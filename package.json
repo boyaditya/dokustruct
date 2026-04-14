@@ -1,0 +1,29 @@
+{
+  "name": "rapiddoc-js-v4-browser",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "dev:e2e": "vite --open /e2e-host.html",
+    "test:e2e": "node src/test/e2e_runner.mjs",
+    "test:e2e:required": "node src/test/e2e_runner.mjs --group required",
+    "test:dump": "node src/test/e2e_runner.mjs --dump-intermediate",
+    "test:parity": "node src/test/parity_reporter.mjs",
+    "test:baseline:native": "python scripts/generate_native_baseline.py"
+  },
+  "dependencies": {
+    "clipper-lib": "^6.4.2",
+    "dompurify": "^3.3.3",
+    "franc-min": "^6.2.0",
+    "katex": "^0.16.45",
+    "marked": "^18.0.0",
+    "onnxruntime-node": "^1.24.3",
+    "onnxruntime-web": "^1.22.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.59.1",
+    "vite": "^5.0.0"
+  }
+}

@@ -112,169 +112,69 @@ export class UniMERNetDecode {
 
   /**
    * Post-process decoded LaTeX string.
-   * Handles both Model S (wrapped in \begin{aligned}) and Model M (clean output).
    * @param {string} text
    * @returns {string}
    */
   _postProcess(text) {
     let result = text.trim();
     
-    // 1. Strip leading <s> token text if present
-    result = result.replace(/^<s>\s*/g, '');
+    // 1. Remove Chinese text wrapping (Python: remove_chinese_text_wrapping)
+    result = this._removeChineseTextWrapping(result);
     
-    // 2. Extract formula from \begin{aligned} wrapper (Model S specific)
-    //    Model S wraps output like:
-    //      \begin{aligned} { } & { { } FORMULA } \\ { } & { { } } \\ ...garbage...
-    //    We extract FORMULA from the first row's content.
-    result = this._unwrapAligned(result);
+    // 2. Fix LaTeX (Python: fix_latex -> calls utils functions)
+    result = fixLatex(result);
     
-    // 3. Strip bare aligned-row markers (inline formula without \begin{aligned})
-    //    Model S inline formulas often contain: "NOISE & { { } FORMULA }"
-    //    e.g.: "{  delta & { { } E_{E} = ... }}" → "E_{E} = ..."
-    result = this._stripAlignedRowMarkers(result);
-
-    // 4. Fix missing backslashes before known LaTeX commands
-    //    Model noise: "rmathrm yr" → "\mathrm{yr}", "\  epsilon" → "\epsilon"
-    result = this._fixMissingBackslashes(result);
-
-    // 5. Strip \boxed{...} wrapper if present
-    const boxedMatch = result.match(/^\\boxed\s*\{([\s\S]*)\}\s*$/);
-    if (boxedMatch) {
-      result = boxedMatch[1].trim();
-    }
+    // 3. ftfy.fix_text - skip in JS (optional text cleanup)
     
-    // 6. Truncate at degeneration boundary (garbage suffix after real formula)
-    const degenPatterns = [
-      /(\\\\?\s*\{\s*\}\s*&\s*\{)/,    // next aligned row: \\ { } & {
-      /\\\s+\\\s+/,                       // "\ \ " (backslash-space repeated) = Model S noise
-      /(\\\s*){5,}/,                      // 5+ consecutive backslashes
-      /(\{\s*\}\s*){4,}/,               // 4+ consecutive empty braces
-    ];
-    for (const pat of degenPatterns) {
-      const match = pat.exec(result);
-      if (match) {
-        result = result.substring(0, match.index).trim();
-        break;
-      }
-    }
+    // 4. Normalize whitespace (Python: self.normalize, commented out in Python
+    //    but needed in JS because PIL/OpenCV resize differences cause the decoder
+    //    to produce space-separated character tokens like "1 7 0 9" instead of "1709")
+    result = this._normalize(result);
     
-    // 5. Balance braces
-    let depth = 0;
-    for (const ch of result) {
-      if (ch === '{') depth++;
-      else if (ch === '}') depth--;
-    }
-    if (depth > 0) {
-      result += '}'.repeat(depth);
-    } else if (depth < 0) {
-      result = result.replace(/\}+$/, (m) => m.substring(0, Math.max(0, m.length + depth)));
-    }
-    
-    // 7. Apply standard LaTeX fixes
-    return fixLatex(result.trim());
+    return result.trim();
   }
 
   /**
-   * Strip bare aligned-row markers from inline formula content.
-   * Model S outputs inline formulas as bare aligned-row content (no \begin{aligned})
-   * Pattern: "SOMETHING & { { } FORMULA }" or "{ } & { { } FORMULA }"
-   * @param {string} text
+   * Normalize LaTeX by collapsing unnecessary spaces between tokens.
+   * Targeted approach: only collapse specific patterns that the decoder
+   * produces due to PIL/OpenCV resize differences (space-separated digits,
+   * spaces inside subscripts/superscripts, etc.)
+   * @param {string} s
    * @returns {string}
    */
-  _stripAlignedRowMarkers(text) {
-    // Only strip if & is present AND we're not inside a known env
-    const firstRow = text.split(/\\\\(?!\w)/)[0];
-    if (!firstRow.includes('&')) return text;
+  _normalize(s) {
+    // 1. Collapse spaces between digits: '1 7 0 9' -> '1709'
+    s = s.replace(/(\d)\s+(?=\d)/g, '$1');
 
-    // Extract content after the last & in the first row
-    const afterAmpersand = firstRow.substring(firstRow.lastIndexOf('&') + 1).trim();
-    // Strip leading { { } wrapper (aligned column wrapper)
-    let cleaned = afterAmpersand.replace(/^\s*\{\s*\{\s*\}\s*/, '');
-    // Remove matching trailing } if we stripped an opening { { }
-    if (afterAmpersand.trimStart().startsWith('{') && cleaned.endsWith('}')) {
-      cleaned = cleaned.substring(0, cleaned.length - 1);
-    }
-    return cleaned.trim() || text;
+    // 2. Collapse spaces around decimal points: '6 . 8' -> '6.8'
+    s = s.replace(/(\d)\s*\.\s*(\d)/g, '$1.$2');
+
+    // 3. Remove space before subscript/superscript: 'Q _{' -> 'Q_{', 'r ^{' -> 'r^{'
+    s = s.replace(/\s+([_^])/g, '$1');
+
+    // 4. Collapse spaces inside braces after _/^: '_{ 0 }' -> '_{0}'
+    s = s.replace(/([_^])\s*\{\s*([^}]+?)\s*\}/g, '$1{$2}');
+
+    // 5. Collapse space after minus sign when followed by digit: '- 6' -> '-6'
+    s = s.replace(/([-])\s+(\d)/g, '$1$2');
+
+    // 6. Collapse multiple spaces to single space
+    s = s.replace(/\s{2,}/g, ' ');
+
+    return s;
   }
 
   /**
-   * Fix missing backslashes before known LaTeX commands emitted as plain text.
-   * Model noise: "rmathrm" instead of "\mathrm", "\  epsilon" instead of "\epsilon"
-   * Reference: No Python equivalent — this is a JS-side quality fix for model artifacts.
-   * @param {string} text
+   * Remove Chinese text wrapping from formula.
+   * PORTING NOTE: Python's remove_chinese_text_wrapping (line 329-335)
+   * @param {string} formula
    * @returns {string}
    */
-  _fixMissingBackslashes(text) {
-    // Fix "\ command" patterns (backslash + whitespace + word) → "\command"
-    text = text.replace(/\\\s{1,3}([a-zA-Z]+)/g, (_, word) => `\\${word}`);
-
-    // Specific common model typo: rmathrm (missing backslash, wrong prefix r)
-    text = text.replace(/\brmathrm\b/g, '\\mathrm');
-
-    // Known single-letter/short commands emitted without backslash
-    // Only match when preceded by space/brace/start and NOT already by \
-    const bareCmds = [
-      'mathrm','mathbf','mathit','mathbb','mathcal','mathsf','mathfrak',
-      'text','mbox','operatorname',
-      'bar','hat','tilde','vec','dot','ddot','breve','check','acute','grave','widehat','widetilde',
-    ];
-    for (const cmd of bareCmds) {
-      const re = new RegExp(`(?<!\\\\)(?<=[\\s{(,]|^)(${cmd})(?=[\\s{(^_\\\\])`, 'gm');
-      text = text.replace(re, `\\$1`);
-    }
-    return text;
-  }
-
-  /**
-   * Unwrap \begin{aligned} environment, extracting the first row's formula.
-   * Model S often wraps output in aligned with garbage rows after the first.
-   * Model M output doesn't use aligned and passes through unchanged.
-   * @param {string} text
-   * @returns {string}
-   */
-  _unwrapAligned(text) {
-    // Check if wrapped in \begin{aligned}...\end{aligned}
-    const alignedMatch = text.match(/^\\begin\{aligned\}([\s\S]*)\\end\{aligned\}\s*$/);
-    if (!alignedMatch) {
-      // Also handle case where \end{aligned} is missing (truncated)
-      const partialMatch = text.match(/^\\begin\{aligned\}([\s\S]*)$/);
-      if (!partialMatch) return text; // Not aligned — return as-is (Model M path)
-      // Use the partial content
-      return this._extractFirstAlignedRow(partialMatch[1]);
-    }
-    return this._extractFirstAlignedRow(alignedMatch[1]);
-  }
-
-  /**
-   * Extract the meaningful formula content from the first row of an aligned env.
-   * Input format: " { } & { { } FORMULA } \\ { } & ..."
-   * @param {string} alignedContent
-   * @returns {string}
-   */
-  _extractFirstAlignedRow(alignedContent) {
-    // Split by \\ (row separator in aligned environments)
-    const rows = alignedContent.split(/\\\\/);
-    if (rows.length === 0) return alignedContent.trim();
-
-    // Take the first non-empty row with real content
-    let firstRow = rows[0].trim();
-
-    // Strip leading { } & alignment marker
-    firstRow = firstRow.replace(/^\s*\{\s*\}\s*&\s*/, '');
-
-    // Strip wrapping { { } ... } column wrapper
-    firstRow = firstRow.replace(/^\s*\{\s*\{\s*\}\s*/, '');
-    if (firstRow.endsWith('}')) {
-      firstRow = firstRow.substring(0, firstRow.length - 1);
-    }
-
-    // Strip orphaned \begin commands inside extracted row
-    // Model S sometimes nests "\begin aligned" (with space) inside the row body:
-    // e.g. "\begin aligned  \hat { } _ { 0 }" → "\hat { } _ { 0 }"
-    firstRow = firstRow.replace(/\\begin\s+\w+\s*/g, '').trim();
-    firstRow = firstRow.replace(/\\begin\{[^}]*\}\s*/g, '').trim();
-
-    return firstRow.trim();
+  _removeChineseTextWrapping(formula) {
+    // Pattern: \text{ ...Chinese chars... }
+    const pattern = /\\text\s*\{\s*([^}]*?[\u4e00-\u9fff]+[^}]*?)\s*\}/g;
+    const replaced = formula.replace(pattern, (_match, p1) => p1);
+    return replaced.replace(/"/g, '');
   }
 
   /**

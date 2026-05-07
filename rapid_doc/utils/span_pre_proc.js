@@ -348,6 +348,8 @@ export function extractTableFillImage(pageDict, tableResDict, scale, tableExtrac
  * @returns {Promise<Array<object>>}
  */
 export async function txtSpansExtract(pdfPageOrDict, spans, inputImg, scale, allBboxes, allDiscardedBlocks, returnWordBox = false, usefulList = null) {
+  console.log(`[txtSpansExtract] Called with ${spans.length} spans, ${spans.filter(s => s.type === ContentType.TEXT).length} TEXT spans`);
+  
   let pageDict;
   if (pdfPageOrDict && typeof pdfPageOrDict === 'object' && !('getTextContent' in pdfPageOrDict)) {
     pageDict = pdfPageOrDict;

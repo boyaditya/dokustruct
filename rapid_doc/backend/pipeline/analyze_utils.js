@@ -170,9 +170,13 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
         if (dtBoxes && dtBoxes.length > 0) {
           const dtBoxesSorted = sortedBoxes(dtBoxes);
           const dtBoxesMerged = dtBoxesSorted.length ? mergeDetBoxes(dtBoxesSorted) : [];
+          console.log(`[runOcrDetBatch] adjustedMfdetrecRes: ${adjustedMfdetrecRes?.length ?? 0} formulas, dtBoxesMerged: ${dtBoxesMerged.length} boxes`);
           const dtBoxesFinal = (dtBoxesMerged.length && adjustedMfdetrecRes?.length)
             ? updateDetBoxes(dtBoxesMerged, adjustedMfdetrecRes)
             : dtBoxesMerged;
+          if (dtBoxesFinal.length !== dtBoxesMerged.length) {
+            console.log(`[runOcrDetBatch] updateDetBoxes split: ${dtBoxesMerged.length} → ${dtBoxesFinal.length} boxes`);
+          }
 
           if (dtBoxesFinal.length) {
             const ocrRes = dtBoxesFinal.map(box => Array.isArray(box.tolist?.()) ? box.tolist() : box);

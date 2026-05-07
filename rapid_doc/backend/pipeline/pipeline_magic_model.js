@@ -52,11 +52,12 @@ export class MagicModel {
     for (const layoutDet of layoutDets) {
       const [x0, y0, , , x1, y1] = layoutDet.poly;
       const bbox = [
-        Math.round(x0 / scale * 100) / 100,
-        Math.round(y0 / scale * 100) / 100,
-        Math.round(x1 / scale * 100) / 100,
-        Math.round(y1 / scale * 100) / 100,
+        Math.floor(x0 / scale * 100) / 100,
+        Math.floor(y0 / scale * 100) / 100,
+        Math.floor(x1 / scale * 100) / 100,
+        Math.floor(y1 / scale * 100) / 100,
       ];
+      
       layoutDet.bbox = bbox;
 
       const polygonPoints = layoutDet.polygon_points;

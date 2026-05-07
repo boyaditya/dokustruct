@@ -125,6 +125,11 @@ export function mergeParaWithText(paraBlock) {
     }
 
     const spans = line.spans || [];
+    
+    // Check if line has formulas - if so, skip text spans that duplicate formula content
+    const formulaSpans = spans.filter(s => s.type === ContentType.INLINE_EQUATION);
+    const hasFormulas = formulaSpans.length > 0;
+    
     for (let j = 0; j < spans.length; j++) {
       const span = spans[j];
       const spanType = span.type;

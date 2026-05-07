@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Image Parsing - System A (V1 Wiring)</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui/styles/v4-app.css" />
+
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script async src="/opencv/opencv.js"></script>
+
+  <!-- KaTeX for LaTeX formula rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+</head>
+<body>
+
+<header>
+  <h1>Image Parsing</h1>
+  <span>System A - Browser/WebAssembly Pipeline</span>
+  <span style="margin-left:auto;font-size:11px;color:#484f58">
+    <!-- Research: Document Image Parsing Performance Analysis -->
+  </span>
+</header>
+
+<div class="left-panel">
+
+  <div class="upload-zone" id="upload-zone">
+    <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.pdf"/>
+    <div class="label">Drop document image/PDF here<br/>or click to browse</div>
+    <div class="file-name" id="file-name-display">No file selected</div>
+  </div>
+
+  <div class="control-block">
+    <div class="control-label">Pipeline Mode</div>
+    <div class="control-help" id="pipeline-mode-hint">
+      Full Analysis is always enabled (layout + OCR + postprocess).
+    </div>
+  </div>
+
+  <div class="control-block">
+    <label class="control-label" for="layout-model-select">Layout Model</label>
+    <select id="layout-model-select" class="control-select">
+      <option value="plus_l">PP-DocLayout Plus L</option>
+      <option value="v2" selected>PP-DocLayoutV2</option>
+      <option value="v3">PP-DocLayoutV3</option>
+      <option value="s">PP-DocLayout-S</option>
+    </select>
+    <div class="control-help" id="layout-model-hint">
+      Switch layout detector model and reinitialize pipeline.
+    </div>
+  </div>
+
+  <div class="control-block">
+    <label class="control-label" for="ocr-rec-model-select">OCR Recognizer</label>
+    <select id="ocr-rec-model-select" class="control-select">
+      <option value="ch_v5" selected>PP-OCRv5 Recognizer (CH)</option>
+      <option value="en_v5">PP-OCRv5 Recognizer (EN)</option>
+    </select>
+    <div class="control-help" id="ocr-rec-model-hint">
+      Switch recognizer + dictionary model and reinitialize pipeline.
+    </div>
+  </div>
+
+  <div class="control-block">
+    <label class="control-label" for="formula-model-select">Formula Model</label>
+    <select id="formula-model-select" class="control-select">
+      <option value="pp_formulanet_plus_s" selected>PP-FormulaNet Plus S (Fast, ~4s)</option>
+      <option value="pp_formulanet_plus_m">PP-FormulaNet Plus M (Accurate, ~30s)</option>
+      <option value="latex_ocr">LaTeX-OCR (WebGPU, Experimental)</option>
+    </select>
+    <div class="control-help" id="formula-model-hint">
+      S = faster (WASM optimized). M = higher quality. LaTeX-OCR = WebGPU-compatible.
+    </div>
+  </div>
+  <div class="control-block">
+    <div class="control-label">Pipeline Options</div>
+    <label class="control-help" for="formula-enable-toggle">
+      <input type="checkbox" id="formula-enable-toggle" /> Enable Formula Model
+    </label>
+    <label class="control-help" for="table-enable-toggle">
+      <input type="checkbox" id="table-enable-toggle" /> Enable Table Model
+    </label>
+    <div class="control-help" id="pipeline-options-hint">
+      Turn off unused models to speed up processing.
+    </div>
+  </div>
+
+  <div class="stages" id="stages">
+    <div class="stage-row" data-stage="preprocessing">
+      <span class="stage-name">Input Decode</span>
+      <div class="stage-bar-bg"><div class="stage-bar"></div></div>
+      <span class="stage-time">-</span>
+      <span class="stage-status">○</span>
+    </div>
+    <div class="stage-row" data-stage="layout">
+      <span class="stage-name">Layout Analysis</span>
+      <div class="stage-bar-bg"><div class="stage-bar"></div></div>
+      <span class="stage-time">-</span>
+      <span class="stage-status">○</span>
+    </div>
+    <div class="stage-row" data-stage="ocr">
+      <span class="stage-name">Text Recognition</span>
+      <div class="stage-bar-bg"><div class="stage-bar"></div></div>
+      <span class="stage-time">-</span>
+      <span class="stage-status">○</span>
+    </div>
+    <div class="stage-row" data-stage="formula">
+      <span class="stage-name">Formula Parsing</span>
+      <div class="stage-bar-bg"><div class="stage-bar"></div></div>
+      <span class="stage-time">-</span>
+      <span class="stage-status">○</span>
+    </div>
+    <div class="stage-row" data-stage="table">
+      <span class="stage-name">Table Structuring</span>
+      <div class="stage-bar-bg"><div class="stage-bar"></div></div>
+      <span class="stage-time">-</span>
+      <span class="stage-status">○</span>
+    </div>
+    <div class="stage-row" data-stage="assembly">
+      <span class="stage-name">Content Assembly</span>
+      <div class="stage-bar-bg"><div class="stage-bar"></div></div>
+      <span class="stage-time">-</span>
+      <span class="stage-status">○</span>
+    </div>
+    <div class="stage-row" data-stage="visual">
+      <span class="stage-name">Visual Rendering</span>
+      <div class="stage-bar-bg"><div class="stage-bar"></div></div>
+      <span class="stage-time">-</span>
+      <span class="stage-status">○</span>
+    </div>
+  </div>
+
+  <div class="timing-breakdown" id="postprocessing-breakdown">
+    <div class="timing-breakdown-title">Postprocessing Breakdown</div>
+    <div class="timing-breakdown-empty" id="postprocessing-breakdown-empty">Run pipeline to view detailed postprocessing timings.</div>
+    <div class="timing-breakdown-rows" id="postprocessing-breakdown-rows"></div>
+  </div>
+
+  <div class="total-time" id="total-time">Upload a file, then click Run Pipeline.</div>
+
+  <button class="btn" id="btn-run" disabled>
+    Run Pipeline
+  </button>
+
+  <button class="btn" id="btn-csv" disabled>
+    Download Benchmark CSV
+  </button>
+
+  <button class="btn" id="btn-artifacts" disabled>
+    Download Output Artifacts
+  </button>
+
+</div>
+
+<div class="right-panel">
+  <div class="right-inner">
+  <section class="visual-section">
+    <div class="section-head">
+      <div class="output-title">Visual Outputs</div>
+      <div class="visual-controls">
+        <div class="visual-tabs" id="visual-tabs" role="tablist" aria-label="Visualization views">
+          <button type="button" class="visual-tab active" data-visual="layout" role="tab" aria-selected="true">Layout</button>
+          <button type="button" class="visual-tab" data-visual="reading" role="tab" aria-selected="false">Reading Order</button>
+          <button type="button" class="visual-tab" data-visual="ocr" role="tab" aria-selected="false">OCR</button>
+        </div>
+        <button type="button" class="visual-reset-btn" id="visual-reset-zoom" disabled>Reset Zoom</button>
+      </div>
+      <div class="visual-hint" id="visual-zoom-hint">Click image to zoom in. Click again or Reset Zoom to zoom out.</div>
+    </div>
+
+    <div class="visual-grid" id="visual-grid">
+      <article class="visual-card active" data-visual-card="layout">
+        <div class="visual-head">
+          <h3>Layout Region Detection</h3>
+          <span class="visual-meta" id="layout-meta">Waiting for file...</span>
+        </div>
+        <div class="visual-canvas-wrap" data-visual-wrap="layout">
+          <canvas id="layout-detection-canvas" class="visual-canvas"></canvas>
+        </div>
+      </article>
+
+      <article class="visual-card" data-visual-card="reading">
+        <div class="visual-head">
+          <h3>Reading Order</h3>
+          <span class="visual-meta" id="reading-order-meta">Waiting for file...</span>
+        </div>
+        <div class="visual-canvas-wrap" data-visual-wrap="reading">
+          <canvas id="reading-order-canvas" class="visual-canvas"></canvas>
+        </div>
+      </article>
+
+      <article class="visual-card" data-visual-card="ocr">
+        <div class="visual-head">
+          <h3>OCR Overlay + Rewrite</h3>
+          <span class="visual-meta" id="ocr-meta">Waiting for file...</span>
+        </div>
+        <div class="ocr-compare-wrap">
+          <div class="ocr-compare-grid">
+            <section class="ocr-pane">
+              <div class="ocr-pane-title">OCR Overlay</div>
+              <div class="visual-canvas-wrap ocr-pane-wrap" data-visual-wrap="ocr-overlay">
+                <canvas id="ocr-overlay-canvas" class="visual-canvas"></canvas>
+              </div>
+            </section>
+            <section class="ocr-pane">
+              <div class="ocr-pane-title">OCR Rewrite</div>
+              <div class="visual-canvas-wrap ocr-pane-wrap" data-visual-wrap="ocr-rewrite">
+                <canvas id="ocr-rewrite-canvas" class="visual-canvas"></canvas>
+              </div>
+            </section>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="markdown-section">
+    <div class="section-head">
+      <div class="output-title">Markdown</div>
+      <div class="mini-tabs" id="markdown-tabs" role="tablist" aria-label="Markdown output views">
+        <button type="button" class="mini-tab" data-md="raw" role="tab" aria-selected="false">Raw</button>
+        <button type="button" class="mini-tab active" data-md="viewer" role="tab" aria-selected="true">Viewer</button>
+      </div>
+    </div>
+
+    <div class="output-grid markdown-panels">
+      <section class="output-card" data-md-card="raw">
+        <pre id="markdown-raw">Upload an image/PDF to run RapidDoc pipeline.</pre>
+      </section>
+      <section class="output-card active" data-md-card="viewer">
+        <div id="markdown-viewer">Upload an image/PDF to run RapidDoc pipeline.</div>
+      </section>
+    </div>
+  </section>
+  </div>
+
+</div>
+
+<script type="module" src="/ui/app.js"></script>
+</body>
+</html>

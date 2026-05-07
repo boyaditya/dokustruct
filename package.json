@@ -1,0 +1,21 @@
+{
+  "name": "rapiddoc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RapidDoc — browser-native document intelligence engine",
+  "scripts": {
+    "dev": "vite --open false",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "franc-min": "^6.2.0",
+    "js-yaml": "^4.1.1",
+    "onnxruntime-web": "^1.24.3",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1"
+  }
+}

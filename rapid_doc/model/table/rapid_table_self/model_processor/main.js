@@ -1,0 +1,83 @@
+// Copyright (c) Opendatalab. All rights reserved.
+// PORTING NOTE: rapid_table_self/model_processor/main.py → main.js
+// ModelProcessor downloads single or multiple model files (UNITABLE needs multiple files).
+
+import { DownloadFile, DownloadFileInput } from "../utils/download_file.js";
+import { ModelType } from "../utils/typings.js";
+
+// Models are served locally from public/models/ (Vite static assets).
+// Run `python scripts/copy-models-to-public.py` to populate public/models/.
+// SHA-256 disabled (null) to avoid cache mismatch issues during development
+const MODEL_URLS = {
+  [ModelType.SLANETPLUS]: {
+    modelUrl: '/models/table/slanet-plus.onnx',
+    sha256: null, // Disabled for development
+  },
+  [ModelType.UNET]: {
+    modelUrl: '/models/table/unet.onnx',
+    sha256: null, // Disabled for development
+  },
+  [ModelType.UNITABLE]: {
+    // UNITABLE needs multiple files: encoder + decoder + vocab
+    modelUrls: [
+      '/models/table/unitable/encoder.pth',
+      '/models/table/unitable/decoder.pth',
+      '/models/table/unitable/vocab.json',
+    ],
+    sha256: null,
+  },
+  [ModelType.PADDLE_CLS]: {
+    modelUrl: '/models/table/table_cls/paddle_cls.onnx',
+    sha256: null, // Disabled for development
+  },
+  [ModelType.Q_CLS]: {
+    modelUrl: '/models/table/table_cls/q_cls.onnx',
+    sha256: null, // Disabled for development
+  },
+  [ModelType.PPSTRUCTURE_CH]: {
+    modelUrl: '/models/table/ch_ppstructure_mobile_v2_SLANet.onnx',
+    sha256: null, // Disabled for development
+  },
+  [ModelType.PPSTRUCTURE_EN]: {
+    modelUrl: '/models/table/en_ppstructure_mobile_v2_SLANet.onnx',
+    sha256: null, // Disabled for development
+  },
+};
+
+/**
+ * Model downloader and path resolver for table models.
+ * PORTING NOTE: ModelProcessor.get_model_path(model_type) → returns Uint8Array or Uint8Array[]
+ */
+export class ModelProcessor {
+  /**
+   * Get model bytes. Returns Uint8Array for single-file models,
+   * or Uint8Array[] for multi-file models (like UNITABLE).
+   *
+   * @param {string} modelType
+   * @param {string|Uint8Array|null} [modelDirOrPath]
+   * @param {(progress: number) => void} [onProgress]
+   * @returns {Promise<Uint8Array|Uint8Array[]>}
+   */
+  static async getModelPath(modelType, modelDirOrPath = null, onProgress = null) {
+    if (modelDirOrPath instanceof Uint8Array || modelDirOrPath instanceof ArrayBuffer) {
+      return modelDirOrPath instanceof ArrayBuffer ? new Uint8Array(modelDirOrPath) : modelDirOrPath;
+    }
+
+    const modelDef = MODEL_URLS[modelType];
+    if (!modelDef) throw new Error(`ModelProcessor: no URL config for model type '${modelType}'`);
+
+    // Multi-file model (e.g., UNITABLE)
+    if (modelDef.modelUrls) {
+      const urls = modelDirOrPath ? JSON.parse(modelDirOrPath) : modelDef.modelUrls;
+      return Promise.all(urls.map(url =>
+        DownloadFile.run(new DownloadFileInput({ url }), onProgress)
+      ));
+    }
+
+    // Single file model
+    const url = modelDirOrPath ?? modelDef.modelUrl;
+    return DownloadFile.run(new DownloadFileInput({ url, sha256: modelDef.sha256 }), onProgress);
+  }
+}
+
+export default ModelProcessor;

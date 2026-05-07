@@ -564,13 +564,15 @@ export class PipelineAdapter {
           const contentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
           postBreakdown.content_list_union_ms = performance.now() - tContent0;
 
+          const images = await this._collectImageMap(imageWriter);
+
           rawResult = {
             markdown,
             content_list:  contentList,
             middle_json:   middleJson,
             model_output:  modelList,
             page_count:    modelList.length,
-            images:        imageWriter.files ?? {},
+            images,
             layout_dets:   modelList.flatMap(p => p?.layout_dets ?? []),
             page_info:     modelList[0]?.page_info ?? null,
             _timings:      stageTimings,
@@ -781,6 +783,89 @@ export class PipelineAdapter {
       // Pipeline mode
       pipeline_mode:       'full_analysis',
     };
+  }
+
+  // ── Image normalization ───────────────────────────────────────────────────
+
+  /**
+   * Convert MemoryDataWriter output into a plain object of data URLs.
+   * @param {any} imageWriter
+   * @returns {Promise<Object.<string, string>>}
+   */
+  async _collectImageMap(imageWriter) {
+    if (!imageWriter) return {};
+
+    if (imageWriter instanceof Map) {
+      return this._normalizeImageEntries(imageWriter.entries());
+    }
+
+    if (typeof imageWriter.getStore === 'function') {
+      const store = imageWriter.getStore();
+      if (store instanceof Map) {
+        return this._normalizeImageEntries(store.entries());
+      }
+    }
+
+    if (imageWriter._store instanceof Map) {
+      return this._normalizeImageEntries(imageWriter._store.entries());
+    }
+
+    if (imageWriter.files && typeof imageWriter.files === 'object') {
+      return this._normalizeImageEntries(Object.entries(imageWriter.files));
+    }
+
+    return {};
+  }
+
+  /**
+   * @param {Iterable<[string, any]>} entries
+   * @returns {Promise<Object.<string, string>>}
+   */
+  async _normalizeImageEntries(entries) {
+    const output = {};
+    for (const [key, value] of entries) {
+      const dataUrl = await this._toDataUrl(value);
+      if (dataUrl) output[key] = dataUrl;
+    }
+    return output;
+  }
+
+  /**
+   * @param {any} value
+   * @returns {Promise<string|null>}
+   */
+  async _toDataUrl(value) {
+    if (!value) return null;
+    if (typeof value === 'string') {
+      return value.startsWith('data:') ? value : null;
+    }
+
+    if (value instanceof Blob) {
+      return this._blobToDataUrl(value);
+    }
+
+    if (value instanceof Uint8Array) {
+      return this._blobToDataUrl(new Blob([value], { type: 'image/png' }));
+    }
+
+    if (value instanceof ArrayBuffer) {
+      return this._blobToDataUrl(new Blob([value], { type: 'image/png' }));
+    }
+
+    return null;
+  }
+
+  /**
+   * @param {Blob} blob
+   * @returns {Promise<string>}
+   */
+  _blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error || new Error('Failed to read image blob'));
+      reader.readAsDataURL(blob);
+    });
   }
 
   // ── Result normaliser ─────────────────────────────────────────────────────

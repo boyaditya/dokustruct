@@ -312,7 +312,7 @@ function bootstrap() {
       return;
     }
 
-    renderMarkdownOutput(results.markdown || '(no markdown output)');
+    renderMarkdownOutput(results.markdown || '(no markdown output)', results.images || null);
     const visualMs = await renderVisualOutputs(results);
     applyVisualTiming(results, visualMs);
     renderPostprocessingBreakdown(results);
@@ -336,7 +336,7 @@ function bootstrap() {
   resetStages();
   resetPostprocessingBreakdown();
   resetVisualOutputs('Upload a file to render visuals.');
-  renderMarkdownOutput('Upload a file to run RapidDoc pipeline.');
+  renderMarkdownOutput('Upload a file to run RapidDoc pipeline.', null);
   updateRunButtonState(false);
 }
 
@@ -446,7 +446,7 @@ async function loadFile(file) {
   }
   resetStages();
   resetPostprocessingBreakdown();
-  renderMarkdownOutput(`File loaded: ${file.name}. Click Run Pipeline to start.`);
+  renderMarkdownOutput(`File loaded: ${file.name}. Click Run Pipeline to start.`, null);
 
   try {
     sourceCanvas = await buildSourceCanvas(file);
@@ -787,7 +787,7 @@ function setMarkdownMode(mode) {
   });
 }
 
-function renderMarkdownOutput(markdownText) {
+function renderMarkdownOutput(markdownText, imageMap = null) {
   const source = (typeof markdownText === 'string' && markdownText.trim().length > 0)
     ? markdownText
     : '(no markdown output)';
@@ -850,12 +850,52 @@ function renderMarkdownOutput(markdownText) {
           }
         }
       }
+
+      applyMarkdownImageSources(imageMap);
     } else {
       markdownViewer.textContent = source;
     }
   } catch {
     markdownViewer.textContent = source;
   }
+}
+
+function applyMarkdownImageSources(imageMap) {
+  if (!markdownViewer || !imageMap) return;
+  const lookup = buildImageLookup(imageMap);
+  if (!lookup.size) return;
+
+  for (const img of markdownViewer.querySelectorAll('img')) {
+    const src = img.getAttribute('src') || '';
+    if (!src || /^(https?:|data:|blob:)/i.test(src)) continue;
+    const clean = normalizeImageKey(src);
+    const direct = lookup.get(clean)
+      || lookup.get(clean.replace(/^images\//, ''))
+      || lookup.get(`images/${clean}`);
+    if (direct) img.src = direct;
+  }
+}
+
+function buildImageLookup(imageMap) {
+  const lookup = new Map();
+  const entries = imageMap instanceof Map
+    ? imageMap.entries()
+    : Object.entries(imageMap);
+
+  for (const [key, value] of entries) {
+    if (typeof value !== 'string') continue;
+    const clean = normalizeImageKey(key);
+    if (!clean) continue;
+    lookup.set(clean, value);
+    if (!clean.startsWith('images/')) {
+      lookup.set(`images/${clean}`, value);
+    }
+  }
+  return lookup;
+}
+
+function normalizeImageKey(value) {
+  return String(value || '').replace(/^\.\/+/, '').replace(/^\/+/, '');
 }
 
 function clamp(value, min, max) {

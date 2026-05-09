@@ -520,6 +520,8 @@ export class PipelineAdapter {
             formula_config: config.formula_config,
             table_config:   config.table_config,
             checkbox_config: config.checkbox_config,
+            start_page_id:  config.start_page_id ?? 0,
+            end_page_id:    config.end_page_id ?? null,
           }
         );
 

@@ -28,6 +28,7 @@ export { AtomicModel } from './backend/pipeline/model_list.js';
 
 export {
   convertPdfBytesToBytesByPypdfium2,
+  convertPdfToBytesByPypdfium2,
   prepareEnv,
   readFn,
 } from './cli/common.js';

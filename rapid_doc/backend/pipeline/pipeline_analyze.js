@@ -18,6 +18,7 @@
  */
 
 import { MineruPipelineModel } from "./model_init.js";
+import { convertPdfBytesToBytesByPypdfium2 } from "../../cli/common.js";
 import { getDevice } from "../../utils/config_reader.js";
 import { ImageType } from "../../utils/enum_class.js";
 import { makeHashable } from "../../utils/hash_utils.js";
@@ -131,6 +132,8 @@ export async function customModelInit({
  *
  * @param {(Uint8Array|ArrayBuffer|{pdf_bytes: Uint8Array, original_image?: any})[]} pdfBytesList
  * @param {object} [opts]
+ * @param {number} [opts.start_page_id=0]
+ * @param {number|null} [opts.end_page_id=null]
  * @returns {Promise<[object[][], object[][], object[][], string[], boolean[]]>}
  *   [infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list]
  */
@@ -146,6 +149,8 @@ export async function docAnalyze(
     formula_config = null,
     table_config = null,
     checkbox_config = null,
+    start_page_id = 0,
+    end_page_id = null,
   } = {}
 ) {
   const pipelineTimings = {
@@ -158,20 +163,41 @@ export async function docAnalyze(
   };
   // -------- Normalize input --------
   const originalImageList = [];
+  const normalizedPdfBytesList = [];
   const contains_dict = pdfBytesList.some(item => item !== null && typeof item === 'object' && 'pdf_bytes' in item);
 
   if (contains_dict) {
     for (let idx = 0; idx < pdfBytesList.length; idx++) {
       const item = pdfBytesList[idx];
       if (item !== null && typeof item === 'object' && 'pdf_bytes' in item) {
-        pdfBytesList[idx] = item.pdf_bytes;
+        normalizedPdfBytesList.push(item.pdf_bytes);
         originalImageList.push(item.original_image ?? null);
       } else {
+        normalizedPdfBytesList.push(item);
         originalImageList.push(null);
       }
     }
   } else {
     for (let i = 0; i < pdfBytesList.length; i++) originalImageList.push(null);
+    normalizedPdfBytesList.push(...pdfBytesList);
+  }
+
+  // Apply page slicing if requested (Python parity: pre-slice PDF bytes)
+  const hasPageSlice = Number(start_page_id || 0) > 0 || end_page_id != null;
+  if (hasPageSlice) {
+    const sliced = [];
+    for (const pdfBytes of normalizedPdfBytesList) {
+      try {
+        const outBytes = await convertPdfBytesToBytesByPypdfium2(pdfBytes, start_page_id, end_page_id);
+        sliced.push(outBytes);
+      } catch (e) {
+        console.warn(`[docAnalyze] page slice failed, using original bytes: ${e}`);
+        sliced.push(pdfBytes);
+      }
+    }
+    pdfBytesList = sliced;
+  } else {
+    pdfBytesList = normalizedPdfBytesList;
   }
 
   if (!lang_list) lang_list = new Array(pdfBytesList.length).fill('ch');

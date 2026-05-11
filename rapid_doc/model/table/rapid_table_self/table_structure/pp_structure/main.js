@@ -64,7 +64,7 @@ export class PPTableStructurer {
       }
     }
     
-    inst.postProcessor = new TableLabelDecode(charList, cfg);
+    inst.postProcessor = new TableLabelDecode(charList, { ...cfg, model_type: modelType });
 
     return inst;
   }

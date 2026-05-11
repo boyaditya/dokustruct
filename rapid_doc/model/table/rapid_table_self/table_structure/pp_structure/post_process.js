@@ -93,7 +93,29 @@ export class TableLabelDecode {
       }
 
       allStructures.push(tokens);
-      allCellBboxes.push(bboxes);
+
+      // Python: normalize_bboxes → rescale_cell_bboxes (SLANETPLUS only) + filter_blank_bbox
+      let finalBboxes = bboxes.filter(b => b.some(v => v !== 0));
+      const modelType = this.cfg.model_type ?? this.cfg.modelType ?? '';
+      if (modelType === 'slanet_plus' || modelType === 'slanetplus') {
+        const oriImg = oriImgs[n];
+        if (oriImg && finalBboxes.length > 0) {
+          const h = oriImg.rows, w = oriImg.cols;
+          const resized = 488;
+          const ratio = Math.min(resized / h, resized / w);
+          const wRatio = resized / (w * ratio);
+          const hRatio = resized / (h * ratio);
+          finalBboxes = finalBboxes.map(bbox => {
+            const r = [...bbox];
+            for (let i = 0; i < r.length; i++) {
+              if (i % 2 === 0) r[i] *= wRatio;
+              else r[i] *= hRatio;
+            }
+            return r;
+          });
+        }
+      }
+      allCellBboxes.push(finalBboxes);
     }
 
     return { structures: allStructures, cellBboxes: allCellBboxes };

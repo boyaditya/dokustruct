@@ -114,7 +114,7 @@ export class TSRUnetStructurer {
       poly[1] = p3; poly[3] = p1;
     }
 
-    const [, idx] = sortedOcrBoxes(polygons.map(p => box42PolyToBox41(p)), 0.3);
+    const [, idx] = sortedOcrBoxes(polygons.map(p => box42PolyToBox41(p)), 0.4);
     const finalPolys = idx.map(i => polygons[i]);
     return { polygons: finalPolys, rotatedPolygons: finalPolys };
   }

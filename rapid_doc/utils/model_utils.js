@@ -41,7 +41,6 @@ export function importPackage(_name) {
 export function toMatBgr(img) {
   // Already a cv.Mat — caller owns it, we don't add a new reference
   if (typeof cv !== 'undefined' && img instanceof cv.Mat) {
-    console.log(`[toMatBgr] Input is already cv.Mat (${img.cols}x${img.rows})`);
     return { mat: img, owned: false };
   }
 
@@ -49,12 +48,10 @@ export function toMatBgr(img) {
 
   if (typeof OffscreenCanvas !== 'undefined' && img instanceof OffscreenCanvas) {
     const ctx = img.getContext('2d', { willReadFrequently: true });
-    console.log(`[toMatBgr] Converting OffscreenCanvas (${img.width}x${img.height}) to BGR Mat...`);
     imageData = ctx.getImageData(0, 0, img.width, img.height);
   } else if (typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap) {
     const oc = new OffscreenCanvas(img.width, img.height);
     const ctx = oc.getContext('2d', { willReadFrequently: true });
-    console.log(`[toMatBgr] Converting ImageBitmap (${img.width}x${img.height}) to BGR Mat...`);
     ctx.drawImage(img, 0, 0);
     imageData = ctx.getImageData(0, 0, img.width, img.height);
   } else {
@@ -66,7 +63,6 @@ export function toMatBgr(img) {
   const bgr  = new cv.Mat();
   try {
     cv.cvtColor(rgba, bgr, cv.COLOR_RGBA2BGR);
-    console.log(`[toMatBgr] BGR Mat created (${bgr.cols}x${bgr.rows})`);
     return { mat: bgr, owned: true };
   } finally {
     rgba.delete();

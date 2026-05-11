@@ -270,6 +270,70 @@ async function getEngine() {
   return _engineModule;
 }
 
+function releaseCanvasLike(value) {
+  const canvas = value?.img_pil ?? value?.canvas ?? value;
+  if (canvas && typeof canvas === 'object' && 'width' in canvas && 'height' in canvas) {
+    try {
+      canvas.width = 0;
+      canvas.height = 0;
+    } catch { /* ignore */ }
+  }
+}
+
+function releaseImageLists(imageLists) {
+  for (const list of Array.isArray(imageLists) ? imageLists : []) {
+    for (const item of Array.isArray(list) ? list : []) releaseCanvasLike(item);
+  }
+}
+
+async function destroyPdfProxy(pdfDoc) {
+  if (!pdfDoc) return;
+  try { await pdfDoc.cleanup?.(); } catch { /* ignore */ }
+  try { await pdfDoc.destroy?.(); } catch { /* ignore */ }
+}
+
+function getDefaultPdfPagesBatch(state) {
+  const ep = String(state.get('activeExecutionProvider') || '').toLowerCase();
+  return ep === 'webgpu' ? 4 : 8;
+}
+
+function markdownHasImageRefs(markdown) {
+  return /!\[[^\]]*\]\([^)]+\)|<img\b/i.test(String(markdown || ''));
+}
+
+function normalizeLayoutText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function extractLayoutLabelBlocks(middleJson) {
+  const pages = Array.isArray(middleJson?.pdf_info) ? middleJson.pdf_info : [];
+  const items = [];
+
+  for (let pageNo = 0; pageNo < pages.length; pageNo++) {
+    const blocks = Array.isArray(pages[pageNo]?.preproc_blocks) ? pages[pageNo].preproc_blocks : [];
+    for (const block of blocks) {
+      let text = '';
+      for (const line of Array.isArray(block?.lines) ? block.lines : []) {
+        for (const span of Array.isArray(line?.spans) ? line.spans : []) {
+          const token = normalizeLayoutText(span?.content ?? span?.text ?? '');
+          if (!token) continue;
+          text += text && shouldInsertSpace(text, token) ? ` ${token}` : token;
+        }
+      }
+      text = normalizeLayoutText(text);
+      if (!text) continue;
+      items.push({
+        pageNo,
+        text,
+        originalLabel: block.original_label ?? null,
+        blockType: block.type ?? null,
+      });
+    }
+  }
+
+  return items;
+}
+
 // ---------------------------------------------------------------------------
 // PipelineAdapter class
 // ---------------------------------------------------------------------------
@@ -279,6 +343,7 @@ export class PipelineAdapter {
     /** @type {import('../components/ModelManager.js').ModelManager|null} */
     this._modelManager = null;
     this._abortController = null;
+    this._lastModelConfigKey = null;
   }
 
   // ── Registration ──────────────────────────────────────────────────────────
@@ -410,12 +475,13 @@ export class PipelineAdapter {
         [imagesList, pdfDoc] = await loadImagesFromPdf(rawFileBytes);
       }
       if (signal.aborted) {
-        await pdfDoc?.cleanup?.();
+        await destroyPdfProxy(pdfDoc);
         if (singleImageMat?.owned) singleImageMat.mat.delete();
         return null;
       }
 
       const config = this._buildConfig(state, file);
+      await this._evictStaleModelCache(engine, config);
       const lang = config.language ?? 'ch';
 
       // ── Step 3: create OCR model (cached via singleton) ─────────────────
@@ -430,7 +496,7 @@ export class PipelineAdapter {
       });
 
       if (signal.aborted) {
-        await pdfDoc?.cleanup?.();
+        await destroyPdfProxy(pdfDoc);
         if (singleImageMat?.owned) singleImageMat.mat.delete();
         return null;
       }
@@ -473,7 +539,7 @@ export class PipelineAdapter {
         }
       }
 
-      await pdfDoc?.cleanup?.();
+      await destroyPdfProxy(pdfDoc);
       if (singleImageMat?.owned) {
         singleImageMat.mat.delete();
       }
@@ -619,6 +685,7 @@ export class PipelineAdapter {
             checkbox_config: config.checkbox_config,
             start_page_id:  config.start_page_id ?? 0,
             end_page_id:    config.end_page_id ?? null,
+            pdf_pages_batch: config.pdf_pages_batch ?? 0,
           }
         );
 
@@ -673,19 +740,29 @@ export class PipelineAdapter {
             }
           }
 
-          const images = await this._collectImageMap(imageWriter);
+          const shouldKeepImages = Boolean(
+            markdownHasImageRefs(markdown)
+            || config.dump_middle_json
+            || config.dump_model_output
+            || config.dump_md_html
+            || config.dump_md_docx
+          );
+          const images = shouldKeepImages ? await this._collectImageMap(imageWriter) : {};
 
           rawResult = {
             markdown,
             content_list:  contentList,
-            middle_json:   middleJson,
-            model_output:  modelList,
+            middle_json:   config.dump_middle_json ? middleJson : null,
+            model_output:  config.dump_model_output ? modelList : null,
+            layout_label_blocks: extractLayoutLabelBlocks(middleJson),
             page_count:    modelList.length,
             images,
             layout_dets:   modelList.flatMap(p => p?.layout_dets ?? []),
             page_info:     modelList[0]?.page_info ?? null,
             _timings:      stageTimings,
           };
+
+          releaseImageLists(allImageLists);
         } else if (Array.isArray(docResult)) {
           // Fallback: unwrap first element
           rawResult = docResult[0];
@@ -839,6 +916,19 @@ export class PipelineAdapter {
     }
   }
 
+  async _evictStaleModelCache(engine, config) {
+    const key = JSON.stringify({
+      language: config.language,
+      layout: config.layout_config,
+      ocr: config.ocr_config,
+      formula: config.formula_enable ? config.formula_config : null,
+      table: config.table_enable ? config.table_config : null,
+      checkbox: config.checkbox_config,
+    });
+    if (this._lastModelConfigKey === key) return;
+    this._lastModelConfigKey = key;
+  }
+
   // ── Config builder ────────────────────────────────────────────────────────
 
   /**
@@ -885,7 +975,9 @@ export class PipelineAdapter {
       draw_layout_bbox:    state.get('drawLayoutBbox'),
       draw_span_bbox:      state.get('drawSpanBbox'),
       dump_md_html:        state.get('dumpMdHtml'),
+      dump_md_docx:        state.get('dumpMdDocx'),
       make_mode:           state.get('makeMode'),
+      pdf_pages_batch:     getDefaultPdfPagesBatch(state),
 
       // Execution
       execution_provider:  state.get('activeExecutionProvider') ?? 'wasm',
@@ -991,28 +1083,41 @@ export class PipelineAdapter {
    */
   _normaliseResult(raw, file, config) {
     if (!raw) return { markdown: '', raw_text: '', page_count: 0 };
+    const keepMiddleJson = Boolean(config.dump_middle_json);
+    const keepModelOutput = Boolean(config.dump_model_output);
+    const sourceMarkdown = raw.markdown ?? raw.md_content ?? raw.md ?? '';
+    const keepImages = Boolean(
+      markdownHasImageRefs(sourceMarkdown)
+      || config.dump_middle_json
+      || config.dump_model_output
+      || config.dump_md_html
+      || config.dump_md_docx
+    );
 
     return {
       // Core outputs
-      markdown:      raw.markdown    ?? raw.md_content     ?? raw.md       ?? '',
-      raw_text:      raw.raw_text    ?? raw.text_content   ?? raw.text     ?? markdownToPlainText(raw.markdown ?? raw.md_content ?? raw.md ?? ''),
+      markdown:      sourceMarkdown,
+      raw_text:      raw.raw_text    ?? raw.text_content   ?? raw.text     ?? markdownToPlainText(sourceMarkdown),
       content_list:  raw.content_list ?? raw.contentList   ?? null,
-      middle_json:   raw.middle_json  ?? raw.middleJson     ?? raw.layout_info ?? null,
-      model_output:  raw.model_output ?? raw.modelOutput    ?? null,
+      middle_json:   keepMiddleJson ? (raw.middle_json  ?? raw.middleJson     ?? raw.layout_info ?? null) : null,
+      model_output:  keepModelOutput ? (raw.model_output ?? raw.modelOutput    ?? null) : null,
+      layout_label_blocks: raw.layout_label_blocks ?? raw.layoutLabelBlocks ?? [],
 
       // Bbox overlays (per-page arrays)
       layout_bboxes: raw.layout_bboxes ?? raw.layoutBboxes ?? [],
       span_bboxes:   raw.span_bboxes   ?? raw.spanBboxes   ?? [],
+      layout_dets:   raw.layout_dets    ?? [],
+      page_info:     raw.page_info      ?? null,
 
       // Meta
       page_count:    raw.page_count   ?? raw.pageCount     ?? 1,
-      images:        raw.images       ?? {},
+      images:        keepImages ? (raw.images ?? {}) : {},
 
       // Pass-through for downstream use
       _config: config,
       _file:   { name: file.name, size: file.size },
       _timingBreakdown: raw._timingBreakdown ?? null,
-      _raw:    raw,
+      _raw:    keepModelOutput ? raw : null,
     };
   }
 

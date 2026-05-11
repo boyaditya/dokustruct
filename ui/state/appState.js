@@ -200,7 +200,7 @@ function createInitialState() {
 
     // ── Output options ─────────────────────────────────────────────────────
     dumpMd: true,
-    dumpMiddleJson: true,
+    dumpMiddleJson: false,
     dumpModelOutput: false,
     dumpContentList: true,
     drawLayoutBbox: true,

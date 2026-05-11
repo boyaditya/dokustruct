@@ -33,16 +33,14 @@ export class ModelHandler {
   async _initialize(cfg, session, targetSize) {
     let tokenizerJson = "{}";
     const metaMap = session.session?.customMetadataMap ?? {};
-    console.log('[RapidFormula] model metadata keys:', Object.keys(metaMap));
 
     if (session.haveKey && session.haveKey("fast_tokenizer_file")) {
       tokenizerJson = metaMap["fast_tokenizer_file"];
     } else {
-      console.warn('[RapidFormula] "fast_tokenizer_file" not found in model metadata! Attempting to load from file...');
+      console.warn('[RapidFormula] "fast_tokenizer_file" not found in model metadata; attempting fallback.');
       try {
         const vocabUrl = '/models/formula/formula_vocab.json';
         tokenizerJson = await fetch(vocabUrl).then(r => r.text());
-        console.log('[RapidFormula] Loaded fallback tokenizer from:', vocabUrl);
       } catch (err) {
         console.error('[RapidFormula] Failed to load fallback tokenizer:', err.message);
       }

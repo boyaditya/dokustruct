@@ -74,8 +74,6 @@ export function getCropMat(bbox, mat, scale = 2) {
   const w = Math.max(1, Math.min(x1 - x0, mat.cols - x0));
   const h = Math.max(1, Math.min(y1 - y0, mat.rows - y0));
 
-  console.log(`[getCropMat] rect: x0=${x0}, y0=${y0}, w=${w}, h=${h} | mat: ${mat.cols}x${mat.rows}`);
-  
   try {
     const rect = new cv.Rect(x0, y0, w, h);
     return mat.roi(rect); // returns a sub-matrix view; clone if mutation needed

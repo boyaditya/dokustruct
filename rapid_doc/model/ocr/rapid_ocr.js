@@ -1247,10 +1247,12 @@ export class RapidOcrModel {
       params.mean         ?? [0.485, 0.456, 0.406],
       params.std          ?? [0.229, 0.224, 0.225],
     );
+    // PARITY FIX (2026-05-11): align defaults with Python baseline (rapid_ocr.py:50).
+    // Python: det_db_box_thresh=0.3, det_db_unclip_ratio=1.8.
     const detPost = new DetPostProcess(
       params.detDbThresh      ?? 0.3,  // thresh (binarization threshold)
-      params.detDbBoxThresh   ?? 0.5,  // boxThresh (score threshold) - FIXED: was 0.3, should be 0.5
-      params.detDbUnclipRatio ?? 1.6,  // unclipRatio - FIXED: was 1.8, should be 1.6
+      params.detDbBoxThresh   ?? 0.3,  // boxThresh (score threshold) - Python default
+      params.detDbUnclipRatio ?? 1.8,  // unclipRatio - Python default
       3,                          // minSize
       params.useDilation ?? true, // useDilation
       1000,                       // maxCandidates
@@ -1347,9 +1349,7 @@ export class RapidOcrModel {
         ?? metadata?.customMetadataMap
         ?? metadata?.custom_metadata_map
         ?? {};
-      console.log('[RapidOcrModel] raw metadata keys:', Object.keys(meta));
       const raw  = meta.character ?? meta.chars ?? meta.charset ?? '';
-      console.log('[RapidOcrModel] raw character string length:', raw.length);
       const list = raw.split('\n').filter(Boolean);
       return list.length > 0 ? list : null;
     } catch (err) { 
@@ -1476,10 +1476,8 @@ export class RapidOcrModel {
     dtBoxes = sortedBoxes(dtBoxes);
     // Allow per-call override of enableMergeDetBoxes
     const shouldMerge = opts.enableMergeDetBoxes ?? this.enableMergeDetBoxes;
-    console.log(`[OCR] _runDetOnly: shouldMerge=${shouldMerge}, model.enableMergeDetBoxes=${this.enableMergeDetBoxes}, opts.enableMergeDetBoxes=${opts.enableMergeDetBoxes}, boxes before=${dtBoxes.length}`);
     if (shouldMerge) {
       dtBoxes = mergeDetBoxes(dtBoxes);
-      console.log(`[OCR] After merge: boxes=${dtBoxes.length}`);
     }
     if (mfdRes) dtBoxes = updateDetBoxes(dtBoxes, mfdRes);
 

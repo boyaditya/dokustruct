@@ -14,7 +14,7 @@
 // Pipeline — main entry points
 // ---------------------------------------------------------------------------
 
-export { docAnalyze } from './backend/pipeline/pipeline_analyze.js';
+export { docAnalyze, ModelSingleton } from './backend/pipeline/pipeline_analyze.js';
 export { unionMake } from './backend/pipeline/pipeline_middle_json_mkcontent.js';
 export { resultToMiddleJson } from './backend/pipeline/model_json_to_middle_json.js';
 export { BatchAnalyze } from './backend/pipeline/batch_analyze.js';
@@ -107,7 +107,8 @@ export { makeHashable, bytesMd5, strMd5, strSha256 } from './utils/hash_utils.js
 // ---------------------------------------------------------------------------
 
 export { RapidOcrModel } from './model/ocr/rapid_ocr.js';
-export { AtomModelSingleton, ocrModelInit } from './backend/pipeline/model_init.js';
+export { AtomModelSingleton, disposeModelResource, ocrModelInit } from './backend/pipeline/model_init.js';
+export { initVramDetection, getBatchRatio } from './utils/model_utils.js';
 
 // ---------------------------------------------------------------------------
 // Utilities — output conversion

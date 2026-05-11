@@ -45,6 +45,62 @@ function makeHashable(value) {
   }
 }
 
+const DISPOSED_MARK = Symbol.for("rapiddoc.disposed");
+const DISPOSABLE_KEYS = [
+  "session",
+  "detSession",
+  "recSession",
+  "resizerSession",
+  "encoderSession",
+  "decoderSession",
+  "textDetector",
+  "textRecognizer",
+  "layoutModel",
+  "formulaModel",
+  "ocrModel",
+  "tableModel",
+  "orientationEngine",
+  "model",
+  "_model",
+  "_tableCls",
+  "_wiredModel",
+  "_wirelessModel",
+  "_singleModel",
+  "_structurer",
+  "_cls",
+];
+
+/**
+ * Best-effort cleanup for model wrappers and ORT sessions.
+ * Keeps traversal narrow so large runtime data structures are not walked.
+ * @param {any} resource
+ * @param {WeakSet<object>} [seen]
+ */
+export async function disposeModelResource(resource, seen = new WeakSet()) {
+  if (!resource || (typeof resource !== "object" && typeof resource !== "function")) return;
+  if (seen.has(resource)) return;
+  seen.add(resource);
+
+  if (resource[DISPOSED_MARK]) return;
+  try { resource[DISPOSED_MARK] = true; } catch { /* ignore non-extensible objects */ }
+
+  for (const key of DISPOSABLE_KEYS) {
+    if (resource[key] && resource[key] !== resource) {
+      await disposeModelResource(resource[key], seen);
+    }
+  }
+
+  for (const method of ["release", "dispose", "close"]) {
+    if (typeof resource[method] === "function") {
+      try {
+        await resource[method]();
+      } catch (err) {
+        console.warn(`[disposeModelResource] ${method} failed:`, err?.message ?? err);
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Individual model init functions
 // ---------------------------------------------------------------------------
@@ -240,12 +296,21 @@ export class AtomModelSingleton {
    * @returns {Promise<any>}
    */
   async getAtomModel(atomModelName, kwargs = {}) {
-    let key;
+    const key = AtomModelSingleton.buildKey(atomModelName, kwargs);
+
+    if (!this.#models.has(key)) {
+      const initPromise = atomModelInit(atomModelName, kwargs);
+      this.#models.set(key, initPromise);
+    }
+    return await this.#models.get(key);
+  }
+
+  static buildKey(atomModelName, kwargs = {}) {
     if (atomModelName === AtomicModel.Layout) {
-      key = JSON.stringify([atomModelName, makeHashable(kwargs.layout_config ?? null)]);
+      return JSON.stringify([atomModelName, makeHashable(kwargs.layout_config ?? null)]);
     } else if (atomModelName === AtomicModel.OCR) {
       const ocrLang = kwargs.lang ?? 'ch';
-      key = JSON.stringify([
+      return JSON.stringify([
         atomModelName,
         makeHashable(kwargs.ocr_config ?? null),
         kwargs.det_db_box_thresh ?? 0.3,
@@ -255,20 +320,63 @@ export class AtomModelSingleton {
         kwargs.is_seal ?? false,
       ]);
     } else if (atomModelName === AtomicModel.Table) {
-      key = JSON.stringify([atomModelName, makeHashable(kwargs.table_config ?? null)]);
+      let ocrConfigClean = null;
+      if (kwargs.ocr_config !== null && kwargs.ocr_config !== undefined) {
+        ocrConfigClean = { ...kwargs.ocr_config };
+        delete ocrConfigClean.custom_model;
+      }
+      return JSON.stringify([
+        atomModelName,
+        makeHashable(kwargs.table_config ?? null),
+        kwargs.lang ?? null,
+        makeHashable(ocrConfigClean),
+      ]);
     } else if (atomModelName === AtomicModel.FORMULA) {
-      key = JSON.stringify([atomModelName, makeHashable(kwargs.formula_config ?? null)]);
+      return JSON.stringify([atomModelName, makeHashable(kwargs.formula_config ?? null)]);
     } else if (atomModelName === AtomicModel.ImgOrientationCls) {
-      key = JSON.stringify([atomModelName, makeHashable(kwargs.orientation_config ?? null)]);
-    } else {
-      key = atomModelName;
+      return JSON.stringify([atomModelName, makeHashable(kwargs.orientation_config ?? null)]);
     }
+    return atomModelName;
+  }
 
-    if (!this.#models.has(key)) {
-      const initPromise = atomModelInit(atomModelName, kwargs);
-      this.#models.set(key, initPromise);
+  /**
+   * Dispose and remove cached atomic models.
+   * @param {string|null} [keepKey]
+   */
+  async clear(keepKey = null) {
+    for (const [key, value] of this.#models.entries()) {
+      if (keepKey !== null && key === keepKey) continue;
+      this.#models.delete(key);
+      try {
+        await disposeModelResource(await value);
+      } catch (err) {
+        console.warn("[AtomModelSingleton] failed to dispose model:", err?.message ?? err);
+      }
     }
-    return await this.#models.get(key);
+  }
+
+  async clearByConfig(keepKey = null) {
+    await this.clear(keepKey);
+  }
+
+  /**
+   * Keep only the atomic model keys required by the active config.
+   * @param {Set<string>} keepKeys
+   */
+  async retainKeys(keepKeys) {
+    for (const [key, value] of this.#models.entries()) {
+      if (keepKeys.has(key)) continue;
+      this.#models.delete(key);
+      try {
+        await disposeModelResource(await value);
+      } catch (err) {
+        console.warn("[AtomModelSingleton] failed to dispose stale model:", err?.message ?? err);
+      }
+    }
+  }
+
+  async dispose() {
+    await this.clear();
   }
 }
 
@@ -349,5 +457,12 @@ export class MineruPipelineModel {
 
     console.info("[MineruPipelineModel] init done!");
     return inst;
+  }
+
+  async dispose() {
+    this.layoutModel = null;
+    this.formulaModel = null;
+    this.ocrModel = null;
+    this.tableModel = null;
   }
 }

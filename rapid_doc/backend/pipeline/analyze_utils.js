@@ -24,6 +24,24 @@ export { extractTableFillImage } from "../../utils/span_pre_proc.js";
 
 const RESOLUTION_GROUP_STRIDE = 64;
 
+function deleteMat(mat) {
+  if (mat && typeof cv !== 'undefined' && mat instanceof cv.Mat && !mat.isDeleted?.()) {
+    mat.delete();
+  }
+}
+
+function clearLayoutImageList(tableRes) {
+  const list = tableRes?.layout_image_list;
+  if (Array.isArray(list)) {
+    for (const item of list) deleteMat(item?.pil_image);
+  }
+  if (tableRes) delete tableRes.layout_image_list;
+}
+
+async function yieldToBrowser() {
+  await new Promise(resolve => setTimeout(resolve, 0));
+}
+
 // ---------------------------------------------------------------------------
 // Helper: Apply mask boxes to image
 // ---------------------------------------------------------------------------
@@ -104,24 +122,29 @@ export async function extractTextFromPdf(ocrResAllPage, pdfDictList, scaleList) 
 
       for (const res of ocrResDict.ocr_res_list) {
         const { newImage, usefulList } = cropImg(res, ocrResDict.np_img, 50, 50);
-        const adjustedMfdetrecRes = getAdjustedMfdetrecRes(
-          [...(Array.isArray(ocrResDict.single_page_mfdetrec_res) ? ocrResDict.single_page_mfdetrec_res : []), ...(Array.isArray(ocrResDict.checkbox_res) ? ocrResDict.checkbox_res : [])],
-          usefulList
-        );
-
-        const ocrRes = txtSpansBboxExtract(
-          pageDict, res, adjustedMfdetrecRes, scale, usefulList
-        );
-
-        if (ocrRes) {
-          const ocrResultList = getOcrResultList(
-            ocrRes, usefulList, ocrResDict.ocr_enable,
-            newImage, ocrResDict.lang,
-            res.original_label, res.original_order
+        try {
+          const adjustedMfdetrecRes = getAdjustedMfdetrecRes(
+            [...(Array.isArray(ocrResDict.single_page_mfdetrec_res) ? ocrResDict.single_page_mfdetrec_res : []), ...(Array.isArray(ocrResDict.checkbox_res) ? ocrResDict.checkbox_res : [])],
+            usefulList
           );
-          ocrResDict.layout_res.push(...ocrResultList);
+
+          const ocrRes = txtSpansBboxExtract(
+            pageDict, res, adjustedMfdetrecRes, scale, usefulList
+          );
+
+          if (ocrRes) {
+            const ocrResultList = getOcrResultList(
+              ocrRes, usefulList, ocrResDict.ocr_enable,
+              newImage, ocrResDict.lang,
+              res.original_label, res.original_order
+            );
+            ocrResDict.layout_res.push(...ocrResultList);
+          }
+        } finally {
+          deleteMat(newImage);
         }
       }
+      await yieldToBrowser();
     }
   }
 }
@@ -241,10 +264,10 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
           }
         }
 
-        if (detImage !== bgrImage && typeof cv !== 'undefined' && detImage instanceof cv.Mat) {
-          detImage.delete();
-        }
+        if (detImage !== bgrImage) deleteMat(detImage);
+        deleteMat(bgrImage);
       }
+      await yieldToBrowser();
     }
   }
 }
@@ -295,15 +318,16 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig) {
       ocr_config: ocrConfig,
     });
 
-    const ocrResListAll = await ocrModel.ocr(imgCropList, { det: false });
-    const ocrResList = (Array.isArray(ocrResListAll) && ocrResListAll.length > 0) ? ocrResListAll[0] : [];
+    try {
+      const ocrResListAll = await ocrModel.ocr(imgCropList, { det: false });
+      const ocrResList = (Array.isArray(ocrResListAll) && ocrResListAll.length > 0) ? ocrResListAll[0] : [];
     const needOcrList = needOcrByLang[lang];
 
     if (ocrResList.length !== needOcrList.length) {
       console.warn(`[runOcrRecPostprocess] mismatch: ocrResList=${ocrResList.length}, need=${needOcrList.length}`);
     }
 
-    for (let i = 0; i < needOcrList.length; i++) {
+      for (let i = 0; i < needOcrList.length; i++) {
       const item = needOcrList[i];
       const [ocrText, ocrScore] = ocrResList[i] || ['', 0];
 
@@ -321,7 +345,11 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig) {
           item.category_id = CategoryId.LowScoreText;
         }
       }
+      }
+    } finally {
+      for (const img of imgCropList) deleteMat(img);
     }
+    await yieldToBrowser();
   }
 }
 
@@ -393,9 +421,7 @@ export async function processSingleTable(
   let detRes = (Array.isArray(ocrResRaw) && ocrResRaw.length > 0) ? (ocrResRaw[0] || []) : [];
 
   // Clean up masked image if created
-  if (detImage !== tableResDict.table_img && typeof cv !== 'undefined' && detImage instanceof cv.Mat) {
-    detImage.delete();
-  }
+  if (detImage !== tableResDict.table_img) deleteMat(detImage);
 
   let angles = [];
   let rotateLabel = "0";
@@ -428,9 +454,7 @@ export async function processSingleTable(
       });
       detRes = (Array.isArray(rotatedOcrResRaw) && rotatedOcrResRaw.length > 0) ? (rotatedOcrResRaw[0] || []) : [];
     } finally {
-      if (rotatedDetImage !== tableResDict.table_img && typeof cv !== 'undefined' && rotatedDetImage instanceof cv.Mat) {
-        rotatedDetImage.delete();
-      }
+      if (rotatedDetImage !== tableResDict.table_img) deleteMat(rotatedDetImage);
     }
   }
 
@@ -464,7 +488,7 @@ export async function processSingleTable(
     }
 
     if (tableResDict && tableResDict.table_res) {
-      delete tableResDict.table_res.layout_image_list;
+      clearLayoutImageList(tableResDict.table_res);
     }
 
     if (tableModel && typeof tableModel.predict === 'function') {
@@ -483,7 +507,7 @@ export async function processSingleTable(
   } catch (err) {
     console.warn('[processSingleTable] table model error:', err.message);
     if (tableResDict && tableResDict.table_res) {
-      delete tableResDict.table_res.layout_image_list;
+      clearLayoutImageList(tableResDict.table_res);
     }
   }
 
@@ -579,12 +603,17 @@ export async function runTableOcr(ocrModel, bgrImage, detRes, tableUseWordBox) {
   }));
 
   const croppedImgList = recImgList.map(item => item.croppedImg);
-  const ocrResRawResult = await ocrModel.ocr(croppedImgList, {
-    det: false,
-    returnWordBox: tableUseWordBox,
-    oriImg: bgrImage,
-    dtBoxes: detRes,
-  });
+  let ocrResRawResult;
+  try {
+    ocrResRawResult = await ocrModel.ocr(croppedImgList, {
+      det: false,
+      returnWordBox: tableUseWordBox,
+      oriImg: bgrImage,
+      dtBoxes: detRes,
+    });
+  } finally {
+    for (const img of croppedImgList) deleteMat(img);
+  }
 
   const ocrResListRaw = (Array.isArray(ocrResRawResult) && ocrResRawResult.length > 0) ? (ocrResRawResult[0] || []) : [];
 

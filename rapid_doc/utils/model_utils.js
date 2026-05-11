@@ -282,29 +282,90 @@ export function getResListFromLayoutRes(layoutRes, npImg, overlapThreshold = 0.8
 
 /**
  * Clean GPU/device memory.
- * PORTING NOTE: torch.cuda.empty_cache() → no-op in browser
+ * PORTING NOTE: torch.cuda.empty_cache() → minimal browser cleanup
  * @param {string} [_device='wasm']
  */
 export function cleanMemory(_device = 'wasm') {
-  // No GPU memory management in browser
+  // Hint GC if available (non-standard but supported in some runtimes)
+  if (typeof globalThis.gc === 'function') {
+    try { globalThis.gc(); } catch { /* ignore */ }
+  }
 }
 
 /**
  * Clean VRAM if below threshold.
- * PORTING NOTE: torch VRAM detection → no-op in browser
+ * PORTING NOTE: torch VRAM detection → triggers cleanMemory when VRAM is limited
  * @param {string} _device
  * @param {number} [_vramThreshold=8]
  */
 export function cleanVram(_device, _vramThreshold = 8) {
-  // No VRAM management in browser
+  const vram = getVramCached();
+  if (vram !== null && vram <= _vramThreshold) {
+    cleanMemory(_device);
+  }
+}
+
+// Cached VRAM value (WebGPU adapter query is async, cache after first call)
+let _cachedVram = undefined; // undefined = not queried, null = unavailable, number = GB
+
+/**
+ * Get VRAM size in GB (cached).
+ * Returns cached value synchronously. Call initVramDetection() at startup to populate.
+ * PORTING NOTE: torch.cuda.get_device_properties → WebGPU adapter maxBufferSize estimation
+ * @param {string} [_device]
+ * @returns {number|null}
+ */
+export function getVram(_device) {
+  return _cachedVram ?? null;
 }
 
 /**
- * Get VRAM size in GB.
- * PORTING NOTE: torch.cuda.get_device_properties → always null in browser
- * @param {string} _device
- * @returns {null}
+ * Get cached VRAM value (internal helper).
+ * @returns {number|null}
  */
-export function getVram(_device) {
-  return null;
+function getVramCached() {
+  return _cachedVram ?? null;
+}
+
+/**
+ * Initialize WebGPU VRAM detection. Call once at app startup.
+ * Populates the cached VRAM value used by getVram/cleanVram/getBatchRatio.
+ * @returns {Promise<number|null>} VRAM in GB, or null if unavailable
+ */
+export async function initVramDetection() {
+  if (_cachedVram !== undefined) return _cachedVram;
+  _cachedVram = null;
+  try {
+    if (typeof navigator !== 'undefined' && navigator.gpu) {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) {
+        // maxBufferSize gives a rough estimate of available GPU memory
+        const maxBuffer = adapter.limits?.maxBufferSize ?? 0;
+        if (maxBuffer > 0) {
+          _cachedVram = Math.round((maxBuffer / (1024 ** 3)) * 100) / 100;
+        }
+        // Some adapters expose adapterInfo with architecture hints
+        // but maxBufferSize is the most reliable cross-browser metric
+      }
+    }
+  } catch {
+    // WebGPU not available or permission denied
+  }
+  return _cachedVram;
+}
+
+/**
+ * Compute batch ratio based on available VRAM (mirrors Python logic).
+ * Python: >=16GB→16, >=12GB→8, >=8GB→4, >=6GB→2, else→1
+ * Browser: more conservative (WebGPU overhead), halved thresholds.
+ * @returns {number} batch ratio (1, 2, 4, 8, or 16)
+ */
+export function getBatchRatio() {
+  const vram = getVramCached();
+  if (vram === null) return 1;
+  // Browser WebGPU has more overhead than native CUDA, use conservative ratios
+  if (vram >= 16) return 8;
+  if (vram >= 12) return 4;
+  if (vram >= 8) return 2;
+  return 1;
 }

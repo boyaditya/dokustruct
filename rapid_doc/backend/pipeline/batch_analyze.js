@@ -32,6 +32,24 @@ import { extractTableFillImage as _extractTableFillImage } from "../../utils/spa
 import { AtomicModel } from "./model_list.js";
 import { getRotateImage, restorePoly } from "../../utils/boxbase.js";
 
+function deleteMat(mat) {
+  if (mat && typeof cv !== 'undefined' && mat instanceof cv.Mat && !mat.isDeleted?.()) {
+    mat.delete();
+  }
+}
+
+function clearLayoutImageList(tableRes) {
+  const list = tableRes?.layout_image_list;
+  if (Array.isArray(list)) {
+    for (const item of list) deleteMat(item?.pil_image);
+  }
+  if (tableRes) delete tableRes.layout_image_list;
+}
+
+async function yieldToBrowser() {
+  await new Promise(resolve => setTimeout(resolve, 0));
+}
+
 /**
  * Batch analysis processor — orchestrates layout, formula, OCR, and table models.
  * PORTING NOTE: BatchAnalyze class with __call__ → call()
@@ -181,6 +199,7 @@ export class BatchAnalyze {
     const tLayout0 = performance.now();
     const imagesLayoutRes = await this._runLayoutDetection(npImages, pdfDictList, scaleList);
     stageTimings.layout = performance.now() - tLayout0;
+    await yieldToBrowser();
 
     // 2. Collect detection regions
     const [ocrResAllPage, tableResAllPage, formulaResAllPage] =
@@ -191,6 +210,7 @@ export class BatchAnalyze {
       const tFormula0 = performance.now();
       await this._runFormulaRecognition(formulaResAllPage);
       stageTimings.formula = performance.now() - tFormula0;
+      await yieldToBrowser();
     }
 
     // 4. OCR
@@ -203,6 +223,7 @@ export class BatchAnalyze {
       await this._runTraditionalOcr(ocrResAllPage, pdfDictList, scaleList);
       stageTimings.ocr = performance.now() - tOcr0;
     }
+    await yieldToBrowser();
 
     // 5. Table recognition
     if (this.tableEnable) {
@@ -210,11 +231,13 @@ export class BatchAnalyze {
       await this._runTableRecognition(tableResAllPage, pdfDictList, scaleList);
       stageTimings.table = performance.now() - tTable0;
     }
+    await yieldToBrowser();
 
     // 6. Post-process OCR rec results
     const tPost0 = performance.now();
     await runOcrRecPostprocess(imagesLayoutRes, this.ocrConfig);
     stageTimings.postprocessing = performance.now() - tPost0;
+    await yieldToBrowser();
 
     if (this.sealEnable) {
       await this._runSealOcr(npImages, imagesLayoutRes);
@@ -364,13 +387,15 @@ export class BatchAnalyze {
       }
 
       // Formula regions
-      for (const formulaRes of formulaResList) {
-        const { newImage: formulaImg } = cropImg(formulaRes, npImg);
-        formulaResAllPage.push({
-          formula_res: formulaRes,
-          lang: _lang,
-          formula_img: formulaImg,
-        });
+      if (this.formulaEnable) {
+        for (const formulaRes of formulaResList) {
+          const { newImage: formulaImg } = cropImg(formulaRes, npImg);
+          formulaResAllPage.push({
+            formula_res: formulaRes,
+            lang: _lang,
+            formula_img: formulaImg,
+          });
+        }
       }
     }
 
@@ -389,19 +414,23 @@ export class BatchAnalyze {
     const formulaImgs = formulaResAllPage.map(d => d.formula_img);
     if (!formulaImgs.length) return;
 
-    const formulaResults = await this.model.formulaModel.batchPredict(
-      formulaImgs, this.formulaBaseBatchSize
-    );
-    const recFormulas = formulaResults.recFormulas ?? [];
+    try {
+      const formulaResults = await this.model.formulaModel.batchPredict(
+        formulaImgs, this.formulaBaseBatchSize
+      );
+      const recFormulas = formulaResults.recFormulas ?? [];
 
-    for (let i = 0; i < formulaResAllPage.length; i++) {
-      const d = formulaResAllPage[i];
-      const res = recFormulas[i];
-      if (res !== undefined && res !== null) {
-        d.formula_res.latex = res;
-      } else {
-        console.warn('[BatchAnalyze] latex recognition processing fails');
+      for (let i = 0; i < formulaResAllPage.length; i++) {
+        const d = formulaResAllPage[i];
+        const res = recFormulas[i];
+        if (res !== undefined && res !== null) {
+          d.formula_res.latex = res;
+        } else {
+          console.warn('[BatchAnalyze] latex recognition processing fails');
+        }
       }
+    } finally {
+      for (const img of formulaImgs) deleteMat(img);
     }
   }
 
@@ -427,26 +456,30 @@ export class BatchAnalyze {
     if (!allOcrRegions.length) return;
 
     const images = allOcrRegions.map(r => r.image);
-    const ocrTexts = await this.model.ocrModel.batchPredict(
-      images, { batchSize: this.ocrDetBaseBatchSize }
-    );
+    try {
+      const ocrTexts = await this.model.ocrModel.batchPredict(
+        images, { batchSize: this.ocrDetBaseBatchSize }
+      );
 
-    for (let i = 0; i < allOcrRegions.length; i++) {
-      const region = allOcrRegions[i];
-      const text = ocrTexts[i];
-      const res = region.res;
+      for (let i = 0; i < allOcrRegions.length; i++) {
+        const region = allOcrRegions[i];
+        const text = ocrTexts[i];
+        const res = region.res;
 
-      const vlOcrResult = {
-        poly: res.poly,
-        category_id: CategoryId.OcrText,
-        score: 0.95,
-        text: text?.trim() ?? '',
-        vl_ocr: true,
-        original_label: res.original_label ?? null,
-        original_order: res.original_order ?? null,
-        polygon_points: res.polygon_points ?? null,
-      };
-      region.layoutRes.push(vlOcrResult);
+        const vlOcrResult = {
+          poly: res.poly,
+          category_id: CategoryId.OcrText,
+          score: 0.95,
+          text: text?.trim() ?? '',
+          vl_ocr: true,
+          original_label: res.original_label ?? null,
+          original_order: res.original_order ?? null,
+          polygon_points: res.polygon_points ?? null,
+        };
+        region.layoutRes.push(vlOcrResult);
+      }
+    } finally {
+      for (const img of images) deleteMat(img);
     }
   }
 
@@ -487,14 +520,28 @@ export class BatchAnalyze {
       }
 
       if (tableImgs.length) {
-        const tableResults = await this.model.tableModel.batchPredict(
-          tableImgs, { fillImageResList }
-        );
-        for (let i = 0; i < tableResAllPage.length; i++) {
-          const tableResDict = tableResAllPage[i];
-          delete tableResDict.table_res.layout_image_list;
-          if (tableResults[i]) {
-            tableResDict.table_res.html = tableResults[i];
+        try {
+          const tableResults = await this.model.tableModel.batchPredict(
+            tableImgs, { fillImageResList }
+          );
+          const tableHtmls = Array.isArray(tableResults) ? tableResults : (tableResults?.htmls ?? []);
+          for (let i = 0; i < tableResAllPage.length; i++) {
+            const tableResDict = tableResAllPage[i];
+            clearLayoutImageList(tableResDict.table_res);
+            if (tableHtmls[i]) {
+              tableResDict.table_res.html = tableHtmls[i];
+            }
+          }
+        } finally {
+          for (const tableResDict of tableResAllPage) {
+            if (tableResDict.table_img === tableResDict.rect_table_img) {
+              deleteMat(tableResDict.table_img);
+            } else {
+              deleteMat(tableResDict.table_img);
+              deleteMat(tableResDict.rect_table_img);
+            }
+            tableResDict.table_img = null;
+            tableResDict.rect_table_img = null;
           }
         }
       }
@@ -530,12 +577,22 @@ export class BatchAnalyze {
         } catch (err) {
           console.warn('[BatchAnalyze] table recognition skipped:', formatPipelineError(err));
           if (tableResDict?.table_res) {
-            delete tableResDict.table_res.layout_image_list;
+            clearLayoutImageList(tableResDict.table_res);
             tableResDict.table_res.html = tableResDict.table_res.html ?? "";
           }
+        } finally {
+          if (tableResDict.table_img === tableResDict.rect_table_img) {
+            deleteMat(tableResDict.table_img);
+          } else {
+            deleteMat(tableResDict.table_img);
+            deleteMat(tableResDict.rect_table_img);
+          }
+          tableResDict.table_img = null;
+          tableResDict.rect_table_img = null;
         }
         done++;
         if (done % 5 === 0) console.info(`[BatchAnalyze] Table Predict ${done}/${total}`);
+        if (done % 2 === 0) await yieldToBrowser();
       }
     }
   }

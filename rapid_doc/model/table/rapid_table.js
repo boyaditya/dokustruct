@@ -208,10 +208,25 @@ export class RapidTableModel {
    * @param {object[]} [ocrResults]
    * @returns {Promise<{ htmls: string[], cellBboxes: number[][][], elapse: number }>}
    */
-  async batchPredict(images, ocrResults = []) {
-    const results = await Promise.all(
-      images.map((img, i) => this.predict(img, ocrResults[i] ?? null))
+  async batchPredict(images, ocrResults = [], opts = {}) {
+    const requestedConcurrency = opts.maxConcurrency ?? images.length;
+    const maxConcurrency = Math.max(1, Math.trunc(Number(requestedConcurrency || images.length)));
+    const results = new Array(images.length);
+    let next = 0;
+
+    const runWorker = async () => {
+      while (next < images.length) {
+        const i = next++;
+        results[i] = await this.predict(images[i], ocrResults[i] ?? null);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    };
+
+    const workers = Array.from(
+      { length: Math.min(maxConcurrency, images.length) },
+      () => runWorker()
     );
+    await Promise.all(workers);
     return {
       htmls: results.map(r => r.html),
       cellBboxes: results.map(r => r.cellBboxes),

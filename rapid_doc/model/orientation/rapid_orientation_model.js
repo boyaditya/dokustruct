@@ -149,7 +149,9 @@ export class RapidOrientationModel {
     const imgAspectRatio = imgWidth > 0 ? imgHeight / imgWidth : 1.0;
     if (imgAspectRatio <= 1.2) return "0";
 
-    if (Array.isArray(detRes) && detRes.length) {
+    // If we have OCR det results, use text-box aspect ratio heuristic first.
+    // PARITY NOTE: mirrors Python predict() logic exactly.
+    if (Array.isArray(detRes) && detRes.length > 0) {
       let verticalCount = 0;
       for (const box of detRes) {
         if (!Array.isArray(box) || box.length < 3) continue;
@@ -160,9 +162,15 @@ export class RapidOrientationModel {
         const aspectRatio = height > 0 ? width / height : 1.0;
         if (aspectRatio < 0.8) verticalCount += 1;
       }
-      if (!(verticalCount >= detRes.length * 0.28 && verticalCount >= 3)) return "0";
+      // Python threshold: >= 28% of boxes AND >= 3 boxes.
+      // For small tables with few OCR boxes, also fall through to ONNX model
+      // if most boxes are vertical (>= 50%) even if count < 3.
+      const majorityVertical = detRes.length > 0 && verticalCount / detRes.length >= 0.5;
+      const isRotated = (verticalCount >= detRes.length * 0.28 && verticalCount >= 3) || majorityVertical;
+      if (!isRotated) return "0";
+      // Enough vertical boxes detected — confirm with ONNX model.
     }
-
+    // detRes empty or enough vertical boxes → run ONNX orientation model.
     return await this.orientationEngine.predictRaw(inputImg);
   }
 }

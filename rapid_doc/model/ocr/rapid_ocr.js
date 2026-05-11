@@ -43,6 +43,7 @@ import {
   updateDetBoxes, getRotateCropImage, calculateIsAngle,
 } from '../../utils/ocr_utils.js';
 import { configureOrtWasmRuntime } from '../../utils/ort_runtime.js';
+import { DownloadFile, DownloadFileInput } from '../../utils/download_file.js';
 
 // Apply patches (no-op in browser)
 applyOcrPatch();
@@ -101,6 +102,32 @@ const REMOTE_REC_MODEL_URL_EN_CANDIDATES = [
   'https://www.modelscope.cn/models/RapidAI/PP-OCRv5_rec/resolve/main/en_PP-OCRv5_rec_mobile_infer.onnx',
   'https://www.modelscope.cn/models/RapidAI/PP-OCRv5_rec/resolve/main/PP-OCRv5_mobile_rec.onnx',
 ];
+
+function buildOcrCacheKey(url) {
+  if (!url) return url;
+  if (url.startsWith('/')) return url.slice(1);
+  try {
+    const parsed = new URL(url, self?.location?.href ?? undefined);
+    if (parsed.origin === self?.location?.origin) {
+      return parsed.pathname.replace(/^\//, '');
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+async function fetchArrayBufferCached(url) {
+  const downloader = new DownloadFile();
+  const cacheKey = buildOcrCacheKey(url);
+  const cfg = new DownloadFileInput({ url, savePath: cacheKey });
+  return downloader.call(cfg);
+}
+
+async function fetchTextCached(url) {
+  const buf = await fetchArrayBufferCached(url);
+  return new TextDecoder().decode(buf);
+}
 
 // ─── DetPreProcess ────────────────────────────────────────────────────────────
 
@@ -962,12 +989,13 @@ class TextRecognizer {
       }
     };
 
-    // Overlapping Pipeline: Keep up to 5 batches in flight to ensure GPU is never starved
+    // Keep concurrency conservative; each in-flight batch holds tensors and CPU copies.
+    const maxInFlight = 5;
     const inFlight = new Set();
     for (const task of batchTasks) {
       const p = processBatch(task).finally(() => inFlight.delete(p));
       inFlight.add(p);
-      if (inFlight.size >= 5) {
+      if (inFlight.size >= maxInFlight) {
         await Promise.race(inFlight);
       }
       // Yield to event loop to allow Promises to resolve cleanly
@@ -1223,12 +1251,9 @@ export class RapidOcrModel {
     configureOrtWasmRuntime({ numThreads: 4 });
 
     // ── Load Det model (PERFORMANCE PATH: Testing WebGPU with fallback) ──
-    const detUrl = (params.detModelUrl ?? DEFAULT_DET_MODEL_URL) + '?t=' + Date.now();
+    const detUrl = params.detModelUrl ?? DEFAULT_DET_MODEL_URL;
     logger.info(`Loading Det model: ${detUrl}`);
-    const detBuf = await fetch(detUrl).then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} fetching ${detUrl}`);
-      return r.arrayBuffer();
-    });
+    const detBuf = await fetchArrayBufferCached(detUrl);
     let detSession;
     try {
       detSession = await ort.InferenceSession.create(detBuf, {
@@ -1280,11 +1305,7 @@ export class RapidOcrModel {
     let recLastErr = null;
     for (const candidate of recCandidates) {
       try {
-        const response = await fetch(candidate);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status} fetching ${candidate}`);
-        }
-        recBuf = await response.arrayBuffer();
+        recBuf = await fetchArrayBufferCached(candidate);
         recLoadedFrom = candidate;
         break;
       } catch (err) {
@@ -1318,7 +1339,7 @@ export class RapidOcrModel {
         : '/models/ocr/ppocrv5_dict.txt';
       logger.info(`Loading dictionary from: ${dictUrl}`);
       try {
-        const dictBuf = await fetch(dictUrl).then(r => r.text());
+        const dictBuf = await fetchTextCached(dictUrl);
         charList = dictBuf.split(/\r?\n/).filter(Boolean);
       } catch (err) {
         logger.warn(`Failed to load external dict: ${err.message}. Trying metadata.`);

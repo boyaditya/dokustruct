@@ -77,21 +77,8 @@ export class RapidTableModel {
   async predict(image, ocrResult = null, opts = {}) {
     const { fillImageRes = null, mfdRes = null, skipTextInImage = true } = opts;
 
-    console.log('[RapidTableModel.predict] ===== START =====');
-    console.log('[RapidTableModel.predict] Input:', {
-      hasImage: !!image,
-      hasOcrResult: !!ocrResult,
-      ocrResultType: typeof ocrResult,
-      ocrResultIsArray: Array.isArray(ocrResult),
-      ocrResultLen: ocrResult?.length,
-      ocrResultSample: Array.isArray(ocrResult) ? ocrResult.slice(0, 3) : ocrResult,
-      hasFillImageRes: !!fillImageRes,
-      hasMfdRes: !!mfdRes,
-    });
-
     try {
       if (!ocrResult || !Array.isArray(ocrResult) || ocrResult.length < 3) {
-        console.warn('[RapidTableModel.predict] Invalid OCR result format, using empty arrays');
         if (!fillImageRes && !mfdRes) {
           return { html: "", cellBboxes: [], elapse: 0 };
         }
@@ -101,14 +88,6 @@ export class RapidTableModel {
       const boxes = Array.isArray(ocrResult[0]) ? [...ocrResult[0]] : [];
       const texts = Array.isArray(ocrResult[1]) ? [...ocrResult[1]] : [];
       const scores = Array.isArray(ocrResult[2]) ? [...ocrResult[2]] : [];
-
-      console.log('[RapidTableModel.predict] Extracted from ocrResult:', {
-        boxesLen: boxes.length,
-        textsLen: texts.length,
-        scoresLen: scores.length,
-        boxesSample: boxes.slice(0, 2),
-        textsSample: texts.slice(0, 5),
-      });
 
       if (Array.isArray(fillImageRes)) {
         for (const fillImage of fillImageRes) {

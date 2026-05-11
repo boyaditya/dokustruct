@@ -62,7 +62,6 @@ export class RapidFormula {
    * @returns {Promise<{ recFormulas: string[], elapse: number }>}
    */
   async run(imgContents, batchSize = 1) {
-    console.log(`[RapidFormula] run started for ${imgContents.length} images, batchSize=${batchSize}`);
     const t0 = performance.now();
     const allFormulas = [];
 
@@ -71,13 +70,11 @@ export class RapidFormula {
     // cause race conditions that hang the GPU device queue. Process strictly one-at-a-time.
     for (let i = 0; i < imgContents.length; i += batchSize) {
       const batch = imgContents.slice(i, i + batchSize);
-      console.log(`[RapidFormula] Processing formula ${i+1}/${imgContents.length}...`);
-      
+
       // Load each image into cv.Mat
       const mats = await Promise.all(batch.map(img => this._loadImage.run(img)));
       try {
         const outputs = await this._modelHandler.run(mats);
-        console.log(`[RapidFormula] Formula ${i+1} done (${((performance.now()-t0)/1000).toFixed(1)}s elapsed)`);
         for (const out of outputs) {
           allFormulas.push(out.recFormula);
         }
@@ -89,7 +86,6 @@ export class RapidFormula {
     }
 
     const elapse = (performance.now() - t0) / 1000;
-    console.log(`[RapidFormula] run finished, ${allFormulas.length} formulas in ${elapse.toFixed(1)}s`);
     return { recFormulas: allFormulas, elapse };
   }
 }

@@ -72,8 +72,6 @@ export class UniMERNetDecode {
     if (this.sosId != null) this.specialIds.add(this.sosId);
     if (this.padId != null) this.specialIds.add(this.padId);
     if (this.eosId != null) this.specialIds.add(this.eosId);
-    
-    console.log(`[UniMERNetDecode] vocab size=${this.idToToken.size}, eosId=${this.eosId}, sosId=${this.sosId}, padId=${this.padId}`);
   }
 
   /**
@@ -185,7 +183,6 @@ export class UniMERNetDecode {
   run(preds) {
     const data = preds.cpuData || preds.data;
     const dims = preds.dims;
-    console.log(`[UniMERNetDecode] run dims: ${Array.from(dims)}`);
 
     let tokenIdBatches;
     if (dims.length === 3) {
@@ -224,7 +221,6 @@ export class UniMERNetDecode {
     }
 
     const result = tokenIdBatches.map(ids => this.tokenToStr(ids));
-    console.log(`[UniMERNetDecode] Decoded ${result.length} formulas. First 5 tokens of first batch: ${tokenIdBatches[0]?.slice(0, 5)}`);
     return result;
   }
 }

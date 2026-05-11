@@ -1,0 +1,170 @@
+import * as ort from "onnxruntime-web";
+import { configureOrtRuntime } from "../../utils/ort_runtime.js";
+import { LoadImage } from "../table/rapid_table_self/utils/load_image.js";
+
+const DEFAULT_MODEL_URL = "/models/orientation/rapid_orientation.onnx";
+const IMAGENET_MEAN = [0.485, 0.456, 0.406];
+const IMAGENET_STD = [0.229, 0.224, 0.225];
+const FALLBACK_LABELS = ["0", "90", "180", "270"];
+
+function softArgmaxRows(data, rows, cols) {
+  const idxs = [];
+  for (let r = 0; r < rows; r++) {
+    let bestIdx = 0;
+    let bestVal = -Infinity;
+    const offset = r * cols;
+    for (let c = 0; c < cols; c++) {
+      const value = Number(data[offset + c]);
+      if (value > bestVal) {
+        bestVal = value;
+        bestIdx = c;
+      }
+    }
+    idxs.push(bestIdx);
+  }
+  return idxs;
+}
+
+function majorityVote(values) {
+  const counts = new Map();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
+}
+
+function getLabels(session) {
+  const meta = session?.customMetadataMap ?? {};
+  const raw = meta.character ?? meta.label ?? meta.labels ?? "";
+  if (!raw) return FALLBACK_LABELS;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length) return parsed.map(String);
+  } catch {}
+  const labels = String(raw).split(/\r?\n/).filter(Boolean);
+  return labels.length ? labels : FALLBACK_LABELS;
+}
+
+function preprocessOrientationMat(mat, batchSize = 3) {
+  const h = mat.rows;
+  const w = mat.cols;
+  const scale = 256 / Math.min(w, h);
+  const newW = Math.round(w * scale);
+  const newH = Math.round(h * scale);
+  const resized = new cv.Mat();
+  const cropped = new cv.Mat();
+  const rgb = new cv.Mat();
+  const floatMat = new cv.Mat();
+
+  try {
+    cv.resize(mat, resized, new cv.Size(newW, newH), 0, 0, cv.INTER_LANCZOS4 ?? cv.INTER_CUBIC);
+    const x0 = Math.floor((newW - 224) / 2);
+    const y0 = Math.floor((newH - 224) / 2);
+    const roi = resized.roi(new cv.Rect(x0, y0, 224, 224));
+    try {
+      roi.copyTo(cropped);
+    } finally {
+      roi.delete();
+    }
+
+    cv.cvtColor(cropped, rgb, cv.COLOR_BGR2RGB);
+    rgb.convertTo(floatMat, cv.CV_32F, 1.0 / 255.0);
+
+    const single = new Float32Array(3 * 224 * 224);
+    const src = floatMat.data32F;
+    for (let c = 0; c < 3; c++) {
+      const mean = IMAGENET_MEAN[c];
+      const std = IMAGENET_STD[c];
+      const dstOffset = c * 224 * 224;
+      for (let i = 0; i < 224 * 224; i++) {
+        single[dstOffset + i] = (src[i * 3 + c] - mean) / std;
+      }
+    }
+
+    const batched = new Float32Array(batchSize * single.length);
+    for (let b = 0; b < batchSize; b++) batched.set(single, b * single.length);
+    return batched;
+  } finally {
+    resized.delete();
+    cropped.delete();
+    rgb.delete();
+    floatMat.delete();
+  }
+}
+
+export class RapidOrientationEngine {
+  constructor() {
+    this.session = null;
+    this.labels = FALLBACK_LABELS;
+    this.loader = new LoadImage();
+    this.batchSize = 3;
+  }
+
+  static async create({ modelUrl = DEFAULT_MODEL_URL, executionProviders = ["webgpu", "wasm"] } = {}) {
+    const inst = new RapidOrientationEngine();
+    await configureOrtRuntime({ numThreads: 4, useWebGpu: executionProviders.includes("webgpu") });
+    const resp = await fetch(modelUrl);
+    if (!resp.ok) throw new Error(`RapidOrientationEngine: failed to fetch ${modelUrl} (${resp.status})`);
+    const modelBytes = await resp.arrayBuffer();
+    inst.session = await ort.InferenceSession.create(modelBytes, {
+      executionProviders,
+      logSeverityLevel: 4,
+      graphOptimizationLevel: "all",
+    });
+    inst.labels = getLabels(inst.session);
+    return inst;
+  }
+
+  async predictRaw(image) {
+    const mat = image instanceof cv.Mat ? image.clone() : await this.loader.run(image);
+    try {
+      const input = preprocessOrientationMat(mat, this.batchSize);
+      const inputName = this.session.inputNames[0];
+      const outputName = this.session.outputNames[0];
+      const feeds = { [inputName]: new ort.Tensor("float32", input, [this.batchSize, 3, 224, 224]) };
+      const result = await this.session.run(feeds);
+      const tensor = result[outputName];
+      const outputData = tensor.cpuData ?? tensor.data;
+      const dims = tensor.dims ?? [this.batchSize, this.labels.length];
+      const rows = Number(dims[0] ?? this.batchSize);
+      const cols = Number(dims[1] ?? this.labels.length);
+      const predIdx = majorityVote(softArgmaxRows(outputData, rows, cols));
+      return this.labels[predIdx] ?? String(predIdx);
+    } finally {
+      mat.delete();
+    }
+  }
+}
+
+export class RapidOrientationModel {
+  constructor(engine) {
+    this.orientationEngine = engine;
+  }
+
+  static async create(opts = {}) {
+    return new RapidOrientationModel(await RapidOrientationEngine.create(opts));
+  }
+
+  async predict(inputImg, detRes = null) {
+    const imgHeight = inputImg?.rows ?? inputImg?.height ?? 0;
+    const imgWidth = inputImg?.cols ?? inputImg?.width ?? 0;
+    const imgAspectRatio = imgWidth > 0 ? imgHeight / imgWidth : 1.0;
+    if (imgAspectRatio <= 1.2) return "0";
+
+    if (Array.isArray(detRes) && detRes.length) {
+      let verticalCount = 0;
+      for (const box of detRes) {
+        if (!Array.isArray(box) || box.length < 3) continue;
+        const p1 = box[0];
+        const p3 = box[2];
+        const width = Number(p3?.[0] ?? 0) - Number(p1?.[0] ?? 0);
+        const height = Number(p3?.[1] ?? 0) - Number(p1?.[1] ?? 0);
+        const aspectRatio = height > 0 ? width / height : 1.0;
+        if (aspectRatio < 0.8) verticalCount += 1;
+      }
+      if (!(verticalCount >= detRes.length * 0.28 && verticalCount >= 3)) return "0";
+    }
+
+    return await this.orientationEngine.predictRaw(inputImg);
+  }
+}
+
+export default RapidOrientationModel;

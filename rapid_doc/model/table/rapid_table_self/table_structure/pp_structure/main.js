@@ -47,7 +47,6 @@ export class PPTableStructurer {
     
     // If empty, load from external dict file
     if (!charList || charList.length === 0) {
-      console.log('[PPTableStructurer] Model metadata empty, loading external dict');
       const dictUrl = modelType === ModelType.PPSTRUCTURE_EN
         ? '/models/table/table_structure_dict_en.txt'
         : '/models/table/table_structure_dict_ch.txt';
@@ -57,7 +56,6 @@ export class PPTableStructurer {
         if (!resp.ok) throw new Error(`Failed to fetch dict: ${resp.status}`);
         const text = await resp.text();
         charList = text.split('\n').filter(s => s.length > 0);
-        console.log('[PPTableStructurer] Loaded dict from file:', { len: charList.length, sample: charList.slice(0, 10) });
       } catch (err) {
         console.error('[PPTableStructurer] Failed to load dict file:', err);
         charList = [];

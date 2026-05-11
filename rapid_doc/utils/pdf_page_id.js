@@ -10,10 +10,10 @@
  * @param {number} pdfPageNum
  * @returns {number}
  */
-export function getEndPageId(endPageId, pdfPageNum) {
+export function getEndPageId(endPageId, pdfPageNum, warn = false) {
   let result = (endPageId != null && endPageId >= 0) ? endPageId : pdfPageNum - 1;
   if (result > pdfPageNum - 1) {
-    console.warn('[pdf_page_id] end_page_id is out of range, use images length');
+    if (warn) console.warn('[pdf_page_id] end_page_id is out of range, use images length');
     result = pdfPageNum - 1;
   }
   return result;

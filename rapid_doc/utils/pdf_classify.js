@@ -21,7 +21,7 @@
  *   Falls back to returning original bytes if pdf-lib is not installed (conservative approach).
  */
 
-import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { getPdfjsLib } from './pdfjs_loader.js';
 
 /**
  * Get a cryptographically random sample of integers without replacement.
@@ -41,22 +41,6 @@ function randomChoice(total, count) {
     [indices[i], indices[j]] = [indices[j], indices[i]];
   }
   return indices.slice(0, count);
-}
-
-/** @type {any} */
-let _pdfjsLib = null;
-
-/**
- * @returns {Promise<any>}
- */
-async function getPdfjsLib() {
-  if (_pdfjsLib) return _pdfjsLib;
-  _pdfjsLib = await import('pdfjs-dist');
-  // Ensure the PDF.js web-worker URL is configured (CDN global may not have it set yet)
-  if (_pdfjsLib.GlobalWorkerOptions && !_pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    _pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-  }
-  return _pdfjsLib;
 }
 
 /**
@@ -102,15 +86,16 @@ export async function classify(pdfBytes) {
     const CHARS_THRESHOLD = 50;
 
     if ((await getAvgCleanedCharsPerPage(pdfDoc, pagesToCheck)) < CHARS_THRESHOLD) return 'ocr';
-    if (await detectInvalidChars(sampleBytes)) return 'ocr';
-    if ((await getHighImageCoverageRatio(sampleBytes, pagesToCheck)) >= 0.8) return 'ocr';
+    if (await detectInvalidCharsInDoc(pdfDoc)) return 'ocr';
+    if ((await getHighImageCoverageRatioInDoc(pdfDoc, pagesToCheck)) >= 0.8) return 'ocr';
 
     return 'txt';
   } catch (e) {
     console.error('PDF classify error:', e);
     return 'ocr';
   } finally {
-    await pdfDoc.cleanup();
+    try { await pdfDoc.cleanup?.(); } catch { /* ignore */ }
+    try { await pdfDoc.destroy?.(); } catch { /* ignore */ }
   }
 }
 
@@ -146,23 +131,27 @@ export async function getAvgCleanedCharsPerPage(pdfDoc, pagesToCheck) {
  * @returns {Promise<number>}
  */
 export async function getHighImageCoverageRatio(samplePdfBytes, pagesToCheck) {
-  const pdfjsLib = await getPdfjsLib();
   const pdfDoc = await loadPdfDoc(samplePdfBytes);
 
+  try {
+    return await getHighImageCoverageRatioInDoc(pdfDoc, pagesToCheck);
+  } finally {
+    try { await pdfDoc.cleanup?.(); } catch { /* ignore */ }
+    try { await pdfDoc.destroy?.(); } catch { /* ignore */ }
+  }
+}
+
+async function getHighImageCoverageRatioInDoc(pdfDoc, pagesToCheck) {
   let highCoverageCount = 0;
   const pageCount = Math.min(pdfDoc.numPages, pagesToCheck);
 
-  try {
-    for (let i = 0; i < pageCount; i++) {
-      const page = await pdfDoc.getPage(i + 1);
-      const opList = await page.getOperatorList();
-      // OPS.paintImageXObject = 85, paintJpegXObject = 82, paintInlineImageXObject = 83
-      const imageOps = opList.fnArray.filter(op => op === 85 || op === 82 || op === 83).length;
-      // Heuristic: ≥ 3 image ops → likely image-heavy page
-      if (imageOps >= 3) highCoverageCount++;
-    }
-  } finally {
-    await pdfDoc.cleanup();
+  for (let i = 0; i < pageCount; i++) {
+    const page = await pdfDoc.getPage(i + 1);
+    const opList = await page.getOperatorList();
+    // OPS.paintImageXObject = 85, paintJpegXObject = 82, paintInlineImageXObject = 83
+    const imageOps = opList.fnArray.filter(op => op === 85 || op === 82 || op === 83).length;
+    // Heuristic: >= 3 image ops -> likely image-heavy page
+    if (imageOps >= 3) highCoverageCount++;
   }
 
   return pageCount > 0 ? highCoverageCount / pageCount : 0;
@@ -215,15 +204,20 @@ export async function detectInvalidChars(samplePdfBytes) {
     return false;
   }
 
-  let fullText = '';
   try {
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-      const page = await pdfDoc.getPage(i);
-      const textContent = await page.getTextContent();
-      fullText += textContent.items.map(item => item.str ?? '').join('');
-    }
+    return await detectInvalidCharsInDoc(pdfDoc);
   } finally {
-    await pdfDoc.cleanup();
+    try { await pdfDoc.cleanup?.(); } catch { /* ignore */ }
+    try { await pdfDoc.destroy?.(); } catch { /* ignore */ }
+  }
+}
+
+async function detectInvalidCharsInDoc(pdfDoc) {
+  let fullText = '';
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    const page = await pdfDoc.getPage(i);
+    const textContent = await page.getTextContent();
+    fullText += textContent.items.map(item => item.str ?? '').join('');
   }
 
   // Detect (cid:NNN) patterns indicating garbled/embedded encoding

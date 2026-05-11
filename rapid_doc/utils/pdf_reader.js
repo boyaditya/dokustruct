@@ -16,32 +16,7 @@ import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
  * SOLUTION: Standard btoa + Uint8Array interop.
  */
 
-/** @type {any} */
-let _pdfjsLib = null;
-import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-
-/**
- * Lazily load pdfjs-dist.
- * In the browser, PDF.js is expected to be present as a CDN global (window.pdfjsLib)
- * injected by index.html.  The dynamic import below is a fallback for Node.js/Jest
- * environments and is intentionally ignored by Vite's bundler via @vite-ignore.
- * @returns {Promise<any>}
- */
-async function getPdfjsLib() {
-  if (_pdfjsLib) return _pdfjsLib;
-  // Prefer the CDN global set by index.html's <script> tag
-  if (typeof globalThis !== 'undefined' && globalThis.pdfjsLib) {
-    _pdfjsLib = globalThis.pdfjsLib;
-  } else {
-    // npm fallback (Node.js / bundled build) — Vite must not try to resolve this
-    _pdfjsLib = await import(/* @vite-ignore */ 'pdfjs-dist');
-  }
-  // Ensure the PDF.js web-worker URL is configured (CDN global may not have it set yet)
-  if (_pdfjsLib.GlobalWorkerOptions && !_pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    _pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-  }
-  return _pdfjsLib;
-}
+import { getPdfjsLib } from './pdfjs_loader.js';
 
 /**
  * Render a single pdfjs PDFPageProxy to a canvas.
@@ -63,7 +38,7 @@ export async function pageToImage(page, dpi = 200, maxWidthOrHeight = 3500) {
 
   const viewport = page.getViewport({ scale });
   const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
   await page.render({ canvasContext: ctx, viewport }).promise;
 
@@ -113,7 +88,7 @@ export async function base64ToCanvas(base64Str) {
   const blob = new Blob([bytes], { type: 'image/png' });
   const bitmap = await createImageBitmap(blob);
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
   return canvas;
@@ -136,19 +111,22 @@ export async function pdfToImages(pdfBytes, dpi = 200, maxWidthOrHeight = 3500, 
   const _data = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes instanceof ArrayBuffer ? pdfBytes.slice(0) : pdfBytes);
   const loadingTask = pdfjsLib.getDocument({ data: _data });
   const pdfDoc = await loadingTask.promise;
+  try {
+    const pageNum = pdfDoc.numPages;
+    const _endPageId = (endPageId !== null && endPageId >= 0) ? Math.min(endPageId, pageNum - 1) : pageNum - 1;
 
-  const pageNum = pdfDoc.numPages;
-  const _endPageId = (endPageId !== null && endPageId >= 0) ? Math.min(endPageId, pageNum - 1) : pageNum - 1;
+    const images = [];
+    for (let i = startPageId; i <= _endPageId; i++) {
+      const page = await pdfDoc.getPage(i + 1); // pdfjs is 1-indexed
+      const result = await pageToImage(page, dpi, maxWidthOrHeight);
+      images.push(result);
+    }
 
-  const images = [];
-  for (let i = startPageId; i <= _endPageId; i++) {
-    const page = await pdfDoc.getPage(i + 1); // pdfjs is 1-indexed
-    const result = await pageToImage(page, dpi, maxWidthOrHeight);
-    images.push(result);
+    return images;
+  } finally {
+    try { await pdfDoc.cleanup?.(); } catch { /* ignore */ }
+    try { await pdfDoc.destroy?.(); } catch { /* ignore */ }
   }
-
-  await pdfDoc.cleanup();
-  return images;
 }
 
 /**

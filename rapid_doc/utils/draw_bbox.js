@@ -28,7 +28,7 @@
  * a browser download of a ZIP via the download helper.
  */
 
-import * as pdfjsLib from 'pdfjs-dist';
+import { getPdfjsLib } from './pdfjs_loader.js';
 import { BlockType, ContentType, SplitFlag } from './enum_class.js';
 import { getLogger } from './logger.js';
 
@@ -388,38 +388,44 @@ export async function drawLayoutBbox(pdfInfo, pdfBytes) {
   }
 
   // Render overlays
+  const pdfjsLib = await getPdfjsLib();
   const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
   const pdf = await loadingTask.promise;
-  const blobs = [];
+  try {
+    const blobs = [];
 
-  for (let i = 0; i < pdf.numPages; i++) {
-    const pdfPage = await pdf.getPage(i + 1);
-    const canvas = await renderPageToCanvas(pdfPage);
-    const ctx = canvas.getContext('2d');
-    const pageInfo = getPageInfo(pdfPage);
+    for (let i = 0; i < pdf.numPages; i++) {
+      const pdfPage = await pdf.getPage(i + 1);
+      const canvas = await renderPageToCanvas(pdfPage);
+      const ctx = canvas.getContext('2d');
+      const pageInfo = getPageInfo(pdfPage);
 
-    drawBboxWithoutNumber(i, codesBodyList, pageInfo, ctx, [102, 0, 204], true);
-    drawBboxWithoutNumber(i, codesCaptionList, pageInfo, ctx, [204, 153, 255], true);
-    drawBboxWithoutNumber(i, droppedBboxList, pageInfo, ctx, [158, 158, 158], true);
-    drawBboxWithoutNumber(i, tablesBodyList, pageInfo, ctx, [204, 204, 0], true);
-    drawBboxWithoutNumber(i, tablesCaptionList, pageInfo, ctx, [255, 255, 102], true);
-    drawBboxWithoutNumber(i, tablesFootnoteList, pageInfo, ctx, [229, 255, 204], true);
-    drawBboxWithoutNumber(i, imgsBodyList, pageInfo, ctx, [153, 255, 51], true);
-    drawBboxWithoutNumber(i, imgsCaptionList, pageInfo, ctx, [102, 178, 255], true);
-    drawBboxWithoutNumber(i, imgsFootnoteList, pageInfo, ctx, [255, 178, 102], true);
-    drawBboxWithoutNumber(i, titlesList, pageInfo, ctx, [102, 102, 255], true);
-    drawBboxWithoutNumber(i, textsList, pageInfo, ctx, [153, 0, 76], true);
-    drawBboxWithoutNumber(i, interequationsList, pageInfo, ctx, [0, 255, 0], true);
-    drawBboxWithoutNumber(i, listsList, pageInfo, ctx, [40, 169, 92], true);
-    drawBboxWithoutNumber(i, listItemsList, pageInfo, ctx, [40, 169, 92], false);
-    drawBboxWithoutNumber(i, indexsList, pageInfo, ctx, [40, 169, 92], true);
-    drawBboxWithNumber(i, layoutBboxList, pageInfo, ctx, [255, 0, 0], false, false);
-    drawBboxWithoutNumber(i, innerLayoutBboxList, pageInfo, ctx, [0, 255, 0], false);
+      drawBboxWithoutNumber(i, codesBodyList, pageInfo, ctx, [102, 0, 204], true);
+      drawBboxWithoutNumber(i, codesCaptionList, pageInfo, ctx, [204, 153, 255], true);
+      drawBboxWithoutNumber(i, droppedBboxList, pageInfo, ctx, [158, 158, 158], true);
+      drawBboxWithoutNumber(i, tablesBodyList, pageInfo, ctx, [204, 204, 0], true);
+      drawBboxWithoutNumber(i, tablesCaptionList, pageInfo, ctx, [255, 255, 102], true);
+      drawBboxWithoutNumber(i, tablesFootnoteList, pageInfo, ctx, [229, 255, 204], true);
+      drawBboxWithoutNumber(i, imgsBodyList, pageInfo, ctx, [153, 255, 51], true);
+      drawBboxWithoutNumber(i, imgsCaptionList, pageInfo, ctx, [102, 178, 255], true);
+      drawBboxWithoutNumber(i, imgsFootnoteList, pageInfo, ctx, [255, 178, 102], true);
+      drawBboxWithoutNumber(i, titlesList, pageInfo, ctx, [102, 102, 255], true);
+      drawBboxWithoutNumber(i, textsList, pageInfo, ctx, [153, 0, 76], true);
+      drawBboxWithoutNumber(i, interequationsList, pageInfo, ctx, [0, 255, 0], true);
+      drawBboxWithoutNumber(i, listsList, pageInfo, ctx, [40, 169, 92], true);
+      drawBboxWithoutNumber(i, listItemsList, pageInfo, ctx, [40, 169, 92], false);
+      drawBboxWithoutNumber(i, indexsList, pageInfo, ctx, [40, 169, 92], true);
+      drawBboxWithNumber(i, layoutBboxList, pageInfo, ctx, [255, 0, 0], false, false);
+      drawBboxWithoutNumber(i, innerLayoutBboxList, pageInfo, ctx, [0, 255, 0], false);
 
-    blobs.push(await canvas.convertToBlob({ type: 'image/png' }));
+      blobs.push(await canvas.convertToBlob({ type: 'image/png' }));
+    }
+
+    return blobs;
+  } finally {
+    try { await pdf.cleanup?.(); } catch { /* ignore */ }
+    try { await pdf.destroy?.(); } catch { /* ignore */ }
   }
-
-  return blobs;
 }
 
 // ─── drawSpanBbox ─────────────────────────────────────────────────────────────
@@ -474,27 +480,33 @@ export async function drawSpanBbox(pdfInfo, pdfBytes) {
     imageList.push(pageImage); tableList.push(pageTable); droppedList.push(pageDropped);
   }
 
+  const pdfjsLib = await getPdfjsLib();
   const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
   const pdf = await loadingTask.promise;
-  const blobs = [];
+  try {
+    const blobs = [];
 
-  for (let i = 0; i < pdf.numPages; i++) {
-    const pdfPage = await pdf.getPage(i + 1);
-    const canvas = await renderPageToCanvas(pdfPage);
-    const ctx = canvas.getContext('2d');
-    const pageInfo = getPageInfo(pdfPage);
+    for (let i = 0; i < pdf.numPages; i++) {
+      const pdfPage = await pdf.getPage(i + 1);
+      const canvas = await renderPageToCanvas(pdfPage);
+      const ctx = canvas.getContext('2d');
+      const pageInfo = getPageInfo(pdfPage);
 
-    drawBboxWithoutNumber(i, textList, pageInfo, ctx, [255, 0, 0], false);
-    drawBboxWithoutNumber(i, inlineEqList, pageInfo, ctx, [0, 255, 0], false);
-    drawBboxWithoutNumber(i, interlineEqList, pageInfo, ctx, [0, 0, 255], false);
-    drawBboxWithoutNumber(i, imageList, pageInfo, ctx, [255, 204, 0], false);
-    drawBboxWithoutNumber(i, tableList, pageInfo, ctx, [204, 0, 255], false);
-    drawBboxWithoutNumber(i, droppedList, pageInfo, ctx, [158, 158, 158], false);
+      drawBboxWithoutNumber(i, textList, pageInfo, ctx, [255, 0, 0], false);
+      drawBboxWithoutNumber(i, inlineEqList, pageInfo, ctx, [0, 255, 0], false);
+      drawBboxWithoutNumber(i, interlineEqList, pageInfo, ctx, [0, 0, 255], false);
+      drawBboxWithoutNumber(i, imageList, pageInfo, ctx, [255, 204, 0], false);
+      drawBboxWithoutNumber(i, tableList, pageInfo, ctx, [204, 0, 255], false);
+      drawBboxWithoutNumber(i, droppedList, pageInfo, ctx, [158, 158, 158], false);
 
-    blobs.push(await canvas.convertToBlob({ type: 'image/png' }));
+      blobs.push(await canvas.convertToBlob({ type: 'image/png' }));
+    }
+
+    return blobs;
+  } finally {
+    try { await pdf.cleanup?.(); } catch { /* ignore */ }
+    try { await pdf.destroy?.(); } catch { /* ignore */ }
   }
-
-  return blobs;
 }
 
 // ─── drawLineSortBbox ─────────────────────────────────────────────────────────
@@ -541,20 +553,26 @@ export async function drawLineSortBbox(pdfInfo, pdfBytes) {
     layoutBboxList.push(sorted.map(l => _layoutItem(l.bbox)));
   }
 
+  const pdfjsLib = await getPdfjsLib();
   const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
   const pdf = await loadingTask.promise;
-  const blobs = [];
+  try {
+    const blobs = [];
 
-  for (let i = 0; i < pdf.numPages; i++) {
-    const pdfPage = await pdf.getPage(i + 1);
-    const canvas = await renderPageToCanvas(pdfPage);
-    const ctx = canvas.getContext('2d');
-    const pageInfo = getPageInfo(pdfPage);
+    for (let i = 0; i < pdf.numPages; i++) {
+      const pdfPage = await pdf.getPage(i + 1);
+      const canvas = await renderPageToCanvas(pdfPage);
+      const ctx = canvas.getContext('2d');
+      const pageInfo = getPageInfo(pdfPage);
 
-    drawBboxWithNumber(i, layoutBboxList, pageInfo, ctx, [255, 0, 0], false);
+      drawBboxWithNumber(i, layoutBboxList, pageInfo, ctx, [255, 0, 0], false);
 
-    blobs.push(await canvas.convertToBlob({ type: 'image/png' }));
+      blobs.push(await canvas.convertToBlob({ type: 'image/png' }));
+    }
+
+    return blobs;
+  } finally {
+    try { await pdf.cleanup?.(); } catch { /* ignore */ }
+    try { await pdf.destroy?.(); } catch { /* ignore */ }
   }
-
-  return blobs;
 }

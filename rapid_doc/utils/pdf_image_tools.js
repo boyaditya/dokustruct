@@ -31,20 +31,7 @@ import { ImageType, ContentType, CategoryId } from './enum_class.js';
 import { strSha256 } from './hash_utils.js';
 import { getEndPageId } from './pdf_page_id.js';
 import { calculateIou } from './boxbase.js';
-import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-
-/** @type {any} */
-let _pdfjsLib = null;
-
-async function getPdfjsLib() {
-  if (_pdfjsLib) return _pdfjsLib;
-  _pdfjsLib = await import('pdfjs-dist');
-  // Ensure the PDF.js web-worker URL is configured (CDN global may not have it set yet)
-  if (_pdfjsLib.GlobalWorkerOptions && !_pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    _pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-  }
-  return _pdfjsLib;
-}
+import { getPdfjsLib } from './pdfjs_loader.js';
 
 /**
  * Convert a pdfjs page to an image dict.
@@ -113,18 +100,24 @@ export async function loadImagesFromPdfCore(pdfBytes, dpi = 200, startPageId = 0
   // Always pass a copy so PDF.js cannot detach the caller's buffer
   const _data = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes instanceof ArrayBuffer ? pdfBytes.slice(0) : pdfBytes);
   const pdfDoc = existingDoc ?? await pdfjsLib.getDocument({ data: _data }).promise;
-  const pageNum = pdfDoc.numPages;
-  const endId = getEndPageId(endPageId, pageNum);
+  try {
+    const pageNum = pdfDoc.numPages;
+    const endId = getEndPageId(endPageId, pageNum);
 
-  const imagesList = [];
-  for (let i = startPageId; i <= endId; i++) {
-    const page = await pdfDoc.getPage(i + 1); // pdfjs 1-indexed
-    const imageDict = await pdfPageToImage(page, dpi, imageType);
-    imagesList.push(imageDict);
+    const imagesList = [];
+    for (let i = startPageId; i <= endId; i++) {
+      const page = await pdfDoc.getPage(i + 1); // pdfjs 1-indexed
+      const imageDict = await pdfPageToImage(page, dpi, imageType);
+      imagesList.push(imageDict);
+    }
+
+    return imagesList;
+  } finally {
+    if (!existingDoc) {
+      try { await pdfDoc.cleanup?.(); } catch { /* ignore */ }
+      try { await pdfDoc.destroy?.(); } catch { /* ignore */ }
+    }
   }
-
-  if (!existingDoc) await pdfDoc.cleanup();
-  return imagesList;
 }
 
 /**

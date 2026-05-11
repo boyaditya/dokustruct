@@ -74,24 +74,31 @@ function groupTextContentToBlocks(items, viewport, pageHeight) {
   if (!items || items.length === 0) return [];
 
   // Transform each item's transform matrix to [x0, y0, x1, y1] bounding box
-  const spans = items
-    .filter(item => item.str && item.str.length > 0)
-    .map(item => {
-      const [, , , , tx, ty] = item.transform;
-      // flip y: pdfjs y increases downward from top
-      const x0 = tx;
-      const y1 = pageHeight - ty;           // bottom of text in top-left coords
-      const y0 = y1 - (item.height || 8);   // top of text
-      const x1 = x0 + (item.width || 0);
-      return {
-        bbox: [x0, y0, x1, y1],
-        content: item.str,
-        type: 'text',
-        score: 1.0,
-        chars: [],
-        original_order: null,
-      };
+  const spans = [];
+  let charIdx = 0;
+  for (const item of items) {
+    if (!item.str || item.str.length === 0) continue;
+
+    const [, , , , tx, ty] = item.transform;
+    // flip y: pdfjs y increases downward from top
+    const x0 = tx;
+    const y1 = pageHeight - ty;           // bottom of text in top-left coords
+    const y0 = y1 - (item.height || 8);   // top of text
+    const x1 = x0 + (item.width || 0);
+    const bbox = [x0, y0, x1, y1];
+    const chars = buildChars(item.str, bbox, charIdx);
+    charIdx += chars.length;
+
+    spans.push({
+      bbox,
+      content: item.str,
+      text: item.str,
+      type: 'text',
+      score: 1.0,
+      chars,
+      original_order: null,
     });
+  }
 
   if (spans.length === 0) return [];
 
@@ -143,6 +150,27 @@ function groupTextContentToBlocks(items, viewport, pageHeight) {
     bbox: mergeBboxes(blockLines.map(l => l.bbox)),
     lines: blockLines,
   }));
+}
+
+function buildChars(text, bbox, startIdx) {
+  const graphemes = Array.from(String(text || ''));
+  if (!graphemes.length) return [];
+
+  const [x0, y0, x1, y1] = bbox;
+  const totalWidth = Math.max(0, x1 - x0);
+  const fallbackWidth = Math.max(1, (y1 - y0) * 0.5);
+  const charWidth = totalWidth > 0 ? totalWidth / graphemes.length : fallbackWidth;
+
+  return graphemes.map((char, i) => {
+    const cx0 = x0 + i * charWidth;
+    const cx1 = i === graphemes.length - 1 ? x1 : x0 + (i + 1) * charWidth;
+    return {
+      bbox: [cx0, y0, cx1, y1],
+      char,
+      text: char,
+      char_idx: startIdx + i,
+    };
+  });
 }
 
 /**

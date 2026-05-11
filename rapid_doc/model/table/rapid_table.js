@@ -42,10 +42,10 @@ export class RapidTableModel {
       ? tableConfig
       : new RapidTableInput(tableConfig ?? {});
 
-    const modelType = config.modelType ?? ModelType.PPSTRUCTURE_CH;
+    const modelType = config.modelType ?? ModelType.UNET_SLANET_PLUS;
 
     // UNET_SLANET_PLUS mode: dual-model (wired + wireless) with TableCls
-    if (false && modelType === ModelType.UNET_SLANET_PLUS) {
+    if (modelType === ModelType.UNET_SLANET_PLUS) {
       inst._mode = "dual";
       inst._tableCls = await TableCls.create({ model_type: ModelType.Q_CLS });
       inst._wiredModel = await RapidTable.create(
@@ -182,6 +182,24 @@ export class RapidTableModel {
    * @param {object} opts
    */
   async _predictDual(image, ocrResult, opts) {
+    if (opts?.useCompareTable) {
+      const [wiredResult, wirelessResult] = await Promise.all([
+        this._wiredModel.run([image], ocrResult ? [ocrResult] : null),
+        this._wirelessModel.run([image], ocrResult ? [ocrResult] : null),
+      ]);
+      const wiredHtml = wiredResult.predHtmls?.[0] ?? "";
+      const wirelessHtml = wirelessResult.predHtmls?.[0] ?? "";
+      const selected = selectBestTableModel(ocrResult, wiredHtml, wirelessHtml);
+      logger.info(`RapidTableModel: compare-table selected '${selected.modelType}'`);
+      return {
+        html: selected.bestHtml ?? "",
+        cellBboxes: selected.modelType === "wireless"
+          ? (wirelessResult.cellBboxes?.[0] ?? [])
+          : (wiredResult.cellBboxes?.[0] ?? []),
+        elapse: Number(wiredResult.elapse || 0) + Number(wirelessResult.elapse || 0),
+      };
+    }
+
     // Load image for classification
     const { LoadImage } = await import("./rapid_table_self/utils/load_image.js");
     const loader = new LoadImage();

@@ -138,6 +138,7 @@ const ocrRecModelHint = $('#ocr-rec-model-hint');
 const formulaEnableToggle = $('#formula-enable-toggle');
 const formulaModelSelect = $('#formula-model-select');
 const tableEnableToggle = $('#table-enable-toggle');
+const tableModelSelect = $('#table-model-select');
 
 const markdownRaw = $('#markdown-raw');
 const markdownViewer = $('#markdown-viewer');
@@ -204,10 +205,11 @@ function bootstrap() {
   const savedFormula = localStorage.getItem('rapiddoc_v1_formula_enable');
   const savedTable = localStorage.getItem('rapiddoc_v1_table_enable');
   const savedFormulaModel = localStorage.getItem('rapiddoc_v1_formula_model') || 'pp_formulanet_plus_s';
+  const savedTableModel = localStorage.getItem('rapiddoc_v1_table_model') || 'unet_slanet_plus';
 
   state.patch({
-    parseMethod: 'ocr',
-    forceOcr: true,
+    parseMethod: 'auto',
+    forceOcr: false,
     dumpMd: true,
     dumpContentList: true,
     dumpMiddleJson: true,
@@ -219,6 +221,7 @@ function bootstrap() {
     language: mapOcrRecToLang(savedOcrRec),
     formulaEnable: savedFormula === '1',
     tableEnable: savedTable === '1',
+    tableModelType: savedTableModel,
     formulaModelType: savedFormulaModel,
   });
 
@@ -268,6 +271,14 @@ function bootstrap() {
       const enabled = Boolean(tableEnableToggle.checked);
       state.set('tableEnable', enabled);
       localStorage.setItem('rapiddoc_v1_table_enable', enabled ? '1' : '0');
+    });
+  }
+
+  if (tableModelSelect) {
+    tableModelSelect.value = state.get('tableModelType');
+    tableModelSelect.addEventListener('change', () => {
+      state.set('tableModelType', tableModelSelect.value);
+      localStorage.setItem('rapiddoc_v1_table_model', tableModelSelect.value);
     });
   }
 
@@ -491,8 +502,8 @@ async function runPipeline() {
   }
 
   state.patch({
-    parseMethod: 'ocr',
-    forceOcr: true,
+    parseMethod: 'auto',
+    forceOcr: false,
     timings: {
       preprocessing: 0,
       layoutAnalysis: 0,

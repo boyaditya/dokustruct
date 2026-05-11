@@ -48,12 +48,12 @@ export function toMatBgr(img) {
   let imageData = null;
 
   if (typeof OffscreenCanvas !== 'undefined' && img instanceof OffscreenCanvas) {
-    const ctx = img.getContext('2d');
+    const ctx = img.getContext('2d', { willReadFrequently: true });
     console.log(`[toMatBgr] Converting OffscreenCanvas (${img.width}x${img.height}) to BGR Mat...`);
     imageData = ctx.getImageData(0, 0, img.width, img.height);
   } else if (typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap) {
     const oc = new OffscreenCanvas(img.width, img.height);
-    const ctx = oc.getContext('2d');
+    const ctx = oc.getContext('2d', { willReadFrequently: true });
     console.log(`[toMatBgr] Converting ImageBitmap (${img.width}x${img.height}) to BGR Mat...`);
     ctx.drawImage(img, 0, 0);
     imageData = ctx.getImageData(0, 0, img.width, img.height);
@@ -98,24 +98,58 @@ export function checkOpenvino() {
 export function cropImg(inputRes, inputImg, cropPasteX = 0, cropPasteY = 0, opts = {}) {
   const layoutShapeMode = opts.layoutShapeMode ?? 'auto';
 
-  const cropXmin = Math.trunc(inputRes.poly[0]);
-  const cropYmin = Math.trunc(inputRes.poly[1]);
-  const cropXmax = Math.trunc(inputRes.poly[4]);
-  const cropYmax = Math.trunc(inputRes.poly[5]);
+  const poly = Array.isArray(inputRes.poly) ? inputRes.poly : [];
+  const xs = [];
+  const ys = [];
+  for (let i = 0; i + 1 < poly.length; i += 2) {
+    const x = Number(poly[i]);
+    const y = Number(poly[i + 1]);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      xs.push(x);
+      ys.push(y);
+    }
+  }
+  if (!xs.length || !ys.length) {
+    return {
+      newImage: new cv.Mat(0, 0, typeof inputImg?.type === 'function' ? inputImg.type() : cv.CV_8UC3),
+      usefulList: [cropPasteX, cropPasteY, 0, 0, 0, 0, 0, 0],
+    };
+  }
+
+  const cropXmin = Math.trunc(Math.min(...xs));
+  const cropYmin = Math.trunc(Math.min(...ys));
+  const cropXmax = Math.trunc(Math.max(...xs));
+  const cropYmax = Math.trunc(Math.max(...ys));
 
   const cropNewWidth  = cropXmax - cropXmin + cropPasteX * 2;
   const cropNewHeight = cropYmax - cropYmin + cropPasteY * 2;
+  if (cropNewWidth <= 0 || cropNewHeight <= 0) {
+    return {
+      newImage: new cv.Mat(0, 0, typeof inputImg?.type === 'function' ? inputImg.type() : cv.CV_8UC3),
+      usefulList: [cropPasteX, cropPasteY, cropXmin, cropYmin, cropXmax, cropYmax, 0, 0],
+    };
+  }
+
+  const srcXmin = Math.max(0, Math.min(inputImg.cols, cropXmin));
+  const srcYmin = Math.max(0, Math.min(inputImg.rows, cropYmin));
+  const srcXmax = Math.max(0, Math.min(inputImg.cols, cropXmax));
+  const srcYmax = Math.max(0, Math.min(inputImg.rows, cropYmax));
+  const srcWidth = srcXmax - srcXmin;
+  const srcHeight = srcYmax - srcYmin;
 
   // Create white background
   const returnImage = new cv.Mat(cropNewHeight, cropNewWidth, inputImg.type());
   returnImage.setTo(new cv.Scalar(255, 255, 255, 255));
 
+  if (srcWidth <= 0 || srcHeight <= 0) {
+    const usefulList = [cropPasteX, cropPasteY, cropXmin, cropYmin, cropXmax, cropYmax, cropNewWidth, cropNewHeight];
+    return { newImage: returnImage, usefulList };
+  }
+
   // Crop region
-  const roi = inputImg.roi(new cv.Rect(
-    Math.max(0, cropXmin), Math.max(0, cropYmin),
-    Math.min(cropXmax, inputImg.cols) - Math.max(0, cropXmin),
-    Math.min(cropYmax, inputImg.rows) - Math.max(0, cropYmin),
-  ));
+  const roi = inputImg.roi(new cv.Rect(srcXmin, srcYmin, srcWidth, srcHeight));
+  const destX = cropPasteX + (srcXmin - cropXmin);
+  const destY = cropPasteY + (srcYmin - cropYmin);
 
   if (layoutShapeMode !== 'rect' && inputRes.polygon_points) {
     // Apply polygon mask
@@ -139,12 +173,13 @@ export function cropImg(inputRes, inputImg, cropPasteX = 0, cropPasteY = 0, opts
         }
       }
     }
-    const destRoi = returnImage.roi(new cv.Rect(cropPasteX, cropPasteY, roi.cols, roi.rows));
+    const destRoi = returnImage.roi(new cv.Rect(destX, destY, roi.cols, roi.rows));
     maskedRoi.copyTo(destRoi);
-    maskedRoi.delete(); mask.delete(); pts.delete(); ptsArr.delete();
+    maskedRoi.delete(); mask.delete(); pts.delete(); ptsArr.delete(); destRoi.delete();
   } else {
-    const destRoi = returnImage.roi(new cv.Rect(cropPasteX, cropPasteY, roi.cols, roi.rows));
+    const destRoi = returnImage.roi(new cv.Rect(destX, destY, roi.cols, roi.rows));
     roi.copyTo(destRoi);
+    destRoi.delete();
   }
   roi.delete();
 

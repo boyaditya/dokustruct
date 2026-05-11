@@ -16,6 +16,7 @@
 
 import { appState } from '../state/appState.js';
 import { exportUtils } from './exportUtils.js';
+import { PDFDocument } from 'pdf-lib';
 
 // ---------------------------------------------------------------------------
 // Image helpers
@@ -139,6 +140,82 @@ function formatOcrPairs(pairs) {
   };
 }
 
+function formatPipelineError(err) {
+  if (err instanceof Error) return err.message || err.name;
+  if (typeof err === 'number') return `native runtime error code ${err}`;
+  if (typeof err === 'string') return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
+function extractSearchableTextFallback(pageDictList) {
+  const pages = Array.isArray(pageDictList) ? pageDictList : [];
+  const contentList = [];
+  const markdownPages = [];
+
+  for (let pageNo = 0; pageNo < pages.length; pageNo++) {
+    const lines = [];
+    for (const block of pages[pageNo]?.blocks ?? []) {
+      for (const line of block.lines ?? []) {
+        const spans = [...(line.spans ?? [])].sort((a, b) => {
+          const ab = Array.isArray(a.bbox?.bbox) ? a.bbox.bbox : a.bbox;
+          const bb = Array.isArray(b.bbox?.bbox) ? b.bbox.bbox : b.bbox;
+          return Number(ab?.[0] ?? 0) - Number(bb?.[0] ?? 0);
+        });
+        let text = '';
+        for (const span of spans) {
+          const token = String(span.text ?? span.content ?? '').trim();
+          if (!token) continue;
+          text += text && shouldInsertSpace(text, token) ? ` ${token}` : token;
+        }
+        if (text) lines.push(text);
+      }
+    }
+
+    const pageText = lines.join('\n').trim();
+    if (pageText) {
+      markdownPages.push(pageText);
+      contentList.push({ type: 'text', page_no: pageNo, text: pageText, lines });
+    }
+  }
+
+  return {
+    markdown: markdownPages.join('\n\n'),
+    contentList,
+  };
+}
+
+function textHasContent(value) {
+  const text = String(value ?? '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/!\[[^\]]*]\([^)]+\)/g, ' ')
+    .replace(/[#*_`~|>\-[\](){}:;.,!?/\\]+/g, ' ')
+    .trim();
+  return /[A-Za-z0-9\u00C0-\uFFFF]/.test(text);
+}
+
+function hasMeaningfulContentList(contentList) {
+  if (!Array.isArray(contentList)) return false;
+  return contentList.some(item =>
+    textHasContent(item?.text) ||
+    textHasContent(item?.content) ||
+    textHasContent(item?.table_body) ||
+    textHasContent(item?.table)
+  );
+}
+
+function markdownToPlainText(markdown) {
+  return String(markdown ?? '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/!\[[^\]]*]\([^)]+\)/g, ' ')
+    .replace(/[#*_`~|>\-[\](){}:;.,!?/\\]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function fileToImageMat(file, toMatBgr) {
   const imageBitmap = await createImageBitmap(file);
   try {
@@ -147,6 +224,24 @@ async function fileToImageMat(file, toMatBgr) {
     if (typeof imageBitmap.close === 'function') {
       imageBitmap.close();
     }
+  }
+}
+
+async function imageFileToPdfBytes(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+    const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
+    const pdfDoc = await PDFDocument.create();
+    const embedded = await pdfDoc.embedPng(pngBytes);
+    const page = pdfDoc.addPage([bitmap.width, bitmap.height]);
+    page.drawImage(embedded, { x: 0, y: 0, width: bitmap.width, height: bitmap.height });
+    return await pdfDoc.save();
+  } finally {
+    if (typeof bitmap.close === 'function') bitmap.close();
   }
 }
 
@@ -470,7 +565,9 @@ export class PipelineAdapter {
       // ── Step 2: read file bytes ────────────────────────────────────────────
       const tPre0 = performance.now();
       state.beginStage('preprocessing');
-      const rawFileBytes = new Uint8Array(await file.arrayBuffer());
+      const rawFileBytes = isImageFile(file)
+        ? await imageFileToPdfBytes(file)
+        : new Uint8Array(await file.arrayBuffer());
       if (signal.aborted) return null;
 
       const fileBytes = rawFileBytes.buffer.slice(
@@ -559,12 +656,22 @@ export class PipelineAdapter {
 
           const pdfInfo = middleJson?.pdf_info ?? [];
           const tMarkdown0 = performance.now();
-          const markdown = engine.unionMake(pdfInfo, 'mm_markdown', 'images') || '';
+          let markdown = engine.unionMake(pdfInfo, 'mm_markdown', 'images') || '';
           postBreakdown.markdown_union_ms = performance.now() - tMarkdown0;
 
           const tContent0 = performance.now();
-          const contentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
+          let contentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
           postBreakdown.content_list_union_ms = performance.now() - tContent0;
+
+          const markdownHasContent = textHasContent(markdown);
+          const contentListHasContent = hasMeaningfulContentList(contentList);
+          if (!ocrEnabled && (!markdownHasContent || !contentListHasContent)) {
+            const searchableFallback = extractSearchableTextFallback(pageDictList);
+            if (searchableFallback.markdown) {
+              markdown = searchableFallback.markdown;
+              contentList = searchableFallback.contentList;
+            }
+          }
 
           const images = await this._collectImageMap(imageWriter);
 
@@ -666,9 +773,10 @@ export class PipelineAdapter {
         state.failProcessing('Cancelled');
         return null;
       }
-      console.error('[pipelineAdapter] Run failed:', err);
-      state.failProcessing(err);
-      this._toast(`Processing failed: ${err.message ?? err}`, 'error');
+      const message = formatPipelineError(err);
+      console.error('[pipelineAdapter] Run failed:', message, err);
+      state.failProcessing(message);
+      this._toast(`Processing failed: ${message}`, 'error');
       return null;
     }
   }
@@ -887,7 +995,7 @@ export class PipelineAdapter {
     return {
       // Core outputs
       markdown:      raw.markdown    ?? raw.md_content     ?? raw.md       ?? '',
-      raw_text:      raw.raw_text    ?? raw.text_content   ?? raw.text     ?? '',
+      raw_text:      raw.raw_text    ?? raw.text_content   ?? raw.text     ?? markdownToPlainText(raw.markdown ?? raw.md_content ?? raw.md ?? ''),
       content_list:  raw.content_list ?? raw.contentList   ?? null,
       middle_json:   raw.middle_json  ?? raw.middleJson     ?? raw.layout_info ?? null,
       model_output:  raw.model_output ?? raw.modelOutput    ?? null,

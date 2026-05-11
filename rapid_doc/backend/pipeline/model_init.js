@@ -23,6 +23,7 @@ import { RapidFormulaModel } from "../../model/formula/rapid_formula_model.js";
 import { LatexOCRModel } from "../../model/formula/latex_ocr_model.js";
 import { RapidOcrModel } from "../../model/ocr/rapid_ocr.js";
 import { RapidTableModel } from "../../model/table/rapid_table.js";
+import { RapidOrientationModel } from "../../model/orientation/rapid_orientation_model.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -128,7 +129,8 @@ export async function ocrModelInit(
   lang = null,
   ocrConfig = null,
   detDbUnclipRatio = 1.8,
-  enableMergeDetBoxes = true
+  enableMergeDetBoxes = true,
+  isSeal = false
 ) {
   return RapidOcrModel.create({
     detDbBoxThresh,
@@ -137,8 +139,14 @@ export async function ocrModelInit(
     useDilation: true,
     detDbUnclipRatio,
     enableMergeDetBoxes,
+    isSeal,
+    detModelUrl: isSeal ? "/models/ocr/pp-ocrv4_mobile_seal_det.onnx" : undefined,
     executionProviders: ['webgpu', 'wasm'],
   });
+}
+
+export async function orientationModelInit(orientationConfig = null) {
+  return RapidOrientationModel.create(orientationConfig ?? {});
 }
 
 /**
@@ -172,7 +180,8 @@ export async function atomModelInit(modelName, kwargs = {}) {
         kwargs.lang ?? null,
         kwargs.ocr_config ?? null,
         kwargs.det_db_unclip_ratio ?? 1.8,
-        kwargs.enable_merge_det_boxes ?? true
+        kwargs.enable_merge_det_boxes ?? true,
+        kwargs.is_seal ?? false
       );
     }
 
@@ -187,6 +196,9 @@ export async function atomModelInit(modelName, kwargs = {}) {
         kwargs.table_config ?? null
       );
     }
+
+  } else if (modelName === AtomicModel.ImgOrientationCls) {
+    atomModel = await orientationModelInit(kwargs.orientation_config ?? null);
 
   } else {
     throw new Error(`[atomModelInit] model name not allowed: ${modelName}`);
@@ -240,11 +252,14 @@ export class AtomModelSingleton {
         ocrLang,
         kwargs.det_db_unclip_ratio ?? 1.8,
         kwargs.enable_merge_det_boxes ?? true,
+        kwargs.is_seal ?? false,
       ]);
     } else if (atomModelName === AtomicModel.Table) {
       key = JSON.stringify([atomModelName, makeHashable(kwargs.table_config ?? null)]);
     } else if (atomModelName === AtomicModel.FORMULA) {
       key = JSON.stringify([atomModelName, makeHashable(kwargs.formula_config ?? null)]);
+    } else if (atomModelName === AtomicModel.ImgOrientationCls) {
+      key = JSON.stringify([atomModelName, makeHashable(kwargs.orientation_config ?? null)]);
     } else {
       key = atomModelName;
     }

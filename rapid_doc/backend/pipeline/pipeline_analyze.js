@@ -19,6 +19,7 @@
 
 import { MineruPipelineModel } from "./model_init.js";
 import { convertPdfBytesToBytesByPypdfium2 } from "../../cli/common.js";
+import { PDFDocument } from "pdf-lib";
 import { getDevice } from "../../utils/config_reader.js";
 import { ImageType } from "../../utils/enum_class.js";
 import { makeHashable } from "../../utils/hash_utils.js";
@@ -162,7 +163,6 @@ export async function docAnalyze(
     postprocessing: 0,
   };
   // -------- Normalize input --------
-  const originalImageList = [];
   const normalizedPdfBytesList = [];
   const contains_dict = pdfBytesList.some(item => item !== null && typeof item === 'object' && 'pdf_bytes' in item);
 
@@ -171,15 +171,18 @@ export async function docAnalyze(
       const item = pdfBytesList[idx];
       if (item !== null && typeof item === 'object' && 'pdf_bytes' in item) {
         normalizedPdfBytesList.push(item.pdf_bytes);
-        originalImageList.push(item.original_image ?? null);
       } else {
         normalizedPdfBytesList.push(item);
-        originalImageList.push(null);
       }
     }
   } else {
-    for (let i = 0; i < pdfBytesList.length; i++) originalImageList.push(null);
     normalizedPdfBytesList.push(...pdfBytesList);
+  }
+
+  for (let i = 0; i < normalizedPdfBytesList.length; i++) {
+    if (isImageBytes(normalizedPdfBytesList[i])) {
+      normalizedPdfBytesList[i] = await imageBytesToPdfBytes(normalizedPdfBytesList[i]);
+    }
   }
 
   // Apply page slicing if requested (Python parity: pre-slice PDF bytes)
@@ -223,29 +226,7 @@ export async function docAnalyze(
     const _lang = lang_list[pdfIdx];
     let imagesList, pdfDocProxy;
 
-    // Native parity: Check if input is already an image to avoid upscaling via PDF.js
-    const isImage = pdfBytes[0] === 0x89 || pdfBytes[0] === 0xFF || pdfBytes[0] === 0x42;
-    if (isImage) {
-      const bitmap = await createImageBitmap(new Blob([pdfBytes]));
-      imagesList = [{ img_pil: bitmap, scale: 1.0, page_no: 0 }];
-      pdfDocProxy = { numPages: 1, getPage: async () => ({
-        getViewport: () => ({ width: bitmap.width, height: bitmap.height }),
-        getTextContent: async () => ({ items: [] }),
-        getOperatorList: async () => ({ fnArray: [], argsArray: [] }),
-      })};
-    } else {
-      [imagesList, pdfDocProxy] = await loadImagesFromPdf(pdfBytes, { imageType: ImageType.PIL });
-    }
-
-    // Override first page image if original_image provided
-    if (originalImageList[pdfIdx] && imagesList.length > 0) {
-      const pdfImgWidth = imagesList[0].img_pil.width;
-      const pdfImgHeight = imagesList[0].img_pil.height;
-      const origImg = originalImageList[pdfIdx];
-      if (origImg.width !== pdfImgWidth || origImg.height !== pdfImgHeight) {
-        imagesList[0].img_pil = await resizeImageBitmap(origImg, pdfImgWidth, pdfImgHeight);
-      }
-    }
+    [imagesList, pdfDocProxy] = await loadImagesFromPdf(pdfBytes, { imageType: ImageType.PIL });
     allImageLists.push(imagesList);
 
     // Iterate each page of the PDF document proxy (mirrors Python: for pdf_page in pdf_doc)
@@ -376,16 +357,35 @@ export async function batchImageAnalyze(
 // ---------------------------------------------------------------------------
 
 /**
- * Resize an ImageBitmap to (targetW × targetH).
- * Browser-compatible via OffscreenCanvas.
- * @param {ImageBitmap} srcBitmap
- * @param {number} targetW
- * @param {number} targetH
- * @returns {Promise<ImageBitmap>}
+ * Detect image byte streams that must be normalized to PDF before analysis.
  */
-async function resizeImageBitmap(srcBitmap, targetW, targetH) {
-  const canvas = new OffscreenCanvas(targetW, targetH);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(srcBitmap, 0, 0, targetW, targetH);
-  return createImageBitmap(canvas);
+function isImageBytes(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return (
+    (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) ||
+    (b[0] === 0xFF && b[1] === 0xD8) ||
+    (b[0] === 0x42 && b[1] === 0x4D) ||
+    (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) ||
+    (b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2A && b[3] === 0x00) ||
+    (b[0] === 0x4D && b[1] === 0x4D && b[2] === 0x00 && b[3] === 0x2A)
+  );
+}
+
+async function imageBytesToPdfBytes(bytes) {
+  const srcBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const bitmap = await createImageBitmap(new Blob([srcBytes]));
+  try {
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+    const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
+    const pdfDoc = await PDFDocument.create();
+    const embedded = await pdfDoc.embedPng(pngBytes);
+    const page = pdfDoc.addPage([bitmap.width, bitmap.height]);
+    page.drawImage(embedded, { x: 0, y: 0, width: bitmap.width, height: bitmap.height });
+    return await pdfDoc.save();
+  } finally {
+    if (typeof bitmap.close === 'function') bitmap.close();
+  }
 }

@@ -11,4 +11,5 @@ export class AtomicModel {
   static FORMULA = "formula";
   static OCR = "ocr";
   static Table = "table";
+  static ImgOrientationCls = "img_ori_cls";
 }

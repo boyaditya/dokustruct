@@ -29,9 +29,9 @@ export class RapidTable {
     logger.info(`RapidTable: using model type ${inst._modelType}`);
 
     if (inst._modelType === ModelType.UNITABLE || inst._modelType === ModelType.UNET_UNITABLE) {
-      inst._structurer = await UniTableStructure.create({ model_type: inst._modelType, ...config });
+      inst._structurer = await UniTableStructure.create({ ...config, model_type: inst._modelType });
     } else if (inst._modelType === ModelType.UNET || inst._modelType === ModelType.UNET_SLANET_PLUS) {
-      inst._structurer = await UnetTableRecognition.create({ model_type: ModelType.UNET, ...config });
+      inst._structurer = await UnetTableRecognition.create({ ...config, model_type: ModelType.UNET });
     } else {
       inst._structurer = await PPTableStructurer.create({
         model_type: inst._modelType,

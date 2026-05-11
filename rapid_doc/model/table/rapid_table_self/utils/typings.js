@@ -11,7 +11,8 @@ export const EngineType = Object.freeze({
 
 /** @enum {string} */
 export const ModelType = Object.freeze({
-  SLANETPLUS: "slanetplus",
+  SLANETPLUS: "slanet_plus",
+  SLANETPLUS_LEGACY: "slanetplus",
   UNITABLE: "unitable",
   UNET: "unet",
   UNET_SLANET_PLUS: "unet_slanet_plus",
@@ -36,20 +37,35 @@ export class RapidTableInput {
    * @param {object|null} [params.ocrParams]
    */
   constructor({
-    modelType = ModelType.PPSTRUCTURE_CH,
+    model_type = null,
+    modelType = null,
+    model_dir_or_path = null,
     modelDirOrPath = null,
-    engineType = EngineType.ONNXRUNTIME,
+    engine_type = null,
+    engineType = null,
+    engine_cfg = null,
     engineCfg = null,
     useOcr = false,
     ocrParams = null,
   } = {}) {
-    this.modelType = modelType;
-    this.modelDirOrPath = modelDirOrPath;
-    this.engineType = engineType;
-    this.engineCfg = engineCfg;
+    this.modelType = normalizeTableModelType(modelType ?? model_type ?? ModelType.UNET_SLANET_PLUS);
+    this.model_type = this.modelType;
+    this.modelDirOrPath = modelDirOrPath ?? model_dir_or_path;
+    this.model_dir_or_path = this.modelDirOrPath;
+    this.engineType = engineType ?? engine_type ?? EngineType.ONNXRUNTIME;
+    this.engine_type = this.engineType;
+    this.engineCfg = engineCfg ?? engine_cfg;
+    this.engine_cfg = this.engineCfg;
     this.useOcr = useOcr;
     this.ocrParams = ocrParams;
   }
+}
+
+export function normalizeTableModelType(modelType) {
+  if (modelType === ModelType.SLANETPLUS_LEGACY) return ModelType.SLANETPLUS;
+  if (modelType === "slanetplus") return ModelType.SLANETPLUS;
+  if (modelType === "slanet_plus") return ModelType.SLANETPLUS;
+  return modelType;
 }
 
 /**

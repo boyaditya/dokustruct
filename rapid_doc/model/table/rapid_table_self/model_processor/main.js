@@ -3,14 +3,14 @@
 // ModelProcessor downloads single or multiple model files (UNITABLE needs multiple files).
 
 import { DownloadFile, DownloadFileInput } from "../utils/download_file.js";
-import { ModelType } from "../utils/typings.js";
+import { ModelType, normalizeTableModelType } from "../utils/typings.js";
 
 // Models are served locally from public/models/ (Vite static assets).
 // Run `python scripts/copy-models-to-public.py` to populate public/models/.
 // SHA-256 disabled (null) to avoid cache mismatch issues during development
 const MODEL_URLS = {
   [ModelType.SLANETPLUS]: {
-    modelUrl: '/models/table/slanet-plus.onnx',
+    modelUrl: '/models/table/slanet-plus.onnx?v=ort-shape-fix-1',
     sha256: null, // Disabled for development
   },
   [ModelType.UNET]: {
@@ -31,7 +31,8 @@ const MODEL_URLS = {
     sha256: null, // Disabled for development
   },
   [ModelType.Q_CLS]: {
-    modelUrl: '/models/table/table_cls/q_cls.onnx',
+    modelUrl: '/models/table/q_cls.onnx',
+    fallbackUrls: ['/models/table/table_cls/q_cls.onnx'],
     sha256: null, // Disabled for development
   },
   [ModelType.PPSTRUCTURE_CH]: {
@@ -63,7 +64,8 @@ export class ModelProcessor {
       return modelDirOrPath instanceof ArrayBuffer ? new Uint8Array(modelDirOrPath) : modelDirOrPath;
     }
 
-    const modelDef = MODEL_URLS[modelType];
+    const normalizedModelType = normalizeTableModelType(modelType);
+    const modelDef = MODEL_URLS[normalizedModelType];
     if (!modelDef) throw new Error(`ModelProcessor: no URL config for model type '${modelType}'`);
 
     // Multi-file model (e.g., UNITABLE)
@@ -75,8 +77,16 @@ export class ModelProcessor {
     }
 
     // Single file model
-    const url = modelDirOrPath ?? modelDef.modelUrl;
-    return DownloadFile.run(new DownloadFileInput({ url, sha256: modelDef.sha256 }), onProgress);
+    const candidates = modelDirOrPath ? [modelDirOrPath] : [modelDef.modelUrl, ...(modelDef.fallbackUrls ?? [])];
+    let lastErr = null;
+    for (const url of candidates) {
+      try {
+        return await DownloadFile.run(new DownloadFileInput({ url, sha256: modelDef.sha256 }), onProgress);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr ?? new Error(`ModelProcessor: failed to load model type '${modelType}'`);
   }
 }
 

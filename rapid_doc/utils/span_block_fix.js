@@ -114,6 +114,35 @@ export function fixDiscardedBlock(discardedBlockWithSpans) {
 }
 
 /**
+ * Determine if a text block should be treated as vertical text based on span ratios.
+ * PORTING NOTE: is_vertical_text_block_by_spans → isVerticalTextBlockBySpans
+ *
+ * @param {Array<object>} spans
+ * @returns {boolean}
+ */
+export function isVerticalTextBlockBySpans(spans) {
+  let validSpanCount = 0;
+  let verticalSpanCount = 0;
+
+  for (const span of spans ?? []) {
+    const bbox = span?.bbox;
+    if (!bbox || bbox.length < 4) continue;
+
+    const spanWidth = bbox[2] - bbox[0];
+    const spanHeight = bbox[3] - bbox[1];
+    if (spanWidth <= 0 || spanHeight <= 0) continue;
+
+    validSpanCount++;
+    if (spanHeight / spanWidth > VERTICAL_SPAN_HEIGHT_TO_WIDTH_RATIO_THRESHOLD) {
+      verticalSpanCount++;
+    }
+  }
+
+  if (validSpanCount === 0) return false;
+  return verticalSpanCount / validSpanCount > VERTICAL_SPAN_IN_BLOCK_THRESHOLD;
+}
+
+/**
  * Convert spans in a text block into structured lines.
  * PORTING NOTE: fix_text_block(block) → fixTextBlock(block)
  *
@@ -129,20 +158,9 @@ export function fixTextBlock(block) {
   }
 
   const spans = block.spans ?? [];
-  const totalSpanCount = spans.length;
-
-  // Detect vertical text blocks
-  const verticalSpanCount = spans.filter(span => {
-    const [x0, y0, x1, y1] = span.bbox;
-    const w = x1 - x0;
-    const h = y1 - y0;
-    return w > 0 && h / w > VERTICAL_SPAN_HEIGHT_TO_WIDTH_RATIO_THRESHOLD;
-  }).length;
-
-  const verticalRatio = totalSpanCount > 0 ? verticalSpanCount / totalSpanCount : 0;
 
   let sortBlockLines;
-  if (verticalRatio > VERTICAL_SPAN_IN_BLOCK_THRESHOLD) {
+  if (isVerticalTextBlockBySpans(spans)) {
     const blockLines = mergeSpansToVerticalLine(spans);
     sortBlockLines = verticalLineSortSpansFromTopToBottom(blockLines);
   } else {

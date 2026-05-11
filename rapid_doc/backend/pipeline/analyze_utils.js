@@ -6,6 +6,7 @@
 
 import { AtomModelSingleton } from "./model_init.js";
 import { AtomicModel } from "./model_list.js";
+import { normalizeToIntBbox } from "../../utils/bbox_utils.js";
 import { CategoryId } from "../../utils/enum_class.js";
 import { cropImg } from "../../utils/model_utils.js";
 import {
@@ -22,6 +23,53 @@ import { rotateImage } from "../../utils/boxbase.js";
 export { extractTableFillImage } from "../../utils/span_pre_proc.js";
 
 const RESOLUTION_GROUP_STRIDE = 64;
+
+// ---------------------------------------------------------------------------
+// Helper: Apply mask boxes to image
+// ---------------------------------------------------------------------------
+
+/**
+ * Mask regions (e.g., formulas) by filling with white (255).
+ * Prevents OCR from detecting text inside masked regions.
+ * PORTING NOTE: _apply_mask_boxes_to_image(...) → applyMaskBoxesToImage(...)
+ * 
+ * @param {cv.Mat} bgrMat - Input BGR image
+ * @param {object[]|null} maskBoxes - List of boxes to mask (with bbox property)
+ * @returns {cv.Mat} Masked image (new Mat if masks applied, original if no masks)
+ */
+export function applyMaskBoxesToImage(bgrMat, maskBoxes) {
+  if (!maskBoxes || maskBoxes.length === 0) {
+    return bgrMat;
+  }
+
+  const maskedMat = bgrMat.clone();
+  const imageH = maskedMat.rows;
+  const imageW = maskedMat.cols;
+
+  for (const maskBox of maskBoxes) {
+    const bbox = maskBox.bbox;
+    if (!bbox) continue;
+
+    const intBbox = normalizeToIntBbox(bbox, [imageH, imageW]);
+    if (!intBbox) continue;
+
+    const [x0, y0, x1, y1] = intBbox;
+    const width = x1 - x0;
+    const height = y1 - y0;
+    
+    if (width <= 0 || height <= 0) continue;
+
+    try {
+      const roi = maskedMat.roi(new cv.Rect(x0, y0, width, height));
+      roi.setTo(new cv.Scalar(255, 255, 255, 255)); // Fill white
+      roi.delete();
+    } catch (e) {
+      console.warn(`[applyMaskBoxesToImage] Failed to mask region [${x0},${y0},${x1},${y1}]:`, e);
+    }
+  }
+
+  return maskedMat;
+}
 
 // ---------------------------------------------------------------------------
 // OCR-det
@@ -48,6 +96,11 @@ export async function extractTextFromPdf(ocrResAllPage, pdfDictList, scaleList) 
 
     for (const ocrResDict of textList) {
       if (ocrResDict.ocr_enable) continue;
+      const rotateLabel = pageDict?.rotate_label;
+      if (rotateLabel === "90" || rotateLabel === "180" || rotateLabel === "270") {
+        ocrResDict.ocr_enable = true;
+        continue;
+      }
 
       for (const res of ocrResDict.ocr_res_list) {
         const { newImage, usefulList } = cropImg(res, ocrResDict.np_img, 50, 50);
@@ -107,9 +160,12 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
         usefulList
       );
 
+      // Apply mask to formula regions before OCR detection
+      const detImage = applyMaskBoxesToImage(bgrImage, adjustedMfdetrecRes);
+
       allCroppedInfo.push([
-        bgrImage, usefulList, ocrResDict, res,
-        adjustedMfdetrecRes, ocrResDict.lang, ocrEnable,
+        bgrImage, detImage, usefulList, ocrResDict,
+        adjustedMfdetrecRes, ocrResDict.lang, res, ocrEnable,
       ]);
     }
   }
@@ -135,9 +191,10 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
     // Group by resolution (padded to stride multiples)
     const resolutionGroups = {};
     for (const info of langCropList) {
-      const { rows: h, cols: w } = info[0]; // cv.Mat or {rows, cols}
-      const imgH = h || (info[0].height || 0);
-      const imgW = w || (info[0].width || 0);
+      const croppedImg = info[1]; // detImage
+      const { rows: h, cols: w } = croppedImg; // cv.Mat or {rows, cols}
+      const imgH = h || (croppedImg.height || 0);
+      const imgW = w || (croppedImg.width || 0);
       const targetH = Math.ceil(imgH / RESOLUTION_GROUP_STRIDE) * RESOLUTION_GROUP_STRIDE;
       const targetW = Math.ceil(imgW / RESOLUTION_GROUP_STRIDE) * RESOLUTION_GROUP_STRIDE;
       const key = `${targetH},${targetW}`;
@@ -149,7 +206,7 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
 
       // Pad and collect batch images
       const batchImages = groupCrops.map(info => {
-        const img = info[0];
+        const img = info[1]; // detImage (masked)
         return padImageTo(img, targetH, targetW);
       });
 
@@ -163,7 +220,7 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
 
       for (let i = 0; i < groupCrops.length; i++) {
         const info = groupCrops[i];
-        const [bgr, usefulList, ocrResDict, res, adjustedMfdetrecRes, _lang, ocrEnable] = info;
+        const [bgrImage, detImage, usefulList, ocrResDict, adjustedMfdetrecRes, _lang, res, ocrEnable] = info;
         // detBatchPredict returns { boxes, elapse } objects — destructure by name.
         const { boxes: dtBoxes } = batchResults[i];
 
@@ -181,11 +238,15 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
           if (dtBoxesFinal.length) {
             const ocrRes = dtBoxesFinal.map(box => Array.isArray(box.tolist?.()) ? box.tolist() : box);
             const ocrResultList = getOcrResultList(
-              ocrRes, usefulList, ocrEnable, bgr, _lang,
+              ocrRes, usefulList, ocrEnable, bgrImage, _lang,
               res.original_label, res.original_order
             );
             ocrResDict.layout_res.push(...ocrResultList);
           }
+        }
+
+        if (detImage !== bgrImage && typeof cv !== 'undefined' && detImage instanceof cv.Mat) {
+          detImage.delete();
         }
       }
     }
@@ -323,23 +384,60 @@ export async function processSingleTable(
     enable_merge_det_boxes: false,
   });
 
-  // Rotation detection
-  const mostAngle = Number(txtMostAngleExtractTable(pageDict, tableResDict, Number(scale)) || 0);
-  if (mostAngle === 90 || mostAngle === 270) {
-    rotateImage(tableResDict, mostAngle);
-  }
+  // Apply mask to formula regions before OCR detection
+  const detImage = adjustedMfdetrecRes && adjustedMfdetrecRes.length > 0
+    ? applyMaskBoxesToImage(tableResDict.table_img, adjustedMfdetrecRes)
+    : tableResDict.table_img;
 
-  const ocrResRaw = await ocrModel.ocr(tableResDict.table_img, {
-    mfd_res: adjustedMfdetrecRes, 
+  const ocrResRaw = await ocrModel.ocr(detImage, {
+    mfdRes: adjustedMfdetrecRes, 
     rec: false,
     enableMergeDetBoxes: false,
   });
-  const detRes = (Array.isArray(ocrResRaw) && ocrResRaw.length > 0) ? (ocrResRaw[0] || []) : [];
+  let detRes = (Array.isArray(ocrResRaw) && ocrResRaw.length > 0) ? (ocrResRaw[0] || []) : [];
+
+  // Clean up masked image if created
+  if (detImage !== tableResDict.table_img && typeof cv !== 'undefined' && detImage instanceof cv.Mat) {
+    detImage.delete();
+  }
+
+  let angles = [];
+  let rotateLabel = "0";
+  const pdfNotRotate = !["90", "180", "270"].includes(String(pageDict?.rotate_label ?? "0"));
+  if (pdfNotRotate) {
+    const mostAngle = Number(txtMostAngleExtractTable(pageDict, tableResDict, Number(scale)) || 0);
+    if (mostAngle) {
+      rotateLabel = String(mostAngle);
+      angles = [mostAngle];
+    }
+  }
+  if (!angles.length) {
+    const imgOrientationClsModel = await atomModelManager.getAtomModel(AtomicModel.ImgOrientationCls);
+    rotateLabel = await imgOrientationClsModel.predict(tableResDict.table_img, detRes);
+  }
+  if (rotateLabel === "90" || rotateLabel === "270") {
+    rotateImage(tableResDict, rotateLabel);
+    const rotatedDetImage = adjustedMfdetrecRes && adjustedMfdetrecRes.length > 0
+      ? applyMaskBoxesToImage(tableResDict.table_img, adjustedMfdetrecRes)
+      : tableResDict.table_img;
+    try {
+      const rotatedOcrResRaw = await ocrModel.ocr(rotatedDetImage, {
+        mfdRes: adjustedMfdetrecRes,
+        rec: false,
+        enableMergeDetBoxes: false,
+      });
+      detRes = (Array.isArray(rotatedOcrResRaw) && rotatedOcrResRaw.length > 0) ? (rotatedOcrResRaw[0] || []) : [];
+    } finally {
+      if (rotatedDetImage !== tableResDict.table_img && typeof cv !== 'undefined' && rotatedDetImage instanceof cv.Mat) {
+        rotatedDetImage.delete();
+      }
+    }
+  }
 
   let ocrResult = [];
 
   // Try PDF text extraction first
-  if (!tableForceOcr && !tableResDict.ocr_enable && mostAngle === 0) {
+  if (!tableForceOcr && !tableResDict.ocr_enable && rotateLabel === "0" && pdfNotRotate) {
     ocrResult = await extractTableTextFromPdf(tableResDict, pageDict, scale, detRes, usefulList, tableUseWordBox);
   }
 
@@ -396,7 +494,8 @@ export async function processSingleTable(
           fillImageRes: Array.isArray(fillImageRes) ? fillImageRes : [], 
           mfdRes: Array.isArray(adjustedMfdetrecRes) ? adjustedMfdetrecRes : [], 
           skipTextInImage, 
-          useImg2table 
+          useImg2table,
+          useCompareTable: tableConfig?.use_compare_table ?? false,
         }
       );
       htmlCode = tableResult ? tableResult.html : null;

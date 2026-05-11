@@ -14,7 +14,7 @@ import { AtomModelSingleton } from "./model_init.js";
 import { AtomicModel } from "./model_list.js";
 import { paraSplit } from "./para_split.js";
 import { MagicModel } from "./pipeline_magic_model.js";
-import { crossPageTableMerge } from "../utils.js";
+import { crossPageTableMerge } from "../utils/utils.js";
 import { getDevice, getFormulaEnable } from "../../utils/config_reader.js";
 import { ContentType } from "../../utils/enum_class.js";
 import { prepareBlockBboxes, processGroups } from "../../utils/block_pre_proc.js";
@@ -132,7 +132,8 @@ export async function pageModelInfoToPageInfo(
   // Filter spans
   spans = removeOutsideSpans(spans, allBboxes, allDiscardedBlocks);
   [spans] = removeOverlapsLowConfidenceSpans(spans);
-  // Python parity: remove_overlaps_min_spans is disabled in pipeline
+  // NEW 0.9.4: Re-enable overlap removal (was disabled in 0.9.1)
+  [spans] = removeOverlapsMinSpans(spans);
 
   // Assign spans by mode
   if (use_vl_ocr) {

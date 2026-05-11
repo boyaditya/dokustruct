@@ -178,31 +178,86 @@ export async function cutImage(span, oriImageList, extractOriginalImage, extract
  * @returns {OffscreenCanvas}
  */
 export function getCropImg(bbox, canvas, scale = 2) {
-  const [x0, y0, x1, y1] = bbox.map(v => Math.round(v * scale));
+  let [x0, y0, x1, y1] = bbox.map(v => Math.round(v * scale));
+  x0 = Math.max(0, Math.min(canvas.width, x0));
+  y0 = Math.max(0, Math.min(canvas.height, y0));
+  x1 = Math.max(0, Math.min(canvas.width, x1));
+  y1 = Math.max(0, Math.min(canvas.height, y1));
+  if (x1 <= x0 || y1 <= y0) {
+    const out = new OffscreenCanvas(1, 1);
+    const ctx = out.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, 1, 1);
+    return out;
+  }
   const w = Math.max(1, x1 - x0);
   const h = Math.max(1, y1 - y0);
   const out = new OffscreenCanvas(w, h);
-  const ctx = out.getContext('2d');
+  const ctx = out.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(canvas, x0, y0, w, h, 0, 0, w, h);
   return out;
 }
 
 /**
  * Crop a region from a canvas as a cv.Mat.
- * PORTING NOTE: get_crop_np_img(bbox, input_img, scale) → getCropNpImg(bbox, canvas, scale)
+ * PORTING NOTE: get_crop_np_img(bbox, input_img, scale, return_list) → getCropNpImg(bbox, canvas, scale, returnList)
  *
- * @param {number[]} bbox
- * @param {OffscreenCanvas} canvas
- * @param {number} [scale=2]
- * @returns {any} cv.Mat (RGBA)
+ * @param {number[]} bbox - [x0, y0, x1, y1]
+ * @param {OffscreenCanvas|cv.Mat} canvas - Input image
+ * @param {number} [scale=2] - Scale factor
+ * @param {boolean} [returnList=false] - If true, return {mat, usefulList}
+ * @returns {cv.Mat|{mat: cv.Mat, usefulList: number[]}} cv.Mat or {mat, usefulList}
  */
-export function getCropNpImg(bbox, canvas, scale = 2) {
-  const cropped = getCropImg(bbox, canvas, scale);
-  const ctx = cropped.getContext('2d');
-  const imageData = ctx.getImageData(0, 0, cropped.width, cropped.height);
-  // eslint-disable-next-line no-undef
-  const mat = cv.matFromImageData(imageData);
+export function getCropNpImg(bbox, canvas, scale = 2, returnList = false) {
+  let scaleBbox = [
+    Math.floor(bbox[0] * scale),
+    Math.floor(bbox[1] * scale),
+    Math.floor(bbox[2] * scale),
+    Math.floor(bbox[3] * scale),
+  ];
+
+  let mat;
+  if (typeof cv !== 'undefined' && canvas instanceof cv.Mat) {
+    // Input is already a cv.Mat
+    scaleBbox = clampBboxToSize(scaleBbox, canvas.cols, canvas.rows);
+    const [cropXmin, cropYmin, cropXmax, cropYmax] = scaleBbox;
+    const width = cropXmax - cropXmin;
+    const height = cropYmax - cropYmin;
+    
+    if (width <= 0 || height <= 0) {
+      mat = new cv.Mat(0, 0, typeof canvas.type === 'function' ? canvas.type() : cv.CV_8UC3);
+    } else {
+      const roi = canvas.roi(new cv.Rect(cropXmin, cropYmin, width, height));
+      mat = roi.clone();
+      roi.delete();
+    }
+  } else {
+    // Input is canvas/OffscreenCanvas
+    scaleBbox = clampBboxToSize(scaleBbox, canvas.width, canvas.height);
+    const cropped = getCropImg(bbox, canvas, scale);
+    const ctx = cropped.getContext('2d', { willReadFrequently: true });
+    const imageData = ctx.getImageData(0, 0, cropped.width, cropped.height);
+    mat = cv.matFromImageData(imageData);
+  }
+
+  if (returnList) {
+    const [cropXmin, cropYmin, cropXmax, cropYmax] = scaleBbox;
+    const cropNewHeight = mat.rows;
+    const cropNewWidth = mat.cols;
+    const usefulList = [0, 0, cropXmin, cropYmin, cropXmax, cropYmax, cropNewWidth, cropNewHeight];
+    return { mat, usefulList };
+  }
+
   return mat;
+}
+
+function clampBboxToSize(bbox, width, height) {
+  let [x0, y0, x1, y1] = bbox.map(v => Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : 0);
+  x0 = Math.max(0, Math.min(width, x0));
+  y0 = Math.max(0, Math.min(height, y0));
+  x1 = Math.max(0, Math.min(width, x1));
+  y1 = Math.max(0, Math.min(height, y1));
+  return [x0, y0, x1, y1];
 }
 
 /**

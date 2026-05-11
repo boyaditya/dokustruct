@@ -21,12 +21,16 @@ import {
   extractTableFillImage,
 } from "./analyze_utils.js";
 import { AtomModelSingleton } from "./model_init.js";
-import { removeLayoutInOriImages, filterOverlapBoxes } from "../utils.js";
+import { removeLayoutInOriImages, filterOverlapBoxes } from "../utils/utils.js";
+import { normalizeToIntBbox } from "../../utils/bbox_utils.js";
 import { checkboxPredict } from "../../utils/checkbox_det_cls.js";
 import { getFormulaEnable, getTableEnable } from "../../utils/config_reader.js";
 import { CategoryId } from "../../utils/enum_class.js";
 import { cropImg, getResListFromLayoutRes, cleanVram, toMatBgr } from "../../utils/model_utils.js";
+import { getCropNpImg } from "../../utils/pdf_image_tools.js";
 import { extractTableFillImage as _extractTableFillImage } from "../../utils/span_pre_proc.js";
+import { AtomicModel } from "./model_list.js";
+import { getRotateImage, restorePoly } from "../../utils/boxbase.js";
 
 /**
  * Batch analysis processor — orchestrates layout, formula, OCR, and table models.
@@ -70,7 +74,12 @@ export class BatchAnalyze {
     this.useDetMode = this.ocrConfig.use_det_mode || "auto";
     this.ocrDetBaseBatchSize = this.ocrConfig["Det.rec_batch_num"] || 1;
     this.sealEnable = this.ocrConfig.seal_enable ?? true;
+    this.useDocOrientationClassify =
+      this.layoutConfig.use_doc_orientation_classify ??
+      this.layoutConfig.useDocOrientationClassify ??
+      true;
     this.useCustomOcr = false;
+    this.useCustomTable = false;
 
     this.layoutBaseBatchSize = this.layoutConfig.batch_num || 1;
 
@@ -134,6 +143,8 @@ export class BatchAnalyze {
 
     this.useCustomOcr = typeof this.model.ocrModel?.batchPredict === "function" &&
                         !("ocr" in this.model.ocrModel);
+    this.useCustomTable = !!this.tableConfig.custom_model &&
+                          typeof this.model.tableModel?.batchPredict === "function";
 
     const pdfDictList = imagesWithExtraInfo.map(([,,,, pdfDict]) => pdfDict);
     const scaleList = imagesWithExtraInfo.map(([, scale]) => scale);
@@ -144,6 +155,27 @@ export class BatchAnalyze {
     const matResults = imagesWithExtraInfo.map(([image]) => toMatBgr(image));
     const npImages   = matResults.map(r => r.mat);
     const ownedMats  = matResults.map(r => r.owned);
+    const imgOriOrientationList = [];
+
+    if (this.useDocOrientationClassify) {
+      const atomModelManager = AtomModelSingleton.getInstance();
+      const imgOrientationClsModel = await atomModelManager.getAtomModel(
+        AtomicModel.ImgOrientationCls
+      );
+      for (let i = 0; i < npImages.length; i++) {
+        const npImg = npImages[i];
+        const h = npImg.rows;
+        const w = npImg.cols;
+        const rotateLabel = await imgOrientationClsModel.predict(npImg);
+        if (rotateLabel === "90" || rotateLabel === "270") {
+          const rotated = getRotateImage(npImg, rotateLabel);
+          if (rotated !== npImg && ownedMats[i]) npImg.delete();
+          npImages[i] = rotated;
+        }
+        pdfDictList[i].rotate_label = rotateLabel;
+        imgOriOrientationList.push([h, w, rotateLabel]);
+      }
+    }
 
     // 1. Layout detection
     const tLayout0 = performance.now();
@@ -183,6 +215,22 @@ export class BatchAnalyze {
     const tPost0 = performance.now();
     await runOcrRecPostprocess(imagesLayoutRes, this.ocrConfig);
     stageTimings.postprocessing = performance.now() - tPost0;
+
+    if (this.sealEnable) {
+      await this._runSealOcr(npImages, imagesLayoutRes);
+    }
+
+    if (imgOriOrientationList.length) {
+      for (let index = 0; index < imagesLayoutRes.length; index++) {
+        const [h, w, rotateLabel] = imgOriOrientationList[index];
+        for (const layoutRe of imagesLayoutRes[index]) {
+          layoutRe.rotate_label = rotateLabel;
+          if (rotateLabel === "90" || rotateLabel === "270") {
+            layoutRe.poly = restorePoly(layoutRe.poly, rotateLabel, w, h);
+          }
+        }
+      }
+    }
 
     // Release any cv.Mat objects that we created from OffscreenCanvas/ImageBitmap
     for (let i = 0; i < npImages.length; i++) {
@@ -267,19 +315,52 @@ export class BatchAnalyze {
 
       // Table regions
       for (const tableRes of tableResList) {
-        const { newImage: tableImg, usefulList } = cropImg(tableRes, npImg);
-        const { newImage: rectTableImg } = cropImg(tableRes, npImg, undefined, undefined, { layoutShapeMode: 'rect' });
-        tableResAllPage.push({
-          table_res: tableRes,
-          lang: _lang,
-          table_img: tableImg,
-          rect_table_img: rectTableImg,
-          single_page_mfdetrec_res: formulaResList,
-          checkbox_res: checkboxRes,
-          useful_list: usefulList,
-          ocr_enable: ocrEnable,
-          page_idx: index,
-        });
+        try {
+          // New implementation: use scale=5 for better table quality
+          const poly = tableRes.poly;
+          let tableImg, usefulList;
+
+          if (!poly || poly.length < 6) {
+            tableImg = new cv.Mat(0, 0, cv.CV_8UC3);
+            usefulList = [];
+          } else {
+            let bbox = normalizeToIntBbox(poly, [npImg.rows, npImg.cols]);
+            const scale = 5;
+            bbox = bbox ? bbox.map(v => v / scale) : null;
+
+            const intBbox = normalizeToIntBbox(bbox);
+
+            if (!intBbox) {
+              tableImg = new cv.Mat(0, 0, cv.CV_8UC3);
+              usefulList = [];
+            } else {
+              const result = getCropNpImg(intBbox, npImg, scale, true); // return_list=true
+              tableImg = result.mat;
+              usefulList = result.usefulList;
+              if (!tableImg || tableImg.cols <= 0 || tableImg.rows <= 0) {
+                if (tableImg && typeof tableImg.delete === "function" && !tableImg.isDeleted?.()) tableImg.delete();
+                const fallback = cropImg(tableRes, npImg, 0, 0, { layoutShapeMode: "rect" });
+                tableImg = fallback.newImage;
+                usefulList = fallback.usefulList;
+              }
+            }
+          }
+
+          tableResAllPage.push({
+            table_res: tableRes,
+            lang: _lang,
+            table_img: tableImg,
+            rect_table_img: tableImg, // Same now (no separate rect crop)
+            single_page_mfdetrec_res: formulaResList,
+            checkbox_res: checkboxRes,
+            useful_list: usefulList,
+            ocr_enable: ocrEnable,
+            page_idx: index,
+          });
+        } catch (err) {
+          console.warn('[BatchAnalyze] table crop skipped:', formatPipelineError(err));
+          tableRes.html = "";
+        }
       }
 
       // Formula regions
@@ -389,7 +470,7 @@ export class BatchAnalyze {
 
   async _runTableRecognition(tableResAllPage, pdfDictList, scaleList) {
     // VL/custom table model
-    if (this.useCustomOcr && typeof this.model.tableModel?.batchPredict === "function") {
+    if (this.useCustomTable) {
       const tableImgs = [];
       const fillImageResList = [];
 
@@ -440,14 +521,83 @@ export class BatchAnalyze {
       const scale = scaleList[pageIdx];
 
       for (const tableResDict of tableList) {
-        tableResDict.table_img = tableResDict.rect_table_img;
-        await processSingleTable(
-          tableResDict, pageDict, scale, atomModelManager,
-          this.tableConfig, this.ocrConfig
-        );
+        try {
+          tableResDict.table_img = tableResDict.rect_table_img;
+          await processSingleTable(
+            tableResDict, pageDict, scale, atomModelManager,
+            this.tableConfig, this.ocrConfig
+          );
+        } catch (err) {
+          console.warn('[BatchAnalyze] table recognition skipped:', formatPipelineError(err));
+          if (tableResDict?.table_res) {
+            delete tableResDict.table_res.layout_image_list;
+            tableResDict.table_res.html = tableResDict.table_res.html ?? "";
+          }
+        }
         done++;
         if (done % 5 === 0) console.info(`[BatchAnalyze] Table Predict ${done}/${total}`);
       }
     }
+  }
+
+  async _runSealOcr(npImages, imagesLayoutRes) {
+    const sealOcrItems = [];
+    for (let index = 0; index < npImages.length; index++) {
+      const npImg = npImages[index];
+      for (const layoutRe of imagesLayoutRes[index]) {
+        if (layoutRe.original_label === "seal") {
+          const { newImage: sealImg } = cropImg(layoutRe, npImg);
+          sealOcrItems.push([sealImg, layoutRe]);
+        }
+      }
+    }
+
+    if (!sealOcrItems.length) return;
+
+    let sealOcrModel = null;
+    try {
+      if (this.useCustomOcr && typeof this.model.ocrModel?.batchPredict === "function") {
+        const sealTexts = await this.model.ocrModel.batchPredict(
+          sealOcrItems.map(([img]) => img),
+          { is_seal: true, isSeal: true }
+        );
+        for (let i = 0; i < sealOcrItems.length; i++) {
+          const [, layoutRe] = sealOcrItems[i];
+          layoutRe.text = String(sealTexts?.[i] ?? "").split("\n").filter(Boolean);
+        }
+        return;
+      }
+
+      const atomModelManager = AtomModelSingleton.getInstance();
+      sealOcrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
+        is_seal: true,
+        ocr_config: this.ocrConfig,
+      });
+      for (const [sealCropBgr, layoutRe] of sealOcrItems) {
+        const sealOcrRes = await sealOcrModel.ocr(sealCropBgr, { det: true, rec: true });
+        const pairs = Array.isArray(sealOcrRes?.[0]) ? sealOcrRes[0] : [];
+        const sealTexts = [];
+        for (const sealItem of pairs) {
+          const recResult = sealItem?.[1];
+          const recText = Array.isArray(recResult) ? recResult[0] : "";
+          if (recText) sealTexts.push(recText);
+        }
+        if (sealTexts.length) layoutRe.text = sealTexts;
+      }
+    } finally {
+      for (const [sealImg] of sealOcrItems) {
+        if (sealImg && typeof sealImg.delete === "function" && !sealImg.isDeleted?.()) sealImg.delete();
+      }
+    }
+  }
+}
+
+function formatPipelineError(err) {
+  if (err instanceof Error) return err.stack || err.message;
+  if (typeof err === "number") return `native runtime error code ${err}`;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
   }
 }

@@ -149,10 +149,20 @@ export function removeOverlapsMinSpans(spans) {
     for (let j = 0; j < spans.length; j++) {
       if (i === j) continue;
       if (droppedSpans.includes(spans[i]) || droppedSpans.includes(spans[j])) continue;
+      
       const overlapBox = getMinboxIfOverlapByRatio(spans[i].bbox, spans[j].bbox, 0.65);
       if (overlapBox !== null) {
+        // NEW: Protect seal labels from removal
+        if (spans[i].original_label === "seal" || spans[j].original_label === "seal") {
+          continue;
+        }
+        
         const toRemove = spans.find(s => JSON.stringify(s.bbox) === JSON.stringify(overlapBox));
-        if (toRemove && !droppedSpans.includes(toRemove)) droppedSpans.push(toRemove);
+        
+        // NEW: Don't remove if the span to remove is a seal
+        if (toRemove && !droppedSpans.includes(toRemove) && toRemove.original_label !== "seal") {
+          droppedSpans.push(toRemove);
+        }
       }
     }
   }

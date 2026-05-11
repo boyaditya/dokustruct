@@ -227,16 +227,64 @@ export function mergeAdjacentBboxes(spans, xGapRatio = 0.6, yToleranceRatio = 0.
  */
 export function rotateImage(imgInfo, angle) {
   if (typeof cv === 'undefined') return;
-  if (angle === 270) {
+  const label = String(angle);
+  if (label === "270") {
     const dst = new cv.Mat();
     cv.rotate(imgInfo.table_img, dst, cv.ROTATE_90_CLOCKWISE);
     imgInfo.table_img.delete();
     imgInfo.table_img = dst;
-  } else if (angle === 90) {
+  } else if (label === "90") {
     const dst = new cv.Mat();
     cv.rotate(imgInfo.table_img, dst, cv.ROTATE_90_COUNTERCLOCKWISE);
     imgInfo.table_img.delete();
     imgInfo.table_img = dst;
   }
   // 180 and 0 → no-op
+}
+
+export function getRotateImage(img, angle) {
+  if (typeof cv === 'undefined') return img;
+  const label = String(angle);
+  if (label === "270") {
+    const dst = new cv.Mat();
+    cv.rotate(img, dst, cv.ROTATE_90_CLOCKWISE);
+    return dst;
+  }
+  if (label === "90") {
+    const dst = new cv.Mat();
+    cv.rotate(img, dst, cv.ROTATE_90_COUNTERCLOCKWISE);
+    return dst;
+  }
+  return img;
+}
+
+export function restorePoly(poly, angle, origW, origH) {
+  if (!Array.isArray(poly) || poly.length < 8) return poly;
+  const label = String(angle);
+  const [xmin, ymin, xmax, , , ymax] = poly.map(Number);
+  if (label === "0") return poly;
+
+  let newXmin;
+  let newYmin;
+  let newXmax;
+  let newYmax;
+  if (label === "90") {
+    newXmin = origW - 1 - ymax;
+    newYmin = xmin;
+    newXmax = origW - 1 - ymin;
+    newYmax = xmax;
+  } else if (label === "270") {
+    newXmin = ymin;
+    newYmin = origH - 1 - xmax;
+    newXmax = ymax;
+    newYmax = origH - 1 - xmin;
+  } else if (label === "180") {
+    newXmin = origW - 1 - xmax;
+    newYmin = origH - 1 - ymax;
+    newXmax = origW - 1 - xmin;
+    newYmax = origH - 1 - ymin;
+  } else {
+    throw new Error(`unsupported angle: ${angle}`);
+  }
+  return [newXmin, newYmin, newXmax, newYmin, newXmax, newYmax, newXmin, newYmax];
 }

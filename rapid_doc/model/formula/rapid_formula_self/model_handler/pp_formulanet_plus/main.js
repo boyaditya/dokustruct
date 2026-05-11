@@ -40,24 +40,19 @@ export class PPFormulaNetPlusModelHandler extends BaseModelHandler {
 
     // 2. Build input tensor & run inference
     const inputName = this.session.getInputNames()[0];
-    console.log(`[FormulaHandler] [1/3] Preprocess done. dims=${dims}. Starting session.run() (WASM)...`);
     const inputTensor = new ort.Tensor("float32", data, dims);
 
-    const tRun = performance.now();
     // NOTE: Formula model runs on WASM (not WebGPU) because its ONNX graph
     // contains a Loop operator (autoregressive decoder: 717 ops × ~600 iterations).
     // WebGPU dispatch overhead (~0.03ms/op) makes Loop-based models 10-20x slower
     // than WASM with SIMD. No GPU mutex needed for WASM execution.
     const outputMap = await this.session.run({ [inputName]: inputTensor });
-    console.log(`[FormulaHandler] [2/3] session.run() done in ${(performance.now()-tRun).toFixed(1)}ms.`);
 
     // 3. Postprocess (WASM output is already on CPU — no getData() needed)
     const outputName = this.session.getOutputNames()[0];
     const predTensor = outputMap[outputName];
 
-    const tPost = performance.now();
     const formulas = this.postProcessor.run(predTensor);
-    console.log(`[FormulaHandler] [3/3] postProcess done in ${(performance.now()-tPost).toFixed(1)}ms. Total=${(performance.now()-t0).toFixed(1)}ms`);
 
     const elapse = (performance.now() - t0) / 1000;
 

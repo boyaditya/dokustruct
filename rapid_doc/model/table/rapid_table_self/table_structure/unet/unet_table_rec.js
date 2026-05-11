@@ -84,15 +84,12 @@ export class UnetTableRecognition {
 
         // Match OCR to cells
         const [cellBoxDetMap] = matchOcrCell(ocrResult, polygons);
-        console.log("Matched OCR cells:", polygons.length, Object.keys(cellBoxDetMap).length);
 
         // Fill blank cells
         this.fillBlankRec(polygons, cellBoxDetMap);
 
         // Transform to intermediate format
         let tRecOcrList = this.transformRes(cellBoxDetMap, polygons, logiPoints);
-        
-        console.log("After transformRes, cells with OCR:", tRecOcrList.length);
 
         // Sort and gather OCR results per cell
         tRecOcrList = this.sortAndGatherOcrRes(tRecOcrList);

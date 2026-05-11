@@ -227,13 +227,9 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
         if (dtBoxes && dtBoxes.length > 0) {
           const dtBoxesSorted = sortedBoxes(dtBoxes);
           const dtBoxesMerged = dtBoxesSorted.length ? mergeDetBoxes(dtBoxesSorted) : [];
-          console.log(`[runOcrDetBatch] adjustedMfdetrecRes: ${adjustedMfdetrecRes?.length ?? 0} formulas, dtBoxesMerged: ${dtBoxesMerged.length} boxes`);
           const dtBoxesFinal = (dtBoxesMerged.length && adjustedMfdetrecRes?.length)
             ? updateDetBoxes(dtBoxesMerged, adjustedMfdetrecRes)
             : dtBoxesMerged;
-          if (dtBoxesFinal.length !== dtBoxesMerged.length) {
-            console.log(`[runOcrDetBatch] updateDetBoxes split: ${dtBoxesMerged.length} → ${dtBoxesFinal.length} boxes`);
-          }
 
           if (dtBoxesFinal.length) {
             const ocrRes = dtBoxesFinal.map(box => Array.isArray(box.tolist?.()) ? box.tolist() : box);
@@ -412,8 +408,12 @@ export async function processSingleTable(
     }
   }
   if (!angles.length) {
-    const imgOrientationClsModel = await atomModelManager.getAtomModel(AtomicModel.ImgOrientationCls);
-    rotateLabel = await imgOrientationClsModel.predict(tableResDict.table_img, detRes);
+    try {
+      const imgOrientationClsModel = await atomModelManager.getAtomModel(AtomicModel.ImgOrientationCls);
+      rotateLabel = await imgOrientationClsModel.predict(tableResDict.table_img, detRes);
+    } catch (e) {
+      // Orientation model unavailable or failed — keep rotateLabel = "0"
+    }
   }
   if (rotateLabel === "90" || rotateLabel === "270") {
     rotateImage(tableResDict, rotateLabel);
@@ -449,19 +449,6 @@ export async function processSingleTable(
   // Ensure ocrResult is an array
   if (!ocrResult || !Array.isArray(ocrResult)) ocrResult = [];
 
-  console.log('[processSingleTable] OCR result before table model:', {
-    ocrResultLen: ocrResult.length,
-    ocrResultType: typeof ocrResult,
-    ocrResultIsArray: Array.isArray(ocrResult),
-    ocrResultSample: ocrResult.slice(0, 3),
-    ocrResultStructure: ocrResult[0] ? {
-      hasBox: !!ocrResult[0][0],
-      hasText: !!ocrResult[0][1],
-      boxType: typeof ocrResult[0][0],
-      textType: typeof ocrResult[0][1],
-    } : null,
-  });
-
   // Get table model and run recognition
   let htmlCode = null;
   let fillImageRes = [];
@@ -481,13 +468,6 @@ export async function processSingleTable(
     }
 
     if (tableModel && typeof tableModel.predict === 'function') {
-      console.log('[processSingleTable] Calling tableModel.predict with:', {
-        hasImage: !!tableResDict.table_img,
-        ocrResultLen: ocrResult.length,
-        fillImageResLen: fillImageRes.length,
-        mfdResLen: adjustedMfdetrecRes.length,
-      });
-      
       const tableResult = await tableModel.predict(
         tableResDict.table_img, ocrResult,
         { 
@@ -499,15 +479,8 @@ export async function processSingleTable(
         }
       );
       htmlCode = tableResult ? tableResult.html : null;
-      
-      console.log('[processSingleTable] Table model result:', {
-        hasHtml: !!htmlCode,
-        htmlLen: htmlCode?.length,
-        htmlSample: htmlCode?.substring(0, 200),
-      });
     }
   } catch (err) {
-    console.error('[processSingleTable] table model error details:', err);
     console.warn('[processSingleTable] table model error:', err.message);
     if (tableResDict && tableResDict.table_res) {
       delete tableResDict.table_res.layout_image_list;
@@ -596,16 +569,7 @@ export async function extractTableTextFromPdf(tableResDict, pageDict, scale, det
  * @returns {Promise<any[]>}
  */
 export async function runTableOcr(ocrModel, bgrImage, detRes, tableUseWordBox) {
-  console.log('[runTableOcr] Input:', {
-    hasOcrModel: !!ocrModel,
-    hasImage: !!bgrImage,
-    detResLen: detRes?.length,
-    detResSample: detRes?.slice(0, 2),
-    tableUseWordBox,
-  });
-  
   if (!Array.isArray(detRes) || detRes.length === 0) {
-    console.warn('[runTableOcr] No detection results, returning empty array');
     return [];
   }
   

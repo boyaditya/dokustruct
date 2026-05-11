@@ -161,7 +161,7 @@ function createInitialState() {
     pipelineMode: 'full_analysis',
 
     // ── Parse options ──────────────────────────────────────────────────────
-    parseMethod: 'ocr',
+    parseMethod: 'auto',
     forceOcr: false,
     language: 'ch',
     useDetMode: 'auto',
@@ -177,6 +177,7 @@ function createInitialState() {
     layoutModelType: 'pp_doclayoutv2',
     layoutConfThresh: 0.5,
     layoutShapeMode: 'auto',
+    useDocOrientationClassify: true,
     markdownIgnoreLabels: [
       'number',
       'footnote',
@@ -188,9 +189,9 @@ function createInitialState() {
     ],
 
     // ── Table config ───────────────────────────────────────────────────────
-    tableModelType: 'ppstructure_zh',
+    tableModelType: 'unet_slanet_plus',
     tableForceOcr: false,
-    tableUseWordBox: true,
+    tableUseWordBox: false,
     tableFormulaEnable: false,
     tableImageEnable: false,
     skipTextInImage: true,
@@ -486,6 +487,7 @@ export class AppState {
       model_type: s.layoutModelType,
       conf_thresh: s.layoutConfThresh,
       layout_shape_mode: s.layoutShapeMode,
+      use_doc_orientation_classify: s.useDocOrientationClassify,
       markdown_ignore_labels: s.markdownIgnoreLabels,
     };
   }

@@ -1098,9 +1098,9 @@ export class PipelineAdapter {
       // Core outputs
       markdown:      sourceMarkdown,
       raw_text:      raw.raw_text    ?? raw.text_content   ?? raw.text     ?? markdownToPlainText(sourceMarkdown),
-      content_list:  raw.content_list ?? raw.contentList   ?? null,
-      middle_json:   keepMiddleJson ? (raw.middle_json  ?? raw.middleJson     ?? raw.layout_info ?? null) : null,
-      model_output:  keepModelOutput ? (raw.model_output ?? raw.modelOutput    ?? null) : null,
+      content_list:  raw.content_list ?? raw.contentList ?? raw.content_list_json ?? null,
+      middle_json:   keepMiddleJson ? (raw.middle_json  ?? raw.middleJson ?? raw.layout_info ?? null) : null,
+      model_output:  keepModelOutput ? (raw.model_output ?? raw.modelOutput ?? raw.modelJson ?? null) : null,
       layout_label_blocks: raw.layout_label_blocks ?? raw.layoutLabelBlocks ?? [],
 
       // Bbox overlays (per-page arrays)

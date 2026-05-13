@@ -4,81 +4,10 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>DocParsing - Document Intelligence</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="ui/styles/app-v2.css" />
-  
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
   
   <!-- OpenCV.js for image processing -->
   <script async src="/opencv/opencv.js"></script>
-  
-  <!-- Marked.js for Markdown rendering -->
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
-  
-  <!-- JSZip for ZIP file creation -->
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  
-  <!-- KaTeX for LaTeX formula rendering -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-  
-  <!-- JSON Viewer - Simple custom implementation -->
-  <style>
-    .json-viewer-container {
-      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-      font-size: 13px;
-      line-height: 1.6;
-      color: #24292e;
-      background: #f8f9fa;
-      padding: 16px;
-      overflow: auto;
-      height: 100%;
-    }
-    .json-viewer-container .json-key {
-      color: #0550ae;
-      font-weight: 500;
-    }
-    .json-viewer-container .json-string {
-      color: #0a3069;
-    }
-    .json-viewer-container .json-number {
-      color: #0550ae;
-    }
-    .json-viewer-container .json-boolean {
-      color: #cf222e;
-    }
-    .json-viewer-container .json-null {
-      color: #6e7781;
-    }
-    .json-lines {
-      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .json-line {
-      display: flex;
-      border-bottom: 1px solid #f0f1f3;
-    }
-    .json-line:hover {
-      background: #f8f9fa;
-    }
-    .line-number {
-      display: inline-block;
-      width: 50px;
-      text-align: right;
-      padding-right: 16px;
-      color: #8f959e;
-      user-select: none;
-      flex-shrink: 0;
-    }
-    .line-content {
-      flex: 1;
-      white-space: pre;
-    }
-  </style>
 </head>
 <body>
 
@@ -103,7 +32,7 @@
 
       <!-- Upload Button -->
       <button class="create-task-btn" id="uploadBtn">
-        <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" hidden/>
+        <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" multiple hidden/>
         <i data-lucide="plus"></i>
         <span>Upload Document</span>
       </button>
@@ -127,112 +56,14 @@
         </div>
       </div>
 
-      <!-- Processing Options (Collapsible) -->
-      <div class="options-section">
-        <button class="options-toggle" id="optionsToggle">
-          <span>Processing Options</span>
-          <i data-lucide="chevron-down" class="chevron"></i>
-        </button>
-        <div class="options-content collapsed" id="optionsContent">
-          <div class="option-item">
-            <label>Layout Model</label>
-            <select id="layoutModel">
-              <option value="v2">PP-DocLayoutV2</option>
-              <option value="v3">PP-DocLayoutV3</option>
-              <option value="plus_l">PP-DocLayout Plus L</option>
-            </select>
-          </div>
-          <div class="option-item">
-            <label>OCR Language</label>
-            <select id="ocrModel">
-              <option value="ch_v5">Chinese + English</option>
-              <option value="en_v5">English Only</option>
-            </select>
-          </div>
-          <div class="option-item checkbox-item">
-            <label>
-              <input type="checkbox" id="formulaEnable"/>
-              <span>Enable Formula Recognition</span>
-            </label>
-          </div>
-          <div class="option-item">
-            <label>Formula Model</label>
-            <select id="formulaModel">
-              <option value="pp_formulanet_plus_s">PP-FormulaNet Plus S (Fast)</option>
-              <option value="pp_formulanet_plus_m">PP-FormulaNet Plus M (Balanced)</option>
-              <option value="pp_formulanet_plus_l">PP-FormulaNet Plus L (Accurate)</option>
-            </select>
-          </div>
-          <div class="option-item checkbox-item">
-            <label>
-              <input type="checkbox" id="tableEnable"/>
-              <span>Enable Table Structure</span>
-            </label>
-          </div>
-          <div class="option-item">
-            <label>Table Model</label>
-            <select id="tableModel">
-              <option value="unet_slanet_plus">UNET + SLANet Plus</option>
-              <option value="ppstructure_zh">PP-OCR Table</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- Processing Timings (Collapsible) -->
-      <div class="options-section">
-        <button class="options-toggle" id="timingsToggle">
-          <span>Processing Timings</span>
-          <i data-lucide="chevron-down" class="chevron"></i>
-        </button>
-        <div class="options-content collapsed" id="timingsContent">
-          <div class="timing-item">
-            <span class="timing-label">Preprocessing</span>
-            <span class="timing-value" id="timingPreprocessing">-</span>
-          </div>
-          <div class="timing-item">
-            <span class="timing-label">Layout Analysis</span>
-            <span class="timing-value" id="timingLayout">-</span>
-          </div>
-          <div class="timing-item">
-            <span class="timing-label">OCR</span>
-            <span class="timing-value" id="timingOcr">-</span>
-          </div>
-          <div class="timing-item">
-            <span class="timing-label">Formula</span>
-            <span class="timing-value" id="timingFormula">-</span>
-          </div>
-          <div class="timing-item">
-            <span class="timing-label">Table</span>
-            <span class="timing-value" id="timingTable">-</span>
-          </div>
-          <div class="timing-item">
-            <span class="timing-label">Reading Order</span>
-            <span class="timing-value" id="timingReadingOrder">-</span>
-          </div>
-          <div class="timing-item">
-            <span class="timing-label">Postprocessing</span>
-            <span class="timing-value" id="timingPostprocessing">-</span>
-          </div>
-          <div class="timing-item timing-total">
-            <span class="timing-label">Total</span>
-            <span class="timing-value" id="timingTotal">-</span>
-          </div>
-        </div>
-      </div>
-
       <!-- Action Buttons -->
       <div class="action-buttons">
         <button class="btn-primary" id="startBtn" disabled>
           <i data-lucide="play"></i>
-          <span>Start Processing</span>
+          <span>Start</span>
         </button>
         <div class="btn-group">
-          <button class="btn-secondary" id="downloadBtn" disabled>
-            <i data-lucide="download"></i>
-            <span>Download</span>
-          </button>
-          <button class="btn-secondary" id="clearBtn" disabled>
+          <button class="btn-secondary" id="clearBtn" title="Clear" disabled>
             <i data-lucide="trash-2"></i>
             <span>Clear</span>
           </button>
@@ -242,56 +73,192 @@
     </div>
   </aside>
 
+  <div class="floating-panel hidden" id="settingsPanel" role="dialog" aria-label="Processing Settings">
+    <div class="panel-header">
+      <div>
+        <h2>Processing Settings</h2>
+        <p>Models and extraction options</p>
+      </div>
+      <button class="icon-btn panel-close" type="button" data-close-panel="settingsPanel" title="Close">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="panel-body compact-form" id="optionsContent">
+      <div class="option-item">
+        <label>Layout Model</label>
+        <select id="layoutModel">
+          <option value="v2">PP-DocLayoutV2</option>
+          <option value="v3">PP-DocLayoutV3</option>
+          <option value="plus_l">PP-DocLayout Plus L</option>
+        </select>
+      </div>
+      <div class="option-item">
+        <label>OCR Language</label>
+        <select id="ocrModel">
+          <option value="ch_v5">Chinese + English</option>
+          <option value="en_v5">English Only</option>
+        </select>
+      </div>
+      <div class="option-item checkbox-item">
+        <label>
+          <input type="checkbox" id="formulaEnable"/>
+          <span>Enable Formula Recognition</span>
+        </label>
+      </div>
+      <div class="option-item">
+        <label>Formula Model</label>
+        <select id="formulaModel">
+          <option value="pp_formulanet_plus_s">PP-FormulaNet Plus S (Fast)</option>
+          <option value="pp_formulanet_plus_m">PP-FormulaNet Plus M (Balanced)</option>
+          <option value="pp_formulanet_plus_l">PP-FormulaNet Plus L (Accurate)</option>
+        </select>
+      </div>
+      <div class="option-item checkbox-item">
+        <label>
+          <input type="checkbox" id="tableEnable"/>
+          <span>Enable Table Structure</span>
+        </label>
+      </div>
+      <div class="option-item">
+        <label>Table Model</label>
+        <select id="tableModel">
+          <option value="unet_slanet_plus">UNET + SLANet Plus</option>
+          <option value="ppstructure_zh">PP-OCR Table</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="floating-panel timings-panel hidden" id="timingsPanel" role="dialog" aria-label="Processing Timings">
+    <div class="panel-header">
+      <div>
+        <h2>Processing Timings</h2>
+        <p>Latest run breakdown</p>
+      </div>
+      <button class="icon-btn panel-close" type="button" data-close-panel="timingsPanel" title="Close">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="panel-body" id="timingsContent">
+      <div class="timing-item timing-total">
+        <span class="timing-label">Total</span>
+        <span class="timing-value" id="timingTotal">-</span>
+      </div>
+      <div class="timing-item">
+        <span class="timing-label">Preprocessing</span>
+        <span class="timing-value" id="timingPreprocessing">-</span>
+      </div>
+      <div class="timing-item">
+        <span class="timing-label">Layout Analysis</span>
+        <span class="timing-value" id="timingLayout">-</span>
+      </div>
+      <div class="timing-item">
+        <span class="timing-label">OCR</span>
+        <span class="timing-value" id="timingOcr">-</span>
+      </div>
+      <div class="timing-item">
+        <span class="timing-label">Formula</span>
+        <span class="timing-value" id="timingFormula">-</span>
+      </div>
+      <div class="timing-item">
+        <span class="timing-label">Table</span>
+        <span class="timing-value" id="timingTable">-</span>
+      </div>
+      <div class="timing-item">
+        <span class="timing-label">Reading Order</span>
+        <span class="timing-value" id="timingReadingOrder">-</span>
+      </div>
+      <div class="timing-item">
+        <span class="timing-label">Postprocessing</span>
+        <span class="timing-value" id="timingPostprocessing">-</span>
+      </div>
+    </div>
+  </div>
+
   <!-- MAIN CONTENT AREA -->
   <main class="rapiddoc-main">
+    <div class="workspace-toolbar">
+      <div class="workspace-toolbar-row workspace-toolbar-main">
+        <div class="workspace-title">
+          <button class="icon-btn" id="toggleSidebar" title="Toggle sidebar">
+            <i data-lucide="menu"></i>
+          </button>
+          <div class="file-info">
+            <span class="file-name" id="currentFileName"></span>
+            <span class="file-meta" id="currentFileMeta"></span>
+          </div>
+        </div>
+        <div class="workspace-actions">
+          <button class="icon-btn" id="settingsToggle" title="Processing settings" aria-pressed="false">
+            <i data-lucide="settings"></i>
+          </button>
+          <button class="icon-btn timing-toggle" id="timingsToggle" title="Processing timings" aria-pressed="false">
+            <i data-lucide="timer"></i>
+          </button>
+          <button class="icon-btn" id="overlayToggle" title="Hide overlay" aria-pressed="true">
+            <i data-lucide="eye"></i>
+          </button>
+          <div class="export-menu toolbar-export">
+            <button class="icon-btn export-toggle" id="downloadBtn" title="Download" disabled>
+              <i data-lucide="download"></i>
+            </button>
+            <div class="export-options hidden" id="exportOptions">
+              <button type="button" data-export="markdown">Markdown</button>
+              <button type="button" data-export="content">Content JSON</button>
+              <button type="button" data-export="zip">ZIP bundle</button>
+            </div>
+          </div>
+          <button class="icon-btn" id="copyMarkdown" title="Copy output">
+            <i data-lucide="copy"></i>
+          </button>
+        </div>
+      </div>
+      <div class="workspace-toolbar-row workspace-toolbar-sub">
+        <div class="viewer-controls">
+          <span class="toolbar-label">Original File</span>
+          <button class="icon-btn" id="prevPage" title="Previous page">
+            <i data-lucide="chevron-left"></i>
+          </button>
+          <span class="page-info" id="pageInfo">1 / 1</span>
+          <button class="icon-btn" id="nextPage" title="Next page">
+            <i data-lucide="chevron-right"></i>
+          </button>
+          <button class="icon-btn" id="zoomOut" title="Zoom out">
+            <i data-lucide="zoom-out"></i>
+          </button>
+          <span class="zoom-level" id="zoomLevel">30%</span>
+          <button class="icon-btn" id="zoomIn" title="Zoom in">
+            <i data-lucide="zoom-in"></i>
+          </button>
+          <button class="icon-btn" id="fitWidth" title="Fit width">
+            <i data-lucide="maximize-2"></i>
+          </button>
+        </div>
+        <div class="toolbar-tabs">
+          <button class="tab-btn active" data-tab="rendered">Markdown</button>
+          <button class="tab-btn" data-tab="content">JSON</button>
+        </div>
+      </div>
+    </div>
     
     <!-- Content Split View -->
     <div class="content-split">
       
       <!-- Left: PDF/Image Viewer -->
       <div class="viewer-pane" id="viewerPane">
-        
-        <!-- Top Toolbar (Moved here) -->
-        <div class="top-toolbar">
-          <div class="toolbar-left">
-            <button class="icon-btn" id="toggleSidebar">
-              <i data-lucide="menu"></i>
-            </button>
-            <div class="file-info">
-              <span class="file-name" id="currentFileName"></span>
-              <span class="file-meta" id="currentFileMeta"></span>
+        <div class="viewer-scroll" id="viewerScroll">
+          <div class="viewer-container" id="viewerContainer">
+            <div class="empty-viewer" id="emptyViewer">
+              <i data-lucide="file-text" style="width: 80px; height: 80px; stroke-width: 1;"></i>
+              <p>Upload a document to start</p>
+            </div>
+            <div class="page-stack" id="pageStack">
+              <div class="document-page" data-page-index="0">
+                <canvas id="pdfCanvas" style="display: none;"></canvas>
+                <div class="layout-overlay" id="layoutOverlay"></div>
+              </div>
             </div>
           </div>
-          <div class="toolbar-center">
-            <button class="icon-btn" id="zoomOut">
-              <i data-lucide="zoom-out"></i>
-            </button>
-            <span class="zoom-level" id="zoomLevel">30%</span>
-            <button class="icon-btn" id="zoomIn">
-              <i data-lucide="zoom-in"></i>
-            </button>
-            <button class="icon-btn" id="fitWidth">
-              <i data-lucide="maximize-2"></i>
-            </button>
-          </div>
-          <div class="toolbar-right">
-            <button class="icon-btn" id="prevPage">
-              <i data-lucide="chevron-left"></i>
-            </button>
-            <span class="page-info" id="pageInfo">1 / 1</span>
-            <button class="icon-btn" id="nextPage">
-              <i data-lucide="chevron-right"></i>
-            </button>
-          </div>
-        </div>
-        
-        <div class="viewer-container">
-          <div class="empty-viewer" id="emptyViewer">
-            <i data-lucide="file-text" style="width: 80px; height: 80px; stroke-width: 1;"></i>
-            <p>Upload a document to start</p>
-          </div>
-          <canvas id="pdfCanvas" style="display: none;"></canvas>
-          <div class="layout-overlay" id="layoutOverlay"></div>
         </div>
       </div>
 
@@ -302,27 +269,14 @@
 
       <!-- Right: Markdown/JSON Viewer -->
       <div class="markdown-pane" id="markdownPane">
-        <div class="markdown-toolbar">
-          <div class="toolbar-tabs">
-            <button class="tab-btn active" data-tab="rendered">Rendered</button>
-            <button class="tab-btn" data-tab="raw">Raw</button>
-            <button class="tab-btn" data-tab="json">JSON</button>
-          </div>
-          <button class="icon-btn" id="copyMarkdown">
-            <i data-lucide="copy"></i>
-          </button>
-        </div>
         <div class="markdown-content active" id="markdownContent">
           <div class="empty-markdown">
             <p>Run processing to view results</p>
           </div>
         </div>
-        <div class="raw-content" id="rawContent" style="display: none;">
-          <pre id="rawViewer"></pre>
-        </div>
-        <div class="json-content" id="jsonContent" style="display: none;">
+        <div class="json-content" id="contentJsonContent" style="display: none;">
           <div class="json-viewer-container">
-            <pre id="jsonViewer"></pre>
+            <pre id="contentJsonViewer"></pre>
           </div>
         </div>
         
@@ -336,6 +290,14 @@
               <span class="time-label">Time Elapsed:</span>
               <span class="time-value" id="timeElapsed">0s</span>
             </div>
+            <div class="progress-bar">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-percent" id="progressPercent">0%</div>
+            <button class="btn-secondary progress-cancel" id="progressCancelBtn" type="button">
+              <i data-lucide="square"></i>
+              <span>Cancel</span>
+            </button>
           </div>
         </div>
       </div>
@@ -347,13 +309,5 @@
 </div>
 
 <script type="module" src="ui/app-v2.js"></script>
-<script>
-  // Initialize Lucide icons after DOM load
-  document.addEventListener('DOMContentLoaded', () => {
-    if (typeof lucide !== 'undefined') {
-      lucide.createIcons();
-    }
-  });
-</script>
 </body>
 </html>

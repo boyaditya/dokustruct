@@ -1,3 +1,13 @@
+import JSZip from 'jszip';
+
+function resultArtifact(results, ...keys) {
+  for (const key of keys) {
+    const value = results?.[key];
+    if (value !== undefined && value !== null) return value;
+  }
+  return null;
+}
+
 /**
  * ui/utils/exportUtils.js
  * Export utilities:
@@ -142,7 +152,7 @@ export class ExportUtils {
 
   /**
    * Export a ZIP archive containing all available output files.
-   * Requires JSZip to be available globally (window.JSZip).
+   * Uses the bundled JSZip dependency.
    * Falls back to individual downloads if JSZip not available.
    *
    * @param {import('../state/appState.js').AppState} state
@@ -155,14 +165,9 @@ export class ExportUtils {
     const stem = file ? file.name.replace(/\.[^.]+$/, '') : 'output';
 
     // ── Without JSZip: individual downloads ───────────────────────────────
-    if (!window.JSZip) {
-      console.warn('[exportUtils] JSZip not available — falling back to individual downloads.');
-      this._downloadIndividual(state, results, stem);
-      return;
-    }
-
     // ── With JSZip ────────────────────────────────────────────────────────
-    const zip = new window.JSZip();
+    const zip = new JSZip();
+    const contentList = resultArtifact(results, 'content_list', 'contentList', 'content_list_json');
 
     if (results.markdown) {
       zip.file(`${stem}.md`, results.markdown);
@@ -170,14 +175,8 @@ export class ExportUtils {
     if (results.raw_text) {
       zip.file(`${stem}_raw.txt`, results.raw_text);
     }
-    if (results.content_list) {
-      zip.file(`${stem}_content_list.json`, JSON.stringify(results.content_list, null, 2));
-    }
-    if (results.middle_json) {
-      zip.file(`${stem}_middle.json`, JSON.stringify(results.middle_json, null, 2));
-    }
-    if (results.model_output) {
-      zip.file(`${stem}_model_output.json`, JSON.stringify(results.model_output, null, 2));
+    if (contentList) {
+      zip.file(`${stem}_content_list.json`, JSON.stringify(contentList, null, 2));
     }
 
     // Inline images
@@ -233,23 +232,17 @@ export class ExportUtils {
    * @param {string} stem — base filename without extension
    */
   _downloadIndividual(state, results, stem) {
+    const contentList = resultArtifact(results, 'content_list', 'contentList', 'content_list_json');
+
     if (results.markdown) {
       this._download(results.markdown, `${stem}.md`, 'text/markdown');
     }
     if (results.raw_text) {
       this._download(results.raw_text, `${stem}_raw.txt`, 'text/plain');
     }
-    if (results.content_list) {
-      this._download(JSON.stringify(results.content_list, null, 2),
+    if (contentList) {
+      this._download(JSON.stringify(contentList, null, 2),
         `${stem}_content_list.json`, 'application/json');
-    }
-    if (results.middle_json) {
-      this._download(JSON.stringify(results.middle_json, null, 2),
-        `${stem}_middle.json`, 'application/json');
-    }
-    if (results.model_output) {
-      this._download(JSON.stringify(results.model_output, null, 2),
-        `${stem}_model_output.json`, 'application/json');
     }
     this.exportBenchmarkCsv(state, `${stem}_benchmark.csv`);
   }

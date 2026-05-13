@@ -11,10 +11,10 @@
 </head>
 <body>
 
-<div class="rapiddoc-app">
+<div class="docparse-app">
   
   <!-- LEFT SIDEBAR -->
-  <aside class="rapiddoc-sidebar" id="sidebar">
+  <aside class="docparse-sidebar" id="sidebar">
     <div class="sidebar-content">
       
       <!-- Logo & Collapse -->
@@ -25,16 +25,12 @@
           </div>
           <span class="logo-text">DocParsing</span>
         </div>
-        <button class="collapse-btn" id="collapseBtn">
-          <i data-lucide="chevron-left"></i>
-        </button>
       </div>
 
-      <!-- Upload Button -->
+      <!-- New Task Button -->
       <button class="create-task-btn" id="uploadBtn">
-        <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" multiple hidden/>
         <i data-lucide="plus"></i>
-        <span>Upload Document</span>
+        <span>New Task</span>
       </button>
 
       <!-- Navigation Tabs -->
@@ -51,117 +47,160 @@
 
       <!-- File List / History -->
       <div class="file-list-section">
+        <div class="file-list-header">
+          <span id="queueTitle">Queue</span>
+          <button class="queue-clear-btn" id="clearBtn" type="button" disabled>
+            <i data-lucide="trash-2"></i>
+            <span>Clear queue</span>
+          </button>
+        </div>
         <div class="file-list" id="fileList">
           <!-- History items will be loaded here -->
-        </div>
-      </div>
-
-      <!-- Action Buttons -->
-      <div class="action-buttons">
-        <button class="btn-primary" id="startBtn" disabled>
-          <i data-lucide="play"></i>
-          <span>Start</span>
-        </button>
-        <div class="btn-group">
-          <button class="btn-secondary" id="clearBtn" title="Clear" disabled>
-            <i data-lucide="trash-2"></i>
-            <span>Clear</span>
-          </button>
         </div>
       </div>
 
     </div>
   </aside>
 
-  <div class="floating-panel hidden" id="settingsPanel" role="dialog" aria-label="Processing Settings">
-    <div class="panel-header">
-      <div>
-        <h2>Processing Settings</h2>
-        <p>Models and extraction options</p>
-      </div>
-      <button class="icon-btn panel-close" type="button" data-close-panel="settingsPanel" title="Close">
-        <i data-lucide="x"></i>
-      </button>
-    </div>
-    <div class="panel-body compact-form" id="optionsContent">
-      <div class="option-item">
-        <label>Layout Model</label>
-        <select id="layoutModel">
-          <option value="v2">PP-DocLayoutV2</option>
-          <option value="v3">PP-DocLayoutV3</option>
-          <option value="plus_l">PP-DocLayout Plus L</option>
-        </select>
-      </div>
-      <div class="option-item">
-        <label>OCR Language</label>
-        <select id="ocrModel">
-          <option value="ch_v5">Chinese + English</option>
-          <option value="en_v5">English Only</option>
-        </select>
-      </div>
-      <div class="option-item checkbox-item">
-        <label>
-          <input type="checkbox" id="formulaEnable"/>
-          <span>Enable Formula Recognition</span>
-        </label>
-      </div>
-      <div class="option-item">
-        <label>Formula Model</label>
-        <select id="formulaModel">
-          <option value="pp_formulanet_plus_s">PP-FormulaNet Plus S (Fast)</option>
-          <option value="pp_formulanet_plus_m">PP-FormulaNet Plus M (Balanced)</option>
-          <option value="pp_formulanet_plus_l">PP-FormulaNet Plus L (Accurate)</option>
-        </select>
-      </div>
-      <div class="option-item checkbox-item">
-        <label>
-          <input type="checkbox" id="tableEnable"/>
-          <span>Enable Table Structure</span>
-        </label>
-      </div>
-      <div class="option-item">
-        <label>Table Model</label>
-        <select id="tableModel">
-          <option value="unet_slanet_plus">UNET + SLANet Plus</option>
-          <option value="ppstructure_zh">PP-OCR Table</option>
-        </select>
-      </div>
-    </div>
-  </div>
+  <div class="drawer-backdrop hidden" id="drawerBackdrop"></div>
 
-  <div class="floating-panel timings-panel hidden" id="timingsPanel" role="dialog" aria-label="Processing Timings">
-    <div class="panel-header">
-      <div>
-        <h2>Processing Timings</h2>
-        <p>Latest run breakdown</p>
+  <section class="docparse-drawer hidden" id="settingsPanel" role="dialog" aria-modal="false" aria-label="Processing Settings">
+    <div class="drawer-header">
+      <div class="drawer-title">
+        <h2>Processing Settings</h2>
+        <p>Configure detection, OCR, and output behavior.</p>
       </div>
-      <button class="icon-btn panel-close" type="button" data-close-panel="timingsPanel" title="Close">
+      <button class="icon-btn drawer-close" type="button" data-close-panel="settingsPanel" aria-label="Close settings">
         <i data-lucide="x"></i>
       </button>
     </div>
-    <div class="panel-body" id="timingsContent">
+    <div class="drawer-body" id="optionsContent">
+      <section class="settings-section">
+        <div class="section-heading">
+          <h3>Document</h3>
+          <p>Basic input assumptions for this run.</p>
+        </div>
+        <div class="model-status-card" id="modelStatusSummary">
+          <span class="status-dot"></span>
+          <div>
+            <strong>Model cache</strong>
+            <p>Model status will appear after a run starts.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section compact-form">
+        <div class="section-heading">
+          <h3>Layout</h3>
+          <p>Choose document structure detection model.</p>
+        </div>
+        <div class="option-item">
+          <label for="layoutModel">Layout model</label>
+          <select id="layoutModel">
+            <option value="v2">PP-DocLayoutV2</option>
+            <option value="v3">PP-DocLayoutV3</option>
+            <option value="plus_l">PP-DocLayout Plus L</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="settings-section compact-form">
+        <div class="section-heading">
+          <h3>Text OCR</h3>
+          <p>Language hint for recognition.</p>
+        </div>
+        <div class="option-item">
+          <label for="ocrModel">OCR language</label>
+          <select id="ocrModel">
+            <option value="ch_v5">Chinese + English</option>
+            <option value="en_v5">English Only</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="settings-section compact-form">
+        <div class="section-heading">
+          <h3>Formula</h3>
+          <p>Use only when math notation is important.</p>
+        </div>
+        <div class="option-item switch-item">
+          <label for="formulaEnable">
+            <input type="checkbox" id="formulaEnable"/>
+            <span>Formula recognition</span>
+          </label>
+        </div>
+        <div class="option-item">
+          <label for="formulaModel">Formula model</label>
+          <select id="formulaModel">
+            <option value="pp_formulanet_plus_s">PP-FormulaNet Plus S (Fast)</option>
+            <option value="pp_formulanet_plus_m">PP-FormulaNet Plus M (Balanced)</option>
+            <option value="pp_formulanet_plus_l">PP-FormulaNet Plus L (Accurate)</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="settings-section compact-form">
+        <div class="section-heading">
+          <h3>Tables</h3>
+          <p>Enable structure extraction for dense tables.</p>
+        </div>
+        <div class="option-item switch-item">
+          <label for="tableEnable">
+            <input type="checkbox" id="tableEnable"/>
+            <span>Table structure</span>
+          </label>
+        </div>
+        <div class="option-item">
+          <label for="tableModel">Table model</label>
+          <select id="tableModel">
+            <option value="unet_slanet_plus">UNET + SLANet Plus</option>
+            <option value="ppstructure_zh">PP-OCR Table</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="section-heading">
+          <h3>Output</h3>
+          <p>Markdown and content JSON are kept for inspection and export.</p>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section class="docparse-drawer timings-drawer hidden" id="timingsPanel" role="dialog" aria-modal="false" aria-label="Processing Timings">
+    <div class="drawer-header">
+      <div class="drawer-title">
+        <h2>Processing Timings</h2>
+        <p>Latest stage breakdown from the current run.</p>
+      </div>
+      <button class="icon-btn drawer-close" type="button" data-close-panel="timingsPanel" aria-label="Close timings">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="drawer-body timing-list" id="timingsContent">
       <div class="timing-item timing-total">
         <span class="timing-label">Total</span>
         <span class="timing-value" id="timingTotal">-</span>
       </div>
       <div class="timing-item">
-        <span class="timing-label">Preprocessing</span>
+        <span class="timing-label">Page Prep</span>
         <span class="timing-value" id="timingPreprocessing">-</span>
       </div>
       <div class="timing-item">
-        <span class="timing-label">Layout Analysis</span>
+        <span class="timing-label">Layout Detection</span>
         <span class="timing-value" id="timingLayout">-</span>
       </div>
       <div class="timing-item">
-        <span class="timing-label">OCR</span>
+        <span class="timing-label">Text OCR</span>
         <span class="timing-value" id="timingOcr">-</span>
       </div>
       <div class="timing-item">
-        <span class="timing-label">Formula</span>
+        <span class="timing-label">Formula Recognition</span>
         <span class="timing-value" id="timingFormula">-</span>
       </div>
       <div class="timing-item">
-        <span class="timing-label">Table</span>
+        <span class="timing-label">Table Structure</span>
         <span class="timing-value" id="timingTable">-</span>
       </div>
       <div class="timing-item">
@@ -169,74 +208,79 @@
         <span class="timing-value" id="timingReadingOrder">-</span>
       </div>
       <div class="timing-item">
-        <span class="timing-label">Postprocessing</span>
+        <span class="timing-label">Build Output</span>
         <span class="timing-value" id="timingPostprocessing">-</span>
       </div>
     </div>
-  </div>
+  </section>
 
   <!-- MAIN CONTENT AREA -->
-  <main class="rapiddoc-main">
+  <main class="docparse-main">
     <div class="workspace-toolbar">
       <div class="workspace-toolbar-row workspace-toolbar-main">
         <div class="workspace-title">
-          <button class="icon-btn" id="toggleSidebar" title="Toggle sidebar">
+          <button class="icon-btn" id="toggleSidebar" title="Toggle sidebar" aria-label="Toggle sidebar">
             <i data-lucide="menu"></i>
           </button>
           <div class="file-info">
             <span class="file-name" id="currentFileName"></span>
             <span class="file-meta" id="currentFileMeta"></span>
+            <span class="processing-total-badge" id="processingTotalBadge" title="Latest processing time">-</span>
           </div>
         </div>
         <div class="workspace-actions">
-          <button class="icon-btn" id="settingsToggle" title="Processing settings" aria-pressed="false">
-            <i data-lucide="settings"></i>
-          </button>
-          <button class="icon-btn timing-toggle" id="timingsToggle" title="Processing timings" aria-pressed="false">
-            <i data-lucide="timer"></i>
-          </button>
-          <button class="icon-btn" id="overlayToggle" title="Hide overlay" aria-pressed="true">
-            <i data-lucide="eye"></i>
-          </button>
-          <div class="export-menu toolbar-export">
-            <button class="icon-btn export-toggle" id="downloadBtn" title="Download" disabled>
+          <div class="workspace-action-group">
+            <button class="icon-btn" id="settingsToggle" title="Processing settings" aria-label="Processing settings" aria-pressed="false">
+              <i data-lucide="settings"></i>
+            </button>
+            <button class="icon-btn timing-toggle" id="timingsToggle" title="Processing timings" aria-label="Processing timings" aria-pressed="false">
+              <i data-lucide="timer"></i>
+            </button>
+          </div>
+          <div class="export-menu toolbar-export workspace-download-group">
+            <button class="icon-btn export-toggle" id="downloadBtn" title="Download" aria-label="Download" aria-expanded="false" disabled>
               <i data-lucide="download"></i>
             </button>
-            <div class="export-options hidden" id="exportOptions">
+            <div class="export-options hidden" id="exportOptions" role="menu">
               <button type="button" data-export="markdown">Markdown</button>
               <button type="button" data-export="content">Content JSON</button>
               <button type="button" data-export="zip">ZIP bundle</button>
             </div>
           </div>
-          <button class="icon-btn" id="copyMarkdown" title="Copy output">
-            <i data-lucide="copy"></i>
-          </button>
         </div>
       </div>
       <div class="workspace-toolbar-row workspace-toolbar-sub">
-        <div class="viewer-controls">
+        <div class="viewer-controls input-toolbar">
           <span class="toolbar-label">Original File</span>
-          <button class="icon-btn" id="prevPage" title="Previous page">
+          <button class="icon-btn" id="prevPage" title="Previous page" aria-label="Previous page">
             <i data-lucide="chevron-left"></i>
           </button>
           <span class="page-info" id="pageInfo">1 / 1</span>
-          <button class="icon-btn" id="nextPage" title="Next page">
+          <button class="icon-btn" id="nextPage" title="Next page" aria-label="Next page">
             <i data-lucide="chevron-right"></i>
           </button>
-          <button class="icon-btn" id="zoomOut" title="Zoom out">
+          <button class="icon-btn" id="zoomOut" title="Zoom out" aria-label="Zoom out">
             <i data-lucide="zoom-out"></i>
           </button>
           <span class="zoom-level" id="zoomLevel">30%</span>
-          <button class="icon-btn" id="zoomIn" title="Zoom in">
+          <button class="icon-btn" id="zoomIn" title="Zoom in" aria-label="Zoom in">
             <i data-lucide="zoom-in"></i>
           </button>
-          <button class="icon-btn" id="fitWidth" title="Fit width">
+          <button class="icon-btn" id="fitWidth" title="Fit width" aria-label="Fit width">
             <i data-lucide="maximize-2"></i>
           </button>
+          <button class="icon-btn" id="overlayToggle" title="Hide overlay" aria-label="Toggle overlay" aria-pressed="true">
+            <i data-lucide="eye"></i>
+          </button>
         </div>
-        <div class="toolbar-tabs">
-          <button class="tab-btn active" data-tab="rendered">Markdown</button>
-          <button class="tab-btn" data-tab="content">JSON</button>
+        <div class="output-toolbar">
+          <div class="toolbar-tabs">
+            <button class="tab-btn active" data-tab="rendered">Markdown</button>
+            <button class="tab-btn" data-tab="content">JSON</button>
+          </div>
+          <button class="icon-btn" id="copyMarkdown" title="Copy output" aria-label="Copy output">
+            <i data-lucide="copy"></i>
+          </button>
         </div>
       </div>
     </div>
@@ -247,10 +291,32 @@
       <!-- Left: PDF/Image Viewer -->
       <div class="viewer-pane" id="viewerPane">
         <div class="viewer-scroll" id="viewerScroll">
+          <section class="task-composer" id="taskComposer">
+            <button class="task-dropzone" id="taskDropzone" type="button">
+              <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" multiple hidden/>
+              <span class="dropzone-icon">
+                <i data-lucide="file-text"></i>
+              </span>
+              <span class="dropzone-copy">
+                <strong id="dropzoneTitle">Drop documents here</strong>
+                <small id="dropzoneHint">Click to upload PDF or image files</small>
+              </span>
+            </button>
+            <div class="composer-actions">
+              <button class="btn-secondary composer-settings" id="settingsComposerBtn" type="button">
+                <i data-lucide="settings"></i>
+                <span>Model settings</span>
+              </button>
+              <button class="btn-primary composer-start" id="startBtn" type="button" disabled>
+                <i data-lucide="play"></i>
+                <span>Start Processing</span>
+              </button>
+            </div>
+          </section>
           <div class="viewer-container" id="viewerContainer">
             <div class="empty-viewer" id="emptyViewer">
-              <i data-lucide="file-text" style="width: 80px; height: 80px; stroke-width: 1;"></i>
-              <p>Upload a document to start</p>
+              <strong>No document selected</strong>
+              <p>Create a task and upload a PDF or image to preview it here.</p>
             </div>
             <div class="page-stack" id="pageStack">
               <div class="document-page" data-page-index="0">

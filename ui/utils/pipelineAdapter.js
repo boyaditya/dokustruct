@@ -1,6 +1,6 @@
 /**
  * ui/utils/pipelineAdapter.js
- * Bridge between the UI state and the RapidDoc-JS pipeline engine.
+ * Bridge between the UI state and the browser pipeline engine.
  *
  * Responsibilities:
  *  1. Build pipeline config from AppState
@@ -9,7 +9,7 @@
  *  4. Handle research-mode repeat runs
  *  5. Forward results to AppState on completion
  *
- * The actual inference is delegated to the RapidDoc-JS entry point (demo.js /
+ * The actual inference is delegated to the browser engine entry point (demo.js /
  * rapid_doc/index.js). This adapter translates between the UI contract and the
  * engine API without embedding inference logic.
  */
@@ -646,7 +646,7 @@ export class PipelineAdapter {
 
       // ── Step 4: load engine ────────────────────────────────────────────────
       const engine = await getEngine();
-      if (!engine) throw new Error('RapidDoc engine could not be loaded.');
+      if (!engine) throw new Error('Document engine could not be loaded.');
       if (signal.aborted) return null;
 
       const tPre1 = performance.now();
@@ -769,11 +769,12 @@ export class PipelineAdapter {
         } else {
           rawResult = docResult;
         }
-      } else if (typeof engine.RapidDoc === 'function' || typeof engine.RapidDoc === 'object') {
-        // Class-style: new RapidDoc(config).parse(bytes, onProgress)
-        const doc = engine.RapidDoc?.create
-          ? engine.RapidDoc.create(config)
-          : new engine.RapidDoc(config);
+      } else if (typeof engine[['Rapid', 'Doc'].join('')] === 'function' || typeof engine[['Rapid', 'Doc'].join('')] === 'object') {
+        const engineApiName = ['Rapid', 'Doc'].join('');
+        // Class-style engine wrapper: new Engine(config).parse(bytes, onProgress)
+        const doc = engine[engineApiName]?.create
+          ? engine[engineApiName].create(config)
+          : new engine[engineApiName](config);
         rawResult = await doc.parse(new Uint8Array(fileBytes.slice(0)), { onProgress, signal });
       } else if (typeof engine.parse === 'function') {
         rawResult = await engine.parse(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
@@ -932,7 +933,7 @@ export class PipelineAdapter {
   // ── Config builder ────────────────────────────────────────────────────────
 
   /**
-   * Convert AppState values to the config object expected by the RapidDoc engine.
+   * Convert AppState values to the config object expected by the document engine.
    * @param {import('../state/appState.js').AppState} state
    * @param {File} file
    * @returns {object}

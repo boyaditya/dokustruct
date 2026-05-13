@@ -10,8 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "dompurify": "^3.3.0",
     "franc-min": "^6.2.0",
     "js-yaml": "^4.1.1",
+    "jszip": "^3.10.1",
+    "katex": "^0.16.25",
+    "lucide": "^0.555.0",
     "onnxruntime-web": "^1.24.3",
     "pdfjs-dist": "^4.5.136",
     "marked": "^14.1.0",

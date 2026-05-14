@@ -15,8 +15,6 @@
  */
 
 import { appState } from '../state/appState.js';
-import { exportUtils } from './exportUtils.js';
-import { PDFDocument } from 'pdf-lib';
 
 // ---------------------------------------------------------------------------
 // Image helpers
@@ -27,6 +25,103 @@ const IMAGE_MIME_TYPES = new Set([
   'image/webp', 'image/tiff', 'image/tif',
 ]);
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|bmp|webp|tiff?)$/i;
+let pdfDocumentPromise = null;
+let exportUtilsPromise = null;
+let openCvScriptPromise = null;
+let ortRuntimeConfigPromise = null;
+
+function hasOpenCVRuntime() {
+  return Boolean(globalThis.cv?.Mat);
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw new DOMException('Operation aborted', 'AbortError');
+  }
+}
+
+function loadOpenCVScript(signal) {
+  if (hasOpenCVRuntime()) return Promise.resolve();
+  if (openCvScriptPromise) return openCvScriptPromise;
+
+  openCvScriptPromise = new Promise((resolve, reject) => {
+    throwIfAborted(signal);
+    const existingScript = document.querySelector('script[data-docparse-opencv], script[src="/opencv/opencv.js"]');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(), { once: true });
+      existingScript.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
+      signal?.addEventListener('abort', () => reject(new DOMException('Operation aborted', 'AbortError')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = '/opencv/opencv.js';
+    script.async = true;
+    script.dataset.docparseOpencv = 'true';
+    script.addEventListener('load', () => resolve(), { once: true });
+    script.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
+    signal?.addEventListener('abort', () => reject(new DOMException('Operation aborted', 'AbortError')), { once: true });
+    document.head.appendChild(script);
+  }).catch((error) => {
+    if (!hasOpenCVRuntime()) openCvScriptPromise = null;
+    throw error;
+  });
+
+  return openCvScriptPromise;
+}
+
+function waitForOpenCV(signal, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    if (hasOpenCVRuntime()) {
+      resolve(true);
+      return;
+    }
+
+    const checkInterval = setInterval(() => {
+      if (hasOpenCVRuntime()) {
+        clearInterval(checkInterval);
+        resolve(true);
+      }
+    }, 100);
+
+    const timeout = setTimeout(() => {
+      clearInterval(checkInterval);
+      resolve(hasOpenCVRuntime());
+    }, timeoutMs);
+
+    signal?.addEventListener('abort', () => {
+      clearInterval(checkInterval);
+      clearTimeout(timeout);
+      reject(new DOMException('Operation aborted', 'AbortError'));
+    }, { once: true });
+  });
+}
+
+async function configureDocumentRuntime() {
+  if (!ortRuntimeConfigPromise) {
+    ortRuntimeConfigPromise = import('../../rapid_doc/utils/ort_runtime.js')
+      .then((module) => module.configureOrtWasmRuntime({ numThreads: 4 }))
+      .catch((error) => {
+        ortRuntimeConfigPromise = null;
+        throw error;
+      });
+  }
+  return ortRuntimeConfigPromise;
+}
+
+async function getPDFDocument() {
+  if (!pdfDocumentPromise) {
+    pdfDocumentPromise = import('pdf-lib').then((module) => module.PDFDocument);
+  }
+  return pdfDocumentPromise;
+}
+
+async function getExportUtils() {
+  if (!exportUtilsPromise) {
+    exportUtilsPromise = import('./exportUtils.js').then((module) => module.exportUtils);
+  }
+  return exportUtilsPromise;
+}
 
 function isImageFile(file) {
   if (file.type && IMAGE_MIME_TYPES.has(file.type.toLowerCase())) return true;
@@ -235,6 +330,7 @@ async function imageFileToPdfBytes(file) {
     ctx.drawImage(bitmap, 0, 0);
     const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
     const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
+    const PDFDocument = await getPDFDocument();
     const pdfDoc = await PDFDocument.create();
     const embedded = await pdfDoc.embedPng(pngBytes);
     const page = pdfDoc.addPage([bitmap.width, bitmap.height]);
@@ -344,6 +440,9 @@ export class PipelineAdapter {
     this._modelManager = null;
     this._abortController = null;
     this._lastModelConfigKey = null;
+    this._preparedKey = null;
+    this._prepareKey = null;
+    this._preparePromise = null;
   }
 
   // ── Registration ──────────────────────────────────────────────────────────
@@ -410,7 +509,10 @@ export class PipelineAdapter {
 
         // Auto-export after last run
         if (run === repeatCount - 1) {
-          try { exportUtils.exportResearchCsv(state); } catch { /* non-critical */ }
+          try {
+            const exportUtils = await getExportUtils();
+            exportUtils.exportResearchCsv(state);
+          } catch { /* non-critical */ }
         }
       }
     }
@@ -611,7 +713,6 @@ export class PipelineAdapter {
   // ── Full Analysis Pipeline ────────────────────────────────────────────────
 
   async _runFullAnalysis(state, file, signal) {
-    const t0 = performance.now();
     const postBreakdown = {
       engine_postprocessing_ms: 0,
       middle_json_ms: 0,
@@ -624,9 +725,12 @@ export class PipelineAdapter {
 
     try {
       // ── Step 1: ensure models present ─────────────────────────────────────
-      state.beginStage('loading_models');
-      await this._ensureModels(state, signal);
+      if (!this.isPrepared(state, file)) {
+        await this.prepare(state, file, signal);
+      }
       if (signal.aborted) return null;
+
+      const t0 = performance.now();
 
       // ── Step 2: read file bytes ────────────────────────────────────────────
       const tPre0 = performance.now();
@@ -860,6 +964,137 @@ export class PipelineAdapter {
   }
 
   // ── Model management ──────────────────────────────────────────────────────
+
+  getPreparationKey(state = appState, file = state.currentFile) {
+    const config = this._buildConfig(state, file);
+    return JSON.stringify({
+      language: config.language,
+      layout: config.layout_config,
+      ocr: config.ocr_config,
+      formula: config.formula_enable ? config.formula_config : null,
+      table: config.table_enable ? config.table_config : null,
+      checkbox: config.checkbox_config,
+      executionProvider: config.execution_provider,
+    });
+  }
+
+  isPrepared(state = appState, file = state.currentFile) {
+    return this._preparedKey !== null && this._preparedKey === this.getPreparationKey(state, file);
+  }
+
+  async prepare(state = appState, file = state.currentFile, signal = null) {
+    if (!file) throw new Error('No file selected for model warmup.');
+    const key = this.getPreparationKey(state, file);
+    if (this._preparedKey === key) {
+      state.patch({ runtimeStatus: 'ready', warmupStatus: 'ready', warmupConfigKey: key, warmupError: null });
+      return key;
+    }
+    if (this._preparePromise && this._prepareKey === key) return this._preparePromise;
+
+    this._prepareKey = key;
+    this._preparePromise = this._prepare(state, file, signal, key)
+      .finally(() => {
+        if (this._prepareKey === key) {
+          this._preparePromise = null;
+          this._prepareKey = null;
+        }
+      });
+    return this._preparePromise;
+  }
+
+  async _prepare(state, file, signal, key) {
+    const startupTimings = {
+      preprocessing: 0,
+      layoutAnalysis: 0,
+      ocr: 0,
+      formula: 0,
+      table: 0,
+      readingOrder: 0,
+      postprocessing: 0,
+      total: 0,
+    };
+    const t0 = performance.now();
+    state.patch({
+      runtimeStatus: 'runtime_loading',
+      warmupStatus: 'runtime_loading',
+      warmupConfigKey: key,
+      warmupError: null,
+      startupTimings,
+    });
+
+    try {
+      throwIfAborted(signal);
+      const runtimeStart = performance.now();
+      await loadOpenCVScript(signal);
+      const openCvLoaded = await waitForOpenCV(signal);
+      if (!openCvLoaded) {
+        throw new Error('OpenCV runtime is not available. Check /opencv/opencv.js and reload the page.');
+      }
+      await configureDocumentRuntime();
+      state.recordStartupTiming('preprocessing', performance.now() - runtimeStart);
+      state.patch({ runtimeStatus: 'ready', warmupStatus: 'model_warming' });
+
+      throwIfAborted(signal);
+      const modelStart = performance.now();
+      const engine = await getEngine();
+      if (!engine) throw new Error('Document engine could not be loaded.');
+      await this._ensureModels(state, signal);
+      await this._warmModelSessions(engine, state, file, signal);
+      state.recordStartupTiming('layoutAnalysis', performance.now() - modelStart);
+
+      const total = performance.now() - t0;
+      state.recordStartupTiming('total', total);
+      this._preparedKey = key;
+      state.patch({
+        runtimeStatus: 'ready',
+        warmupStatus: 'ready',
+        warmupConfigKey: key,
+        warmupError: null,
+      });
+      return key;
+    } catch (err) {
+      if (signal?.aborted || err?.name === 'AbortError') {
+        state.patch({
+          warmupStatus: 'idle',
+          warmupError: null,
+        });
+        throw err;
+      }
+      const message = formatPipelineError(err);
+      state.patch({
+        runtimeStatus: 'error',
+        warmupStatus: 'error',
+        warmupError: message,
+      });
+      throw err;
+    }
+  }
+
+  async _warmModelSessions(engine, state, file, signal) {
+    throwIfAborted(signal);
+    const config = this._buildConfig(state, file);
+    const modelManager = engine.ModelSingleton?.getInstance?.();
+    if (modelManager?.getModel) {
+      await modelManager.getModel({
+        lang: config.language ?? 'ch',
+        formula_enable: config.formula_enable,
+        table_enable: config.table_enable,
+        layout_config: config.layout_config,
+        ocr_config: config.ocr_config,
+        formula_config: config.formula_config,
+        table_config: config.table_config,
+      });
+    }
+
+    throwIfAborted(signal);
+    if (config.layout_config?.use_doc_orientation_classify && engine.AtomModelSingleton && engine.AtomicModel) {
+      try {
+        await engine.AtomModelSingleton.getInstance().getAtomModel(engine.AtomicModel.ImgOrientationCls);
+      } catch (err) {
+        console.warn('[pipelineAdapter] Orientation model warmup failed:', err?.message ?? err);
+      }
+    }
+  }
 
   /**
    * Check which models are required for the current config and download any missing ones.

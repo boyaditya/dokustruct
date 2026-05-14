@@ -137,6 +137,11 @@
  * @property {Object.<string, ModelStatusValue>} modelStatus
  * @property {Object.<string, number>}           modelProgress
  * @property {Object.<string, number>}           modelSizeMb
+ * @property {'idle'|'runtime_loading'|'model_warming'|'ready'|'error'} runtimeStatus
+ * @property {'idle'|'runtime_loading'|'model_warming'|'ready'|'error'} warmupStatus
+ * @property {string|null}   warmupConfigKey
+ * @property {Timings}       startupTimings
+ * @property {string|null}   warmupError
  *
  * — UI state —
  * @property {boolean}       leftDrawerOpen
@@ -200,8 +205,8 @@ function createInitialState() {
 
     // ── Output options ─────────────────────────────────────────────────────
     dumpMd: true,
-    dumpMiddleJson: false,
-    dumpModelOutput: false,
+    dumpMiddleJson: true,
+    dumpModelOutput: true,
     dumpContentList: true,
     drawLayoutBbox: true,
     drawSpanBbox: false,
@@ -245,6 +250,20 @@ function createInitialState() {
     modelStatus: {},           // { [modelId]: 'not_downloaded'|'downloading'|'cached'|'error' }
     modelProgress: {},         // { [modelId]: 0-100 }
     modelSizeMb: {},           // { [modelId]: number }
+    runtimeStatus: 'idle',
+    warmupStatus: 'idle',
+    warmupConfigKey: null,
+    startupTimings: {
+      preprocessing: 0,
+      layoutAnalysis: 0,
+      ocr: 0,
+      formula: 0,
+      table: 0,
+      readingOrder: 0,
+      postprocessing: 0,
+      total: 0,
+    },
+    warmupError: null,
 
     // ── UI state ───────────────────────────────────────────────────────────
     leftDrawerOpen: false,
@@ -632,6 +651,15 @@ export class AppState {
    */
   recordTiming(stage, ms) {
     this.setNested('timings', stage, ms);
+  }
+
+  /**
+   * Record timing for startup/runtime/model preparation.
+   * @param {'preprocessing'|'layoutAnalysis'|'ocr'|'formula'|'table'|'readingOrder'|'postprocessing'|'total'} stage
+   * @param {number} ms
+   */
+  recordStartupTiming(stage, ms) {
+    this.setNested('startupTimings', stage, ms);
   }
 
   /**

@@ -162,12 +162,14 @@ export class ExportUtils {
     if (!results) return;
 
     const file = state.currentFile;
-    const stem = file ? file.name.replace(/\.[^.]+$/, '') : 'output';
+    const stem = (file?.name || results.fileName || 'output').replace(/\.[^.]+$/, '');
 
     // ── Without JSZip: individual downloads ───────────────────────────────
     // ── With JSZip ────────────────────────────────────────────────────────
     const zip = new JSZip();
     const contentList = resultArtifact(results, 'content_list', 'contentList', 'content_list_json');
+    const middleJson = resultArtifact(results, 'middle_json', 'middleJson', 'layout_info');
+    const modelJson = resultArtifact(results, 'model_output', 'modelOutput', 'modelJson');
 
     if (results.markdown) {
       zip.file(`${stem}.md`, results.markdown);
@@ -177,6 +179,12 @@ export class ExportUtils {
     }
     if (contentList) {
       zip.file(`${stem}_content_list.json`, JSON.stringify(contentList, null, 2));
+    }
+    if (middleJson) {
+      zip.file(`${stem}_middle.json`, JSON.stringify(middleJson, null, 2));
+    }
+    if (modelJson) {
+      zip.file(`${stem}_model.json`, JSON.stringify(modelJson, null, 2));
     }
 
     // Inline images
@@ -233,6 +241,8 @@ export class ExportUtils {
    */
   _downloadIndividual(state, results, stem) {
     const contentList = resultArtifact(results, 'content_list', 'contentList', 'content_list_json');
+    const middleJson = resultArtifact(results, 'middle_json', 'middleJson', 'layout_info');
+    const modelJson = resultArtifact(results, 'model_output', 'modelOutput', 'modelJson');
 
     if (results.markdown) {
       this._download(results.markdown, `${stem}.md`, 'text/markdown');
@@ -243,6 +253,14 @@ export class ExportUtils {
     if (contentList) {
       this._download(JSON.stringify(contentList, null, 2),
         `${stem}_content_list.json`, 'application/json');
+    }
+    if (middleJson) {
+      this._download(JSON.stringify(middleJson, null, 2),
+        `${stem}_middle.json`, 'application/json');
+    }
+    if (modelJson) {
+      this._download(JSON.stringify(modelJson, null, 2),
+        `${stem}_model.json`, 'application/json');
     }
     this.exportBenchmarkCsv(state, `${stem}_benchmark.csv`);
   }
@@ -286,11 +304,10 @@ export class ExportUtils {
    * @returns {object}
    */
   _staticMeta(state) {
-    const file = state.currentFile;
     const results = state.get('results');
     return {
-      file_name:         file?.name ?? '',
-      file_size_bytes:   file?.size ?? 0,
+      file_name:         state.currentFile?.name ?? results?.fileName ?? '',
+      file_size_bytes:   state.currentFile?.size ?? results?.fileSize ?? 0,
       page_count:        results?.page_count ?? state.get('progress').total ?? 1,
       parse_method:      state.get('parseMethod'),
       formula_enable:    state.get('formulaEnable') ? 1 : 0,

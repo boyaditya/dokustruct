@@ -25,14 +25,11 @@ export default defineConfig({
     esbuildOptions: {
       target: 'es2022',
     },
-    force: true,
     include: [
-      'onnxruntime-web',
       'pdfjs-dist',
       'marked',
       'franc-min',
-      'js-yaml',
-      'pdf-lib'
+      'js-yaml'
     ]
   },
 

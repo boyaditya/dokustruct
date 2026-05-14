@@ -109,7 +109,7 @@ export function matchOcrCell(dtRecBoxes, predBboxes) {
 
 export function gatherOcrListByRow(ocrList, threshold = 0.2) {
   const list = [...ocrList];
-  const thresholdPx = 10;
+  const thresholdPx = 20;
   
   // Python logic: iterate and merge in-place, no pre-sorting
   for (let i = 0; i < list.length; i++) {

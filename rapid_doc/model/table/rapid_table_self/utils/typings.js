@@ -19,6 +19,7 @@ export const ModelType = Object.freeze({
   UNET_UNITABLE: "unet_unitable",
   PADDLE_CLS: "paddle_cls",
   Q_CLS: "q_cls",
+  PADDLE_Q_CLS: "paddle_q_cls",
   PPSTRUCTURE_CH: "ppstructure_zh",
   PPSTRUCTURE_EN: "ppstructure_en",
 });

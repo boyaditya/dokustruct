@@ -9,7 +9,7 @@ const _loggerCache = new Map();
  * Get (or create) a logger for the given name.
  * PORTING NOTE: Python lru_cache(maxsize=None) → JS Map cache
  * @param {string} name
- * @returns {{ debug: Function, info: Function, warning: Function, error: Function }}
+ * @returns {{ debug: Function, info: Function, warn: Function, warning: Function, error: Function }}
  */
 export function getLogger(name) {
   if (_loggerCache.has(name)) return _loggerCache.get(name);
@@ -17,6 +17,7 @@ export function getLogger(name) {
   const logger = {
     debug: (...args) => console.debug(prefix, ...args),
     info: (...args) => console.info(prefix, ...args),
+    warn: (...args) => console.warn(prefix, ...args),
     warning: (...args) => console.warn(prefix, ...args),
     error: (...args) => console.error(prefix, ...args),
   };

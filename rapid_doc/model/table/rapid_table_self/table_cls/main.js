@@ -35,7 +35,7 @@ function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
   let resized = new cv.Mat();
   let cropped = null;
   try {
-    cv.resize(img, resized, new cv.Size(newW, newH), 0, 0, cv.INTER_LINEAR);
+    cv.resize(img, resized, new cv.Size(newW, newH), 0, 0, cv.INTER_LANCZOS4);
     // Step 2: center crop to (cropSize x cropSize)
     const y0 = Math.floor((newH - cropSize) / 2);
     const x0 = Math.floor((newW - cropSize) / 2);
@@ -69,6 +69,50 @@ function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
     rgb.delete();
     float32.delete();
   }
+}
+
+/**
+ * Qanything table classifier preprocessing.
+ * Mirrors Python: BGR -> RGB -> grayscale -> 3-channel -> resize 224x224.
+ * @param {cv.Mat} img - BGR uint8
+ * @param {number} cropSize
+ * @returns {Float32Array} CHW float32 normalized array [3, cropSize, cropSize]
+ */
+function qanythingClsPreprocess(img, cropSize = 224) {
+  const rgb = new cv.Mat();
+  const gray = new cv.Mat();
+  const gray3 = new cv.Mat();
+  const resized = new cv.Mat();
+  const float32 = new cv.Mat();
+  try {
+    cv.cvtColor(img, rgb, cv.COLOR_BGR2RGB);
+    cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
+    cv.cvtColor(gray, gray3, cv.COLOR_GRAY2RGB);
+    cv.resize(gray3, resized, new cv.Size(cropSize, cropSize), 0, 0, cv.INTER_LINEAR);
+    resized.convertTo(float32, cv.CV_32F, 1.0 / 255.0);
+
+    const data = new Float32Array(3 * cropSize * cropSize);
+    const src = float32.data32F;
+    for (let c = 0; c < 3; c++) {
+      const mean = IMAGENET_MEAN[c], std = IMAGENET_STD[c];
+      const offset = c * cropSize * cropSize;
+      for (let i = 0; i < cropSize * cropSize; i++) {
+        data[offset + i] = (src[i * 3 + c] - mean) / std;
+      }
+    }
+    return data;
+  } finally {
+    rgb.delete();
+    gray.delete();
+    gray3.delete();
+    resized.delete();
+    float32.delete();
+  }
+}
+
+function resolveModelPath(modelDirOrPath, modelType) {
+  if (!modelDirOrPath || typeof modelDirOrPath !== "object") return modelDirOrPath ?? null;
+  return modelDirOrPath[modelType] ?? modelDirOrPath[String(modelType)] ?? null;
 }
 
 /**
@@ -107,7 +151,8 @@ export class PaddleCls {
     const outputData = Array.from(result[outputName].cpuData ?? result[outputName].data);
     const softmax = _softmax(outputData);
     const maxIdx = softmax.indexOf(Math.max(...softmax));
-    return [String(maxIdx), softmax[maxIdx]];
+    const labels = ["wired", "wireless"];
+    return [labels[maxIdx] ?? String(maxIdx), softmax[maxIdx]];
   }
 }
 
@@ -139,8 +184,7 @@ export class QanythingCls {
    * @returns {Promise<[string, number]>} [className, score]
    */
   async run(img) {
-    // QanythingCls uses same PaddleCls preprocessing (resize+crop+normalize)
-    const data = paddleClsPreprocess(img, 256, 224);
+    const data = qanythingClsPreprocess(img, 224);
     const inputTensor = new ort.Tensor("float32", data, [1, 3, 224, 224]);
     const inputName = this.session.getInputNames()[0];
     const result = await this.session.run({ [inputName]: inputTensor });
@@ -154,9 +198,44 @@ export class QanythingCls {
 }
 
 /**
+ * Python PADDLE_Q_CLS parity: run Paddle and Qanything classifiers; if they
+ * disagree, treat the table as wireless.
+ */
+export class PaddleQCls {
+  constructor() {
+    this.paddleCls = null;
+    this.qanythingCls = null;
+  }
+
+  static async create(cfg) {
+    const inst = new PaddleQCls();
+    inst.paddleCls = await PaddleCls.create({
+      ...cfg,
+      model_type: ModelType.PADDLE_CLS,
+      model_dir_or_path: resolveModelPath(cfg?.model_dir_or_path, ModelType.PADDLE_CLS),
+    });
+    inst.qanythingCls = await QanythingCls.create({
+      ...cfg,
+      model_type: ModelType.Q_CLS,
+      model_dir_or_path: resolveModelPath(cfg?.model_dir_or_path, ModelType.Q_CLS),
+    });
+    return inst;
+  }
+
+  async run(img) {
+    const [paddleType, paddleScore] = await this.paddleCls.run(img);
+    const [qanythingType, qanythingScore] = await this.qanythingCls.run(img);
+    if (paddleType === qanythingType) {
+      return [paddleType, Math.min(paddleScore, qanythingScore)];
+    }
+    return ["wireless", Math.min(paddleScore, qanythingScore)];
+  }
+}
+
+/**
  * Table type classifier dispatcher.
  * PORTING NOTE: TableCls(cfg) → static async create(cfg)
- * Dispatches to QanythingCls (Q_CLS) or PaddleCls based on model_type.
+ * Dispatches to Paddle, Qanything, or combined Paddle+Qanything based on model_type.
  */
 export class TableCls {
   constructor() {
@@ -165,8 +244,17 @@ export class TableCls {
 
   static async create(cfg = null) {
     const inst = new TableCls();
-    const modelType = cfg?.model_type ?? ModelType.Q_CLS;
-    if (modelType === ModelType.Q_CLS) {
+    const modelType = cfg?.model_type ?? ModelType.PADDLE_Q_CLS;
+    if (modelType === ModelType.PADDLE_Q_CLS) {
+      try {
+        inst._cls = await PaddleQCls.create(cfg ?? {});
+      } catch (err) {
+        logger.warn(
+          `TableCls: Paddle+Q classifier unavailable (${err?.message ?? err}); falling back to QanythingCls.`
+        );
+        inst._cls = await QanythingCls.create({ ...(cfg ?? {}), model_type: ModelType.Q_CLS });
+      }
+    } else if (modelType === ModelType.Q_CLS) {
       inst._cls = await QanythingCls.create(cfg ?? {});
     } else {
       inst._cls = await PaddleCls.create(cfg ?? {});

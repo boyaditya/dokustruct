@@ -31,8 +31,7 @@ const MODEL_URLS = {
     sha256: null, // Disabled for development
   },
   [ModelType.Q_CLS]: {
-    modelUrl: '/models/table/q_cls.onnx',
-    fallbackUrls: ['/models/table/table_cls/q_cls.onnx'],
+    modelUrl: '/models/table/table_cls/q_cls.onnx',
     sha256: null, // Disabled for development
   },
   [ModelType.PPSTRUCTURE_CH]: {

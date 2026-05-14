@@ -37,6 +37,10 @@ export function formatOcrResults(ocrResults, imgH, imgW) {
     } else {
       [x0, y0, x1, y1] = bbox;
     }
+    x0 = Math.max(0, Math.min(imgW, x0));
+    y0 = Math.max(0, Math.min(imgH, y0));
+    x1 = Math.max(0, Math.min(imgW, x1));
+    y1 = Math.max(0, Math.min(imgH, y1));
     dtBoxes.push([x0, y0, x1, y1]);
     recRes.push([item.text ?? "", item.score ?? 1.0]);
   }

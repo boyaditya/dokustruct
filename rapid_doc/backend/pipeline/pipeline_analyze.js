@@ -29,6 +29,9 @@ import { getVram, cleanMemory, getBatchRatio, initVramDetection } from "../../ut
 import { getPage } from "../../utils/pdf_text_tool.js";
 import { AtomicModel } from "./model_list.js";
 
+const PDF_IMAGE_DPI = 200;
+const PDF_POINTS_PER_INCH = 72;
+
 async function yieldToBrowser() {
   await new Promise(resolve => setTimeout(resolve, 0));
 }
@@ -702,8 +705,10 @@ async function imageBytesToPdfBytes(bytes) {
     const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
     const pdfDoc = await PDFDocument.create();
     const embedded = await pdfDoc.embedPng(pngBytes);
-    const page = pdfDoc.addPage([bitmap.width, bitmap.height]);
-    page.drawImage(embedded, { x: 0, y: 0, width: bitmap.width, height: bitmap.height });
+    const pageWidth = bitmap.width * PDF_POINTS_PER_INCH / PDF_IMAGE_DPI;
+    const pageHeight = bitmap.height * PDF_POINTS_PER_INCH / PDF_IMAGE_DPI;
+    const page = pdfDoc.addPage([pageWidth, pageHeight]);
+    page.drawImage(embedded, { x: 0, y: 0, width: pageWidth, height: pageHeight });
     return await pdfDoc.save();
   } finally {
     if (typeof bitmap.close === 'function') bitmap.close();

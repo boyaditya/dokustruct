@@ -25,6 +25,8 @@ const IMAGE_MIME_TYPES = new Set([
   'image/webp', 'image/tiff', 'image/tif',
 ]);
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|bmp|webp|tiff?)$/i;
+const PDF_IMAGE_DPI = 200;
+const PDF_POINTS_PER_INCH = 72;
 let pdfDocumentPromise = null;
 let exportUtilsPromise = null;
 let openCvScriptPromise = null;
@@ -333,8 +335,10 @@ async function imageFileToPdfBytes(file) {
     const PDFDocument = await getPDFDocument();
     const pdfDoc = await PDFDocument.create();
     const embedded = await pdfDoc.embedPng(pngBytes);
-    const page = pdfDoc.addPage([bitmap.width, bitmap.height]);
-    page.drawImage(embedded, { x: 0, y: 0, width: bitmap.width, height: bitmap.height });
+    const pageWidth = bitmap.width * PDF_POINTS_PER_INCH / PDF_IMAGE_DPI;
+    const pageHeight = bitmap.height * PDF_POINTS_PER_INCH / PDF_IMAGE_DPI;
+    const page = pdfDoc.addPage([pageWidth, pageHeight]);
+    page.drawImage(embedded, { x: 0, y: 0, width: pageWidth, height: pageHeight });
     return await pdfDoc.save();
   } finally {
     if (typeof bitmap.close === 'function') bitmap.close();

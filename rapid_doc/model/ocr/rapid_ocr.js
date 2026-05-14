@@ -905,10 +905,6 @@ class TextRecognizer {
 
       // ─── 1. CPU PREPROCESS (Runs concurrently) ───
       let maxWhRatio = batchI.reduce((m, i) => Math.max(m, ratioList[i]), imgW / imgH);
-      maxWhRatio = Math.min(maxWhRatio, 32); 
-
-      const bucketW = Math.ceil(Math.max(imgW, Math.floor(imgH * maxWhRatio)) / 160) * 160;
-      maxWhRatio = bucketW / imgH;
 
       const batchData = [];
       let batchW = 0;
@@ -919,9 +915,8 @@ class TextRecognizer {
       }
 
       const N = batchI.length;
-      const paddedN = this.recBatchNum;
       const C = 3;
-      const flat = new Float32Array(paddedN * C * imgH * batchW);
+      const flat = new Float32Array(N * C * imgH * batchW);
       batchData.forEach((d, b) => flat.set(d, b * C * imgH * batchW));
 
       // ─── 2. GPU INFERENCE (Strictly Serialized via Mutex) ───
@@ -932,7 +927,7 @@ class TextRecognizer {
       let T = 0, numChars = 0;
 
       try {
-        tensor = new ort.Tensor('float32', flat, [paddedN, C, imgH, batchW]);
+        tensor = new ort.Tensor('float32', flat, [N, C, imgH, batchW]);
         
         // Lock GPU just for the run command
         const releaseGpu = await this._acquireGpu();
@@ -1342,14 +1337,14 @@ export class RapidOcrModel {
         const dictBuf = await fetchTextCached(dictUrl);
         charList = dictBuf.split(/\r?\n/).filter(Boolean);
       } catch (err) {
-        logger.warn(`Failed to load external dict: ${err.message}. Trying metadata.`);
+        logger.warning(`Failed to load external dict: ${err.message}. Trying metadata.`);
       }
 
       if (!charList) {
         charList = RapidOcrModel._loadCharListFromMeta(recSession);
       }
       if (!charList) {
-        logger.warn('Failed to load dictionary and metadata. Using default.');
+        logger.warning('Failed to load dictionary and metadata. Using default.');
         charList = _defaultCharList();
       }
     }

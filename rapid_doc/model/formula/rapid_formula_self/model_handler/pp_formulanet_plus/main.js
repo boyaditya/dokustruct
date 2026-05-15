@@ -41,26 +41,39 @@ export class PPFormulaNetPlusModelHandler extends BaseModelHandler {
     // 2. Build input tensor & run inference
     const inputName = this.session.getInputNames()[0];
     const inputTensor = new ort.Tensor("float32", data, dims);
+    let outputMap = null;
 
-    // NOTE: Formula model runs on WASM (not WebGPU) because its ONNX graph
-    // contains a Loop operator (autoregressive decoder: 717 ops × ~600 iterations).
-    // WebGPU dispatch overhead (~0.03ms/op) makes Loop-based models 10-20x slower
-    // than WASM with SIMD. No GPU mutex needed for WASM execution.
-    const outputMap = await this.session.run({ [inputName]: inputTensor });
+    try {
+      // NOTE: Formula model runs on WASM (not WebGPU) because its ONNX graph
+      // contains a Loop operator (autoregressive decoder: 717 ops × ~600 iterations).
+      // WebGPU dispatch overhead (~0.03ms/op) makes Loop-based models 10-20x slower
+      // than WASM with SIMD. No GPU mutex needed for WASM execution.
+      outputMap = await this.session.run({ [inputName]: inputTensor });
 
-    // 3. Postprocess (WASM output is already on CPU — no getData() needed)
-    const outputName = this.session.getOutputNames()[0];
-    const predTensor = outputMap[outputName];
+      // 3. Postprocess (WASM output is already on CPU — no getData() needed)
+      const outputName = this.session.getOutputNames()[0];
+      const predTensor = outputMap instanceof Map
+        ? (outputMap.get(outputName) ?? outputMap.values().next().value)
+        : outputMap[outputName];
 
-    const formulas = this.postProcessor.run(predTensor);
+      const formulas = this.postProcessor.run(predTensor);
 
-    const elapse = (performance.now() - t0) / 1000;
+      const elapse = (performance.now() - t0) / 1000;
 
-    return formulas.map((formula, i) => new RapidFormulaOutput({
-      img: oriImgList[i],
-      recFormula: formula,
-      elapse: elapse / oriImgList.length,
-    }));
+      return formulas.map((formula, i) => new RapidFormulaOutput({
+        img: oriImgList[i],
+        recFormula: formula,
+        elapse: elapse / oriImgList.length,
+      }));
+    } finally {
+      inputTensor.dispose?.();
+      if (outputMap) {
+        const tensors = outputMap instanceof Map ? outputMap.values() : Object.values(outputMap);
+        for (const tensor of tensors) {
+          tensor?.dispose?.();
+        }
+      }
+    }
   }
 
   /**

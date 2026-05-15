@@ -24,26 +24,7 @@ import { LatexOCRModel } from "../../model/formula/latex_ocr_model.js";
 import { RapidOcrModel } from "../../model/ocr/rapid_ocr.js";
 import { RapidTableModel } from "../../model/table/rapid_table.js";
 import { RapidOrientationModel } from "../../model/orientation/rapid_orientation_model.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Make an object/value hashable (deterministic string key).
- * Mirrors Python's make_hashable from utils/hash_utils.py.
- * @param {any} value
- * @returns {string}
- */
-function makeHashable(value) {
-  if (value === null || value === undefined) return "null";
-  if (typeof value !== "object") return String(value);
-  try {
-    return JSON.stringify(value, Object.keys(value).sort());
-  } catch {
-    return String(value);
-  }
-}
+import { makeHashable } from "../../utils/hash_utils.js";
 
 const DISPOSED_MARK = Symbol.for("rapiddoc.disposed");
 const DISPOSABLE_KEYS = [
@@ -121,6 +102,7 @@ export async function tableModelInit(lang = null, ocrConfig = null, tableConfig 
   }
   const atomModelManager = AtomModelSingleton.getInstance();
   const ocrEngine = await atomModelManager.getAtomModel(AtomicModel.OCR, {
+    det_db_thresh: ocrConfigClean?.["Det.det_db_thresh"] ?? ocrConfigClean?.det_db_thresh ?? 0.3,
     det_db_box_thresh: 0.5,
     det_db_unclip_ratio: 1.6,
     lang,
@@ -142,9 +124,10 @@ export async function formulaModelInit(formulaConfig = null) {
   if (modelType === 'latex_ocr') {
     console.info('[formulaModelInit] Loading LaTeX-OCR (WebGPU-compatible)...');
     try {
+      const useWebGpu = formulaConfig?.execution_provider !== "wasm";
       return await LatexOCRModel.create({
-        useWebGpu: false, // TEMPORARY: Use WASM until decoder input is fixed
-        maxLen: 512,
+        useWebGpu,
+        maxLen: formulaConfig?.maxLen ?? 512,
       });
     } catch (err) {
       console.error('[formulaModelInit] LaTeX-OCR failed to load:', err.message);
@@ -178,6 +161,8 @@ export async function layoutModelInit(layoutConfig = null) {
  * @param {object|null} [ocrConfig]
  * @param {number} [detDbUnclipRatio=1.8]
  * @param {boolean} [enableMergeDetBoxes=true]
+ * @param {boolean} [isSeal=false]
+ * @param {number|null} [detDbThresh=null]
  * @returns {Promise<RapidOcrModel>}
  */
 export async function ocrModelInit(
@@ -186,9 +171,18 @@ export async function ocrModelInit(
   ocrConfig = null,
   detDbUnclipRatio = 1.8,
   enableMergeDetBoxes = true,
-  isSeal = false
+  isSeal = false,
+  detDbThresh = null
 ) {
+  const preferredEp = ocrConfig?.execution_provider ?? null;
+  const executionProviders = Array.isArray(ocrConfig?.executionProviders)
+    ? ocrConfig.executionProviders
+    : (preferredEp === "wasm" ? ["wasm"] : ["webgpu", "wasm"]);
+  const resolvedDetDbThresh =
+    detDbThresh ?? ocrConfig?.["Det.det_db_thresh"] ?? ocrConfig?.det_db_thresh ?? 0.3;
+
   return RapidOcrModel.create({
+    detDbThresh: resolvedDetDbThresh,
     detDbBoxThresh,
     lang,
     ocrConfig,
@@ -197,7 +191,8 @@ export async function ocrModelInit(
     enableMergeDetBoxes,
     isSeal,
     detModelUrl: isSeal ? "/models/ocr/pp-ocrv4_mobile_seal_det.onnx" : undefined,
-    executionProviders: ['webgpu', 'wasm'],
+    executionProvider: preferredEp,
+    executionProviders,
   });
 }
 
@@ -237,7 +232,8 @@ export async function atomModelInit(modelName, kwargs = {}) {
         kwargs.ocr_config ?? null,
         kwargs.det_db_unclip_ratio ?? 1.8,
         kwargs.enable_merge_det_boxes ?? true,
-        kwargs.is_seal ?? false
+        kwargs.is_seal ?? false,
+        kwargs.det_db_thresh ?? null
       );
     }
 
@@ -313,6 +309,7 @@ export class AtomModelSingleton {
       return JSON.stringify([
         atomModelName,
         makeHashable(kwargs.ocr_config ?? null),
+        kwargs.det_db_thresh ?? 0.3,
         kwargs.det_db_box_thresh ?? 0.3,
         ocrLang,
         kwargs.det_db_unclip_ratio ?? 1.8,
@@ -437,6 +434,7 @@ export class MineruPipelineModel {
     }
 
     inst.ocrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
+      det_db_thresh: inst.ocrConfig?.["Det.det_db_thresh"] ?? inst.ocrConfig?.det_db_thresh ?? 0.3,
       det_db_box_thresh: 0.3,
       lang: inst.lang,
       ocr_config: inst.ocrConfig,

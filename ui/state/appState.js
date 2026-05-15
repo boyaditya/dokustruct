@@ -503,6 +503,7 @@ export class AppState {
   get layoutConfig() {
     const s = this.#state;
     return {
+      execution_provider: s.activeExecutionProvider ?? 'wasm',
       model_type: s.layoutModelType,
       conf_thresh: s.layoutConfThresh,
       layout_shape_mode: s.layoutShapeMode,
@@ -517,8 +518,12 @@ export class AppState {
    */
   get ocrConfig() {
     const s = this.#state;
+    const executionProvider = s.activeExecutionProvider ?? 'wasm';
     return {
+      execution_provider: executionProvider,
       use_det_mode: s.useDetMode,
+      "Det.rec_batch_num": executionProvider === 'webgpu' ? 4 : 1,
+      "Rec.rec_batch_num": executionProvider === 'webgpu' ? 24 : 6,
     };
   }
 
@@ -529,6 +534,7 @@ export class AppState {
   get tableConfig() {
     const s = this.#state;
     return {
+      execution_provider: s.activeExecutionProvider ?? 'wasm',
       model_type: s.tableModelType,
       force_ocr: s.tableForceOcr,
       use_word_box: s.tableUseWordBox,
@@ -553,9 +559,11 @@ export class AppState {
    * @returns {object}
    */
   get formulaConfig() {
+    const s = this.#state;
     return {
-      formula_level: this.#state.formulaLevel,
-      modelType: this.#state.formulaModelType,
+      execution_provider: s.activeExecutionProvider ?? 'wasm',
+      formula_level: s.formulaLevel,
+      modelType: s.formulaModelType,
     };
   }
 

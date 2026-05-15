@@ -88,9 +88,15 @@ export class BatchAnalyze {
     this.ocrConfig = ocrConfig || {};
     this.formulaConfig = formulaConfig || {};
     this.tableConfig = tableConfig || {};
+    const ratioBatch = Math.max(1, Number(this.batchRatio) || 1);
+    if (!this.ocrConfig["Det.rec_batch_num"]) this.ocrConfig["Det.rec_batch_num"] = Math.min(4, ratioBatch);
+    if (!this.layoutConfig.batch_num) this.layoutConfig.batch_num = Math.min(4, ratioBatch);
+    if (!this.formulaConfig.batch_num && this.formulaConfig.execution_provider === "wasm") {
+      this.formulaConfig.batch_num = Math.min(2, ratioBatch);
+    }
 
     this.useDetMode = this.ocrConfig.use_det_mode || "auto";
-    this.ocrDetBaseBatchSize = this.ocrConfig["Det.rec_batch_num"] || 1;
+    this.ocrDetBaseBatchSize = this.ocrConfig["Det.rec_batch_num"];
     this.sealEnable = this.ocrConfig.seal_enable ?? true;
     this.useDocOrientationClassify =
       this.layoutConfig.use_doc_orientation_classify ??
@@ -99,7 +105,7 @@ export class BatchAnalyze {
     this.useCustomOcr = false;
     this.useCustomTable = false;
 
-    this.layoutBaseBatchSize = this.layoutConfig.batch_num || 1;
+    this.layoutBaseBatchSize = this.layoutConfig.batch_num;
 
     this.formulaLevel = this.formulaConfig.formula_level || 0;
     // WEBGPU LIMITATION: PP-FormulaNet Plus M is a ~100M param Transformer.

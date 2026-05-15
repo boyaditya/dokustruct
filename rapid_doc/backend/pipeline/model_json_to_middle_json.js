@@ -33,6 +33,12 @@ import { OcrConfidence } from "../../utils/ocr_utils.js";
 import { cleanMemory, toMatBgr } from "../../utils/model_utils.js";
 import { __version__ } from "../../version.js";
 
+function deleteMat(mat) {
+  if (mat && typeof cv !== 'undefined' && mat instanceof cv.Mat && !mat.isDeleted?.()) {
+    mat.delete();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // page_model_info_to_page_info
 // ---------------------------------------------------------------------------
@@ -77,7 +83,7 @@ export async function pageModelInfoToPageInfo(
   const extractOriginalImageIouThresh = image_config?.extract_original_image_iou_thresh ?? 0.9;
 
   // Save table fill images
-  saveTableFillImage(
+  await saveTableFillImage(
     pageModelInfo.layout_dets,
     pageDict.table_fill_image_list || [],
     pageImgMd5, pageIndex, imageWriter
@@ -323,7 +329,12 @@ async function postProcessOcr(middleJson, lang, ocrConfig) {
     ocr_config: ocrConfig,
   });
 
-  const [ocrResList] = await ocrModel.ocr(imgCropList, { det: false });
+  let ocrResList = [];
+  try {
+    [ocrResList] = await ocrModel.ocr(imgCropList, { det: false });
+  } finally {
+    for (const img of imgCropList) deleteMat(img);
+  }
 
   if (ocrResList.length !== needOcrList.length) {
     throw new Error(

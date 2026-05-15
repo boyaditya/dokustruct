@@ -42,7 +42,7 @@ import {
   checkImg, preprocessImage, sortedBoxes, mergeDetBoxes,
   updateDetBoxes, getRotateCropImage, calculateIsAngle,
 } from '../../utils/ocr_utils.js';
-import { configureOrtWasmRuntime } from '../../utils/ort_runtime.js';
+import { configureOrtWasmRuntime, acquireGlobalGpu } from '../../utils/ort_runtime.js';
 import { DownloadFile, DownloadFileInput } from '../../utils/download_file.js';
 
 // Apply patches (no-op in browser)
@@ -385,34 +385,37 @@ class DetPostProcess {
     
     for (let i = 0; i < numContours; i++) {
       const contour = contours.get(i);
-      
-      // Get min area rect with proper ordering (Python get_mini_boxes)
-      const { box: points, sside } = this._getMiniBoxes(contour);
-      
-      // Check min size before unclip
-      if (sside < this.minSize) continue;
-      
-      // Calculate score
-      const score = this._boxScoreFast(pred, W, H, points);
-      if (score < this.boxThresh) continue;
-      
-      // Unclip
-      const unclipped = _unclipPolygon(points, this.unclipRatio);
-      
-      // Get final box after unclip
-      const { box: finalBox, sside: finalSside } = this._getMiniBoxes(unclipped);
-      
-      // Check min size after unclip (min_size + 2)
-      if (finalSside < this.minSize + 2) continue;
-      
-      // Scale to original image size
-      const scaledBox = finalBox.map(([x, y]) => [
-        Math.max(0, Math.min(Math.round(x / W * srcW), srcW)),
-        Math.max(0, Math.min(Math.round(y / H * srcH), srcH))
-      ]);
-      
-      boxes.push(scaledBox);
-      scores.push(score);
+      try {
+        // Get min area rect with proper ordering (Python get_mini_boxes)
+        const { box: points, sside } = this._getMiniBoxes(contour);
+
+        // Check min size before unclip
+        if (sside < this.minSize) continue;
+
+        // Calculate score
+        const score = this._boxScoreFast(pred, W, H, points);
+        if (score < this.boxThresh) continue;
+
+        // Unclip
+        const unclipped = _unclipPolygon(points, this.unclipRatio);
+
+        // Get final box after unclip
+        const { box: finalBox, sside: finalSside } = this._getMiniBoxes(unclipped);
+
+        // Check min size after unclip (min_size + 2)
+        if (finalSside < this.minSize + 2) continue;
+
+        // Scale to original image size
+        const scaledBox = finalBox.map(([x, y]) => [
+          Math.max(0, Math.min(Math.round(x / W * srcW), srcW)),
+          Math.max(0, Math.min(Math.round(y / H * srcH), srcH))
+        ]);
+
+        boxes.push(scaledBox);
+        scores.push(score);
+      } finally {
+        contour.delete?.();
+      }
     }
     
     mask.delete();
@@ -802,6 +805,7 @@ class TextDetector {
     this.session      = session;
     this.preProcess   = detPreProcess;
     this.postProcess  = detPostProcess;
+    this._acquireGpu  = acquireGlobalGpu;
   }
 
   /**
@@ -809,13 +813,73 @@ class TextDetector {
    * @returns {{ boxes: Array<Array<[number,number]>>|null, elapse: number }}
    */
   async call(img) {
-    const t0 = performance.now();
-    const { data, shape, ratio } = this.preProcess.call(img);
+    const [result] = await this.callBatch([img]);
+    return result ?? { boxes: null, elapse: 0 };
+  }
+
+  /**
+   * Batch DB text detection for images sharing the same preprocessed shape.
+   * @param {cv.Mat[]} imgList
+   * @returns {Promise<Array<{boxes: Array<Array<[number,number]>>|null, elapse: number}>>}
+   */
+  async callBatch(imgList) {
+    const results = new Array(imgList.length).fill(null);
+    const items = [];
+
+    for (let index = 0; index < imgList.length; index++) {
+      const img = imgList[index];
+      const t0 = performance.now();
+      try {
+        if (!img || typeof img.rows !== 'number' || typeof img.cols !== 'number') {
+          results[index] = { boxes: null, elapse: 0 };
+          continue;
+        }
+        const { data, shape, ratio } = this.preProcess.call(img);
+        items.push({ index, img, data, shape, ratio, t0 });
+      } catch (err) {
+        console.warn('[TextDetector] preprocess failed:', err?.message ?? err);
+        results[index] = { boxes: null, elapse: (performance.now() - t0) / 1000 };
+      }
+    }
+
+    const groups = new Map();
+    for (const item of items) {
+      const key = item.shape.slice(1).join('x');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+
+    for (const group of groups.values()) {
+      await this._runBatchGroup(group, results);
+    }
+
+    return results.map(result => result ?? { boxes: null, elapse: 0 });
+  }
+
+  async _runBatchGroup(group, output) {
     const inputName = this.session.inputNames?.[0] ?? 'x';
+    const [, C, H, W] = group[0].shape.map(Number);
+    const N = group.length;
+    const sampleSize = C * H * W;
+    const flat = new Float32Array(N * sampleSize);
+
+    for (let b = 0; b < N; b++) {
+      const { data, shape } = group[b];
+      if (shape[1] !== C || shape[2] !== H || shape[3] !== W) {
+        throw new Error('[TextDetector] mixed shapes in detector batch');
+      }
+      flat.set(data, b * sampleSize);
+    }
+
     let results, tensor;
     try {
-      tensor = new ort.Tensor('float32', data, shape);
-      results = await this.session.run({ [inputName]: tensor });
+      tensor = new ort.Tensor('float32', flat, [N, C, H, W]);
+      const releaseGpu = await this._acquireGpu();
+      try {
+        results = await this.session.run({ [inputName]: tensor });
+      } finally {
+        releaseGpu();
+      }
 
       // Retrieve first output tensor by position — avoids outputNames key-mismatch.
       // Works with both plain object and Map returns from session.run.
@@ -824,21 +888,49 @@ class TextDetector {
         : Object.values(results)[0];
       if (!predTensor?.dims?.length) {
         console.warn('[TextDetector] inference returned no valid output tensor; dims:', predTensor?.dims);
-        return { boxes: null, elapse: (performance.now() - t0) / 1000 };
+        for (const item of group) {
+          output[item.index] = { boxes: null, elapse: (performance.now() - item.t0) / 1000 };
+        }
+        return;
       }
 
       // WEBGPU FIX: If data is on GPU, download it to CPU before post-processing.
       // This handles the "The data is not on CPU" error.
-      const predData = typeof predTensor.getData === 'function'
+      const rawPredData = typeof predTensor.getData === 'function'
         ? await predTensor.getData()
         : predTensor.data;
+      const predData = rawPredData instanceof Float32Array ? rawPredData : new Float32Array(rawPredData);
+      const predDims = predTensor.dims.map(Number);
+      const outN = predDims[0] ?? 1;
+      if (outN !== N) {
+        throw new Error(`[TextDetector] detector batch output mismatch: expected ${N}, got ${outN}`);
+      }
+      const perItemDims = [1, ...predDims.slice(1)];
+      const perItemSize = perItemDims.slice(1).reduce((acc, dim) => acc * dim, 1);
 
-      const boxes  = this.postProcess.call({ ...predTensor, data: predData }, ratio, [img.rows, img.cols]);
-      const elapse = (performance.now() - t0) / 1000;
-      return { boxes: boxes.length > 0 ? boxes : null, elapse };
+      for (let b = 0; b < N; b++) {
+        const item = group[b];
+        try {
+          const itemData = predData.subarray(b * perItemSize, (b + 1) * perItemSize);
+          const boxes = this.postProcess.call(
+            { dims: perItemDims, data: itemData },
+            item.ratio,
+            [item.img.rows, item.img.cols],
+          );
+          output[item.index] = {
+            boxes: boxes.length > 0 ? boxes : null,
+            elapse: (performance.now() - item.t0) / 1000,
+          };
+        } catch (err) {
+          console.warn('[TextDetector] postprocess failed:', err?.message ?? err);
+          output[item.index] = { boxes: null, elapse: (performance.now() - item.t0) / 1000 };
+        }
+      }
     } catch (err) {
       console.warn('[TextDetector] session.run failed:', err?.message ?? err);
-      return { boxes: null, elapse: (performance.now() - t0) / 1000 };
+      for (const item of group) {
+        output[item.index] = { boxes: null, elapse: (performance.now() - item.t0) / 1000 };
+      }
     } finally {
       // Memory cleanup: dispose input tensor and all output tensors
       if (tensor?.dispose) tensor.dispose();
@@ -849,9 +941,7 @@ class TextDetector {
       }
     }
   }
-  }
-import { acquireGlobalGpu } from '../../utils/ort_runtime.js';
-
+}
 // ─── TextRecognizer ──────────────────────────────────────────────────────────
 
 class TextRecognizer {
@@ -1214,6 +1304,7 @@ export class RapidOcrModel {
    *   detModelUrl?:          string,
    *   recModelUrl?:          string,
    *   charList?:             string[],
+   *   detDbThresh?:          number,
    *   detDbBoxThresh?:       number,
    *   detDbUnclipRatio?:     number,
    *   useDilation?:          boolean,
@@ -1223,27 +1314,34 @@ export class RapidOcrModel {
    *   limitType?:            string,
    *   mean?:                 number[],
    *   std?:                  number[],
+   *   executionProvider?:    string,
    *   executionProviders?:   string[],
    * }} [params={}]
    * @returns {Promise<RapidOcrModel>}
    */
   static async create(params = {}) {
     const inst = new RapidOcrModel();
-    inst.dropScore           = 0.5;
-    inst.enableMergeDetBoxes = params.enableMergeDetBoxes ?? true;
-    inst.recBatchNum         = params.recBatchNum ?? 6;
+    const cfg = params.ocrConfig || {};
+    inst.dropScore           = params.dropScore ?? cfg["Rec.drop_score"] ?? cfg.drop_score ?? cfg.dropScore ?? 0.5;
+    inst.enableMergeDetBoxes = params.enableMergeDetBoxes ?? cfg.enable_merge_det_boxes ?? cfg.enableMergeDetBoxes ?? true;
+    inst.recBatchNum         = params.recBatchNum ?? cfg["Rec.rec_batch_num"] ?? cfg.rec_batch_num ?? 6;
 
-    const epList = ['webgpu', 'wasm'];
+    const requestedProvider = params.executionProvider ?? cfg.execution_provider ?? null;
+    const epList = Array.isArray(params.executionProviders)
+      ? params.executionProviders
+      : (Array.isArray(cfg.executionProviders)
+        ? cfg.executionProviders
+        : (requestedProvider === 'wasm' ? ['wasm'] : ['webgpu', 'wasm']));
+    const useWebGpu = epList.includes('webgpu');
 
     const sessOpts = {
       executionProviders: epList,
       logSeverityLevel: 4,
       graphOptimizationLevel: 'all',
-      // WebGPU specific optimizations
-      preferredOutputLocation: 'gpu-buffer', 
     };
+    if (useWebGpu) sessOpts.preferredOutputLocation = 'gpu-buffer';
 
-    configureOrtWasmRuntime({ numThreads: 4 });
+    await configureOrtWasmRuntime({ numThreads: cfg.numThreads ?? 4, useWebGpu });
 
     // ── Load Det model (PERFORMANCE PATH: Testing WebGPU with fallback) ──
     const detUrl = params.detModelUrl ?? DEFAULT_DET_MODEL_URL;
@@ -1251,30 +1349,26 @@ export class RapidOcrModel {
     const detBuf = await fetchArrayBufferCached(detUrl);
     let detSession;
     try {
-      detSession = await ort.InferenceSession.create(detBuf, {
-        executionProviders: ['webgpu', 'wasm'], // Try WebGPU first, then WASM
-        logSeverityLevel: 4,
-        preferredOutputLocation: 'gpu-buffer', // Optimize WebGPU
-      });
+      detSession = await ort.InferenceSession.create(detBuf, sessOpts);
     } catch (err) {
       const detail = (err instanceof Error) ? err.message : String(err);
       throw new Error(`ONNX session creation failed (OCR det): ${detail}`);
     }
 
     const detPre  = new DetPreProcess(
-      params.limitSideLen ?? 960,
-      params.limitType    ?? 'max',
-      params.mean         ?? [0.485, 0.456, 0.406],
-      params.std          ?? [0.229, 0.224, 0.225],
+      params.limitSideLen ?? cfg["Det.limit_side_len"] ?? cfg.limit_side_len ?? cfg.limitSideLen ?? 960,
+      params.limitType    ?? cfg["Det.limit_type"] ?? cfg.limit_type ?? cfg.limitType ?? 'max',
+      params.mean         ?? cfg.mean ?? [0.485, 0.456, 0.406],
+      params.std          ?? cfg.std ?? [0.229, 0.224, 0.225],
     );
     // PARITY FIX (2026-05-11): align defaults with Python baseline (rapid_ocr.py:50).
     // Python: det_db_box_thresh=0.3, det_db_unclip_ratio=1.8.
     const detPost = new DetPostProcess(
-      params.detDbThresh      ?? 0.3,  // thresh (binarization threshold)
-      params.detDbBoxThresh   ?? 0.3,  // boxThresh (score threshold) - Python default
-      params.detDbUnclipRatio ?? 1.8,  // unclipRatio - Python default
+      params.detDbThresh      ?? cfg["Det.det_db_thresh"] ?? cfg.det_db_thresh ?? cfg.detDbThresh ?? 0.3,
+      params.detDbBoxThresh   ?? cfg["Det.det_db_box_thresh"] ?? cfg.det_db_box_thresh ?? cfg.detDbBoxThresh ?? 0.3,
+      params.detDbUnclipRatio ?? cfg["Det.det_db_unclip_ratio"] ?? cfg.det_db_unclip_ratio ?? cfg.detDbUnclipRatio ?? 1.8,
       3,                          // minSize
-      params.useDilation ?? true, // useDilation
+      params.useDilation ?? cfg.use_dilation ?? cfg.useDilation ?? true,
       1000,                       // maxCandidates
     );
 
@@ -1283,13 +1377,8 @@ export class RapidOcrModel {
     // ── Load Rec model (PERFORMANCE PATH: WebGPU for the 26s bottleneck) ──
     const recUrl = params.recModelUrl
       ?? (params.lang === 'en' ? DEFAULT_REC_MODEL_URL_EN : DEFAULT_REC_MODEL_URL_CH);
-    logger.info(`Loading Rec model (WebGPU): ${recUrl}`);
-    
-    const recSessOpts = {
-      executionProviders: ['webgpu', 'wasm'],
-      logSeverityLevel: 4,
-      preferredOutputLocation: 'gpu-buffer',
-    };
+    logger.info(`Loading Rec model (${epList[0]}): ${recUrl}`);
+
     const recCandidates = [recUrl];
     if (params.lang === 'en' && !params.recModelUrl) {
       recCandidates.push(...REMOTE_REC_MODEL_URL_EN_CANDIDATES);
@@ -1543,11 +1632,7 @@ export class RapidOcrModel {
     const results = [];
     for (let i = 0; i < imgList.length; i += maxBatchSize) {
       const batch = imgList.slice(i, i + maxBatchSize);
-      // Note: PP-OCR DB model is fundamentally single-image in ort-web
-      // (dynamic input shape makes batching complex). Process sequentially.
-      for (const img of batch) {
-        results.push(await this.textDetector.call(img));
-      }
+      results.push(...await this.textDetector.callBatch(batch));
     }
     return results;
   }

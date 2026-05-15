@@ -150,7 +150,7 @@ export async function cutImage(span, oriImageList, extractOriginalImage, extract
 
   const filename = `${pageNum}_${Math.round(bbox[0])}_${Math.round(bbox[1])}_${Math.round(bbox[2])}_${Math.round(bbox[3])}`;
   const imgPath = returnPath !== null ? `${returnPath}_${filename}` : null;
-  const imgHash256Path = `${strSha256(imgPath)}.png`;
+  const imgHash256Path = `${await strSha256(imgPath)}.png`;
 
   if (!cropCanvas) {
     cropCanvas = getCropImg(bbox, pagePilImg, scale);
@@ -320,7 +320,7 @@ export async function saveTableFillImage(layoutDets, tableFillImageList, pageImg
 
         const filename = `${pageNum}_${Math.round(bbox[0])}_${Math.round(bbox[1])}_${Math.round(bbox[2])}_${Math.round(bbox[3])}`;
         const imgPath = `${returnPath('images')}_${filename}`;
-        const imgHash256Path = `${strSha256(imgPath)}.png`;
+        const imgHash256Path = `${await strSha256(imgPath)}.png`;
         const imgBytes = await imageToBytes(canvas, 'image/png');
         imageWriter.write(imgHash256Path, imgBytes);
 

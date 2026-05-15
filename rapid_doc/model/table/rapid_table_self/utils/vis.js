@@ -1,10 +1,7 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/utils/vis.py → vis.js
-// VisTable: draw table cells + HTML output via Canvas 2D API
 
 /**
- * Table visualization helper.
- * PORTING NOTE: VisTable draws bounding boxes for table cells and generates HTML output.
+ * Table visualization helper — draws table cells and OCR boxes on canvas.
  */
 export class VisTable {
   /**
@@ -89,10 +86,7 @@ export class VisTable {
     return canvas;
   }
 
-  /**
-   * @param {ImageData} imageData
-   * @returns {HTMLCanvasElement}
-   */
+  /** @private */
   _imageDataToCanvas(imageData) {
     const c = document.createElement("canvas");
     c.width = imageData.width;

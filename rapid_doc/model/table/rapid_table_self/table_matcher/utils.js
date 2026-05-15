@@ -1,6 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/table_matcher/utils.py → utils.js
-// HTML span/td manipulation using regex (replaces BeautifulSoup).
 
 /**
  * Compute Intersection-over-Union between two boxes.
@@ -34,17 +32,14 @@ export function distance(box1, box2) {
 }
 
 /**
- * Fix isolated span tags in thead HTML.
- * PORTING NOTE: deal_isolate_span(thead_part) → regex-based (replaces BeautifulSoup)
+ * Fix isolated span tags in thead HTML by wrapping them in td elements.
  * @param {string} theadPart
  * @returns {string}
  */
 export function dealIsolateSpan(theadPart) {
-  // Find <span> tags without a surrounding <td> or <th> and wrap them
   return theadPart.replace(
     /(<tr[^>]*>)((?:(?!<\/tr>).)*?<span[^>]*>(?:(?!<\/span>).)*?<\/span>(?:(?!<\/tr>).)*?)<\/tr>/gs,
     (match, trOpen, content) => {
-      // If already inside td/th, leave as-is
       if (/<(?:td|th)[^>]*>/.test(content)) return match;
       return `${trOpen}<td>${content}</td></tr>`;
     }
@@ -52,13 +47,11 @@ export function dealIsolateSpan(theadPart) {
 }
 
 /**
- * Remove duplicate bounding box entries from thead.
- * PORTING NOTE: deal_duplicate_bb(thead_part) → regex manipulation
+ * Remove duplicate bounding box attributes from thead td tags.
  * @param {string} theadPart
  * @returns {string}
  */
 export function dealDuplicateBb(theadPart) {
-  // Remove repeated bbox attributes in td tags (keep first occurrence)
   return theadPart.replace(
     /(<td[^>]*)((?:\s+bbox="[^"]*")+)/g,
     (match, prefix, bboxAttrs) => {

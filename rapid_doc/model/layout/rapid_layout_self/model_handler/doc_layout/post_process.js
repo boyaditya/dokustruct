@@ -1,19 +1,9 @@
 /**
- * PORTING NOTE: model_handler/doc_layout/post_process.py → post_process.js
+ * DocLayoutPostProcess: confidence masking, scaleBoxes rescaling, class lookup.
  *
- * DocLayoutPostProcess: confidence masking, scale_boxes rescaling, class lookup.
- *
- * CHANGE: numpy operations → plain Float32Array iteration.
- *   - preds[0]          → preds is ort.Tensor[]; preds[0].data is a Float32Array
- *   - mask = preds[..., 4] > threshold  → explicit loop
- *   - preds[:, :4]      → extract first 4 cols
- *   - .astype(int)       → Math.round
- *
- * INPUT:  preds = ort.Tensor[]   (returned by OrtInferSession.run())
+ * INPUT:  preds = ort.Tensor[] (returned by OrtInferSession.run())
  *         Also accepts plain Float32Array (for direct tensor data passing)
  * OUTPUT: { boxes: number[][], scores: number[], labels: string[] }
- *         Changed from Python returning 3 separate values to a single object
- *         for cleaner JS destructuring.
  */
 
 import { scaleBoxes } from './utils.js';

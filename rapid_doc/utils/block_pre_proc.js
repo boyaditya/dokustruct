@@ -1,11 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-/**
- * PORTING NOTE: block_pre_proc.py → block_pre_proc.js
- *
- * WORKAROUND: Python list mutation (list.remove) → JS filter + splice
- * REASON: JS arrays use reference equality for splice/filter
- * SOLUTION: Track removal by index; mutate arrays in-place when needed.
- */
 
 import {
   calculateIou,
@@ -17,7 +10,6 @@ import { BlockType } from './enum_class.js';
 
 /**
  * Separate groups into body, caption, footnote, and maybe-text-image lists.
- * PORTING NOTE: process_groups(...) → processGroups(...)
  *
  * @param {Array<object>} groups
  * @param {string} bodyKey
@@ -26,6 +18,8 @@ import { BlockType } from './enum_class.js';
  * @returns {[Array, Array, Array, Array]} [bodyBlocks, captionBlocks, footnoteBlocks, maybeTextImageBlocks]
  */
 export function processGroups(groups, bodyKey, captionKey, footnoteKey) {
+  if (!groups || groups.length === 0) return [[], [], [], []];
+
   const bodyBlocks = [];
   const captionBlocks = [];
   const footnoteBlocks = [];
@@ -55,7 +49,6 @@ export function processGroups(groups, bodyKey, captionKey, footnoteKey) {
 
 /**
  * Build the canonical all_bboxes list from all block types.
- * PORTING NOTE: prepare_block_bboxes(...) → prepareBlockBboxes(...)
  *
  * @returns {[Array[], Array[], Array[]]} [allBboxes, allDiscardedBlocks, footnoteBlocks]
  */
@@ -85,18 +78,16 @@ export function prepareBlockBboxes(
   addBboxes(titleBlocks, BlockType.TITLE, allBboxes);
   addBboxes(interlineEquationBlocks, BlockType.INTERLINE_EQUATION, allBboxes);
 
-  // Fix overlaps
   allBboxes = fixTextOverlapTitleBlocks(allBboxes);
   allBboxes = removeNeedDropBlocks(allBboxes, discardedBlocks);
   allBboxes = fixInterlineEquationOverlapTextBlocksWithHiIou(allBboxes);
 
-  // Build discarded list
   const allDiscardedBlocks = [];
   addBboxes(discardedBlocks, BlockType.DISCARDED, allDiscardedBlocks);
 
   // Detect footnote blocks: width > 1/3 page, height > 10, y0 > 70% page height
   const footnoteBlocks = [];
-  for (const discarded of discardedBlocks) {
+  for (const discarded of (discardedBlocks ?? [])) {
     const [x0, y0, x1, y1] = discarded.bbox;
     if ((x1 - x0) > (pageW / 3) && (y1 - y0) > 10 && y0 > (pageH * 0.7)) {
       footnoteBlocks.push([x0, y0, x1, y1]);
@@ -107,7 +98,7 @@ export function prepareBlockBboxes(
   let usePpDoclayoutv2 = false;
   if (allBboxes.length > 0) {
     const originalOrder = allBboxes[0][11];
-    if (originalOrder !== null && originalOrder !== undefined && originalOrder >= 0) {
+    if (originalOrder != null && originalOrder >= 0) {
       usePpDoclayoutv2 = true;
     }
   }
@@ -133,7 +124,6 @@ export function prepareBlockBboxes(
 
 /**
  * Push bbox tuples from blocks into the bboxes array.
- * PORTING NOTE: add_bboxes(...) → addBboxes(...)
  * Bbox tuple layout: [x0, y0, x1, y1, null, null, null, blockType, null, null, originalLabel, originalOrder, score, groupId, polygonPoints]
  *
  * @param {Array<object>} blocks
@@ -141,6 +131,8 @@ export function prepareBlockBboxes(
  * @param {Array} bboxes
  */
 export function addBboxes(blocks, blockType, bboxes) {
+  if (!blocks) return;
+
   const groupedTypes = new Set([
     BlockType.IMAGE_BODY, BlockType.IMAGE_CAPTION, BlockType.IMAGE_FOOTNOTE,
     BlockType.TABLE_BODY, BlockType.TABLE_CAPTION, BlockType.TABLE_FOOTNOTE,
@@ -156,9 +148,12 @@ export function addBboxes(blocks, blockType, bboxes) {
   }
 }
 
+const HIGH_IOU_THRESHOLD = 0.8;
+const OVERLAP_DROP_THRESHOLD = 0.6;
+const OVERLAP_MERGE_THRESHOLD = 0.8;
+
 /**
- * Remove title blocks that heavily overlap text blocks (IOU > 0.8).
- * PORTING NOTE: fix_text_overlap_title_blocks → fixTextOverlapTitleBlocks
+ * Remove title blocks that heavily overlap text blocks.
  *
  * @param {Array[]} allBboxes
  * @returns {Array[]}
@@ -170,7 +165,7 @@ export function fixTextOverlapTitleBlocks(allBboxes) {
 
   for (const textBlock of textBlocks) {
     for (const titleBlock of titleBlocks) {
-      if (calculateIou(textBlock.slice(0, 4), titleBlock.slice(0, 4)) > 0.8) {
+      if (calculateIou(textBlock.slice(0, 4), titleBlock.slice(0, 4)) > HIGH_IOU_THRESHOLD) {
         if (!needRemove.includes(titleBlock)) needRemove.push(titleBlock);
       }
     }
@@ -184,18 +179,19 @@ export function fixTextOverlapTitleBlocks(allBboxes) {
 }
 
 /**
- * Remove blocks that heavily overlap discarded blocks (overlap ratio > 0.6).
- * PORTING NOTE: remove_need_drop_blocks → removeNeedDropBlocks
+ * Remove blocks that heavily overlap discarded blocks.
  *
  * @param {Array[]} allBboxes
  * @param {Array<object>} discardedBlocks
  * @returns {Array[]}
  */
 export function removeNeedDropBlocks(allBboxes, discardedBlocks) {
+  if (!discardedBlocks || discardedBlocks.length === 0) return allBboxes;
+
   const needRemove = [];
   for (const block of allBboxes) {
     for (const discardedBlock of discardedBlocks) {
-      if (calculateOverlapAreaInBbox1AreaRatio(block.slice(0, 4), discardedBlock.bbox) > 0.6) {
+      if (calculateOverlapAreaInBbox1AreaRatio(block.slice(0, 4), discardedBlock.bbox) > OVERLAP_DROP_THRESHOLD) {
         if (!needRemove.includes(block)) {
           needRemove.push(block);
           break;
@@ -211,8 +207,7 @@ export function removeNeedDropBlocks(allBboxes, discardedBlocks) {
 }
 
 /**
- * Remove text blocks that heavily overlap interline equation blocks (IOU > 0.8).
- * PORTING NOTE: fix_interline_equation_overlap_text_blocks_with_hi_iou → fixInterlineEquationOverlapTextBlocksWithHiIou
+ * Remove text blocks that heavily overlap interline equation blocks.
  *
  * @param {Array[]} allBboxes
  * @returns {Array[]}
@@ -224,7 +219,7 @@ export function fixInterlineEquationOverlapTextBlocksWithHiIou(allBboxes) {
 
   for (const ieBlock of interlineBlocks) {
     for (const textBlock of textBlocks) {
-      if (calculateIou(ieBlock.slice(0, 4), textBlock.slice(0, 4)) > 0.8) {
+      if (calculateIou(ieBlock.slice(0, 4), textBlock.slice(0, 4)) > HIGH_IOU_THRESHOLD) {
         if (!needRemove.includes(textBlock)) needRemove.push(textBlock);
       }
     }
@@ -238,19 +233,20 @@ export function fixInterlineEquationOverlapTextBlocksWithHiIou(allBboxes) {
 }
 
 /**
- * Find blocks below footnote regions (y0 >= footnote y1) with >= 80% vertical projection overlap.
- * PORTING NOTE: find_blocks_under_footnote → findBlocksUnderFootnote
+ * Find blocks below footnote regions with >= 80% vertical projection overlap.
  *
  * @param {Array[]} allBboxes
  * @param {number[][]} footnoteBlocks
  * @returns {Array[]}
  */
 export function findBlocksUnderFootnote(allBboxes, footnoteBlocks) {
+  if (!footnoteBlocks || footnoteBlocks.length === 0) return [];
+
   const needRemoveBlocks = [];
   for (const block of allBboxes) {
     const [blockX0, blockY0, blockX1, blockY1] = block;
     for (const footnoteBbox of footnoteBlocks) {
-      const [, footnoteY0, , footnoteY1] = footnoteBbox;
+      const [, , , footnoteY1] = footnoteBbox;
       if (
         blockY0 >= footnoteY1 &&
         calculateVerticalProjectionOverlapRatio([blockX0, blockY0, blockX1, blockY1], footnoteBbox) >= 0.8
@@ -267,18 +263,19 @@ export function findBlocksUnderFootnote(allBboxes, footnoteBlocks) {
 
 /**
  * Remove smaller overlapping blocks (merging their bbox into the larger block).
- * PORTING NOTE: remove_overlaps_min_blocks → removeOverlapsMinBlocks
  *
  * @param {Array[]} allBboxes
  * @returns {Array[]}
  */
 export function removeOverlapsMinBlocks(allBboxes) {
+  if (!allBboxes || allBboxes.length === 0) return allBboxes ?? [];
+
   const needRemove = [];
   for (let i = 0; i < allBboxes.length; i++) {
     for (let j = i + 1; j < allBboxes.length; j++) {
       const block1 = allBboxes[i];
       const block2 = allBboxes[j];
-      const overlapBox = getMinboxIfOverlapByRatio(block1.slice(0, 4), block2.slice(0, 4), 0.8);
+      const overlapBox = getMinboxIfOverlapByRatio(block1.slice(0, 4), block2.slice(0, 4), OVERLAP_MERGE_THRESHOLD);
       if (overlapBox !== null) {
         const area1 = (block1[2] - block1[0]) * (block1[3] - block1[1]);
         const area2 = (block2[2] - block2[0]) * (block2[3] - block2[1]);

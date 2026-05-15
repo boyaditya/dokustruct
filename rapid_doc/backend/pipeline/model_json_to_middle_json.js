@@ -1,14 +1,4 @@
 // Copyright (c) RapidAI. All rights reserved.
-/**
- * PORTING NOTE: model_json_to_middle_json.py → model_json_to_middle_json.js
- *
- * WORKAROUND: tqdm progress loops → plain async for-of
- * REASON: No tqdm in browser
- * SOLUTION: async iteration with console.info progress logging
- *
- * AFFECTED METHODS: result_to_middle_json, page_model_info_to_page_info,
- *                   _post_process_ocr, make_page_info_dict
- */
 
 import { AtomModelSingleton } from "./model_init.js";
 import { AtomicModel } from "./model_list.js";
@@ -17,8 +7,9 @@ import { MagicModel } from "./pipeline_magic_model.js";
 import { crossPageTableMerge } from "../utils/utils.js";
 import { getDevice, getFormulaEnable } from "../../utils/config_reader.js";
 import { ContentType } from "../../utils/enum_class.js";
+import { AbortException } from "../../utils/exceptions.js";
 import { prepareBlockBboxes, processGroups } from "../../utils/block_pre_proc.js";
-import { sortBlocksByBbox } from "../../utils/block_sort.js";
+import { sortBlocksByBbox, configureReadingOrder } from "../../utils/block_sort.js";
 import { cutImageAndTable } from "../../utils/cut_image.js";
 import { bytesMd5 } from "../../utils/hash_utils.js";
 import {
@@ -31,32 +22,28 @@ import {
 import { saveTableFillImage } from "../../utils/pdf_image_tools.js";
 import { OcrConfidence } from "../../utils/ocr_utils.js";
 import { cleanMemory, toMatBgr } from "../../utils/model_utils.js";
+import { deleteMat } from "../../utils/resource_utils.js";
+import { formatPipelineError } from "../../utils/browser_utils.js";
 import { __version__ } from "../../version.js";
+import { getLayoutParsingRes } from "../../model/reading_order/layout_parsing/xycut_plus_v3.js";
+import { xycutPlusSort } from "../../model/reading_order/xycut_plus.js";
+import { blocktype_to_sort_label } from "../../model/reading_order/layout_parsing/setting.js";
 
-function deleteMat(mat) {
-  if (mat && typeof cv !== 'undefined' && mat instanceof cv.Mat && !mat.isDeleted?.()) {
-    mat.delete();
-  }
-}
+// Configure reading order providers for block_sort utility
+configureReadingOrder({ getLayoutParsingRes, xycutPlusSort, blocktype_to_sort_label });
 
 // ---------------------------------------------------------------------------
-// page_model_info_to_page_info
+// pageModelInfoToPageInfo
 // ---------------------------------------------------------------------------
 
 /**
  * Convert raw per-page model output to a page_info dict.
- * PORTING NOTE: page_model_info_to_page_info(...) → async pageModelInfoToPageInfo(...)
- *
  * @param {object} pageModelInfo
  * @param {object} imageDict - { scale, img_pil }
  * @param {object} pageDict
  * @param {object} imageWriter
  * @param {number} pageIndex
  * @param {object} [opts]
- * @param {boolean} [opts.ocr_enable=false]
- * @param {boolean} [opts.formula_enabled=true]
- * @param {object|null} [opts.image_config]
- * @param {boolean} [opts.use_vl_ocr=false]
  * @returns {Promise<object|null>}
  */
 export async function pageModelInfoToPageInfo(
@@ -72,28 +59,28 @@ export async function pageModelInfoToPageInfo(
     use_vl_ocr = false,
   } = {}
 ) {
+  if (!pageModelInfo || !imageDict) return null;
+
   const scale = imageDict.scale;
   const pagePilImg = imageDict.img_pil;
   const pageImgMd5 = bytesMd5(pagePilImg);
-  const [pageW, pageH] = (pageDict.size || [0, 0]).map(Number);
+  const [pageW, pageH] = (pageDict?.size || [0, 0]).map(Number);
 
   const magicModel = new MagicModel(pageModelInfo, scale);
 
   const extractOriginalImage = image_config?.extract_original_image ?? false;
   const extractOriginalImageIouThresh = image_config?.extract_original_image_iou_thresh ?? 0.9;
 
-  // Save table fill images
   await saveTableFillImage(
     pageModelInfo.layout_dets,
-    pageDict.table_fill_image_list || [],
+    pageDict?.table_fill_image_list || [],
     pageImgMd5, pageIndex, imageWriter
   );
 
-  // Collect block groups
   const discardedBlocks = magicModel.getDiscarded();
   const textBlocks = magicModel.getTextBlocks();
   const titleBlocks = magicModel.getTitleBlocks();
-  const [inlineEquations, interlineEquations, interlineEquationBlocks] = magicModel.getEquations();
+  const [, interlineEquations, interlineEquationBlocks] = magicModel.getEquations();
 
   const imgGroups = magicModel.getImgs();
   const tableGroups = magicModel.getTables();
@@ -108,12 +95,10 @@ export async function pageModelInfoToPageInfo(
   let spans = magicModel.getAllSpans();
   const vlOcrSpans = use_vl_ocr ? magicModel.getVlOcrSpans() : [];
 
-  // Maybe text image blocks → image body
   if (maybeTextImageBlocks?.length) {
     imgBodyBlocks.push(...maybeTextImageBlocks);
   }
 
-  // Interline equations
   let interlineEqBlocksForBbox = formula_enabled ? [] : interlineEquationBlocks;
   if (interlineEqBlocksForBbox.length > 0) {
     for (const block of interlineEqBlocksForBbox) {
@@ -126,7 +111,6 @@ export async function pageModelInfoToPageInfo(
     }
   }
 
-  // Prepare bboxes
   const eqBlocksParam = interlineEqBlocksForBbox.length > 0 ? interlineEqBlocksForBbox : interlineEquations;
   const [allBboxes, allDiscardedBlocks, footnoteBlocks] = prepareBlockBboxes(
     imgBodyBlocks, imgCaptionBlocks, imgFootnoteBlocks,
@@ -135,35 +119,29 @@ export async function pageModelInfoToPageInfo(
     eqBlocksParam, pageW, pageH
   );
 
-  // Filter spans
   spans = removeOutsideSpans(spans, allBboxes, allDiscardedBlocks);
   [spans] = removeOverlapsLowConfidenceSpans(spans);
-  // NEW 0.9.4: Re-enable overlap removal (was disabled in 0.9.1)
   [spans] = removeOverlapsMinSpans(spans);
 
-  // Assign spans by mode
   if (use_vl_ocr) {
-    spans = processVlOcrSpans(spans, vlOcrSpans, allBboxes, allDiscardedBlocks);
+    spans = processVlOcrSpans(spans, vlOcrSpans);
   } else if (!ocr_enable) {
     spans = await txtSpansExtract(pageDict, spans, pagePilImg, scale, allBboxes, allDiscardedBlocks);
   }
 
-  // Discarded blocks
   const [discardedBlockWithSpans, spansAfterDiscard] = fillSpansInBlocks(allDiscardedBlocks, spans, 0.4);
   const fixDiscardedBlocks = fixDiscardedBlock(discardedBlockWithSpans);
   spans = spansAfterDiscard;
 
   if (allBboxes.length === 0 && fixDiscardedBlocks.length === 0) return null;
 
-  // Normalise page image to BGR cv.Mat for cutImageAndTable
   const { mat: pageMat, owned: matOwned } = toMatBgr(pagePilImg);
 
   try {
-    // Cut images / tables / interline equations
     for (const span of spans) {
       if ([ContentType.IMAGE, ContentType.TABLE, ContentType.INTERLINE_EQUATION].includes(span.type)) {
         await cutImageAndTable(
-          span, pageDict.ori_image_list || [],
+          span, pageDict?.ori_image_list || [],
           extractOriginalImage, extractOriginalImageIouThresh,
           pageMat, pageImgMd5, pageIndex, imageWriter, scale
         );
@@ -173,8 +151,7 @@ export async function pageModelInfoToPageInfo(
     if (matOwned) pageMat.delete();
   }
 
-  // Fill spans into blocks
-  const [blockWithSpans, remainingSpans] = fillSpansInBlocks(allBboxes, spans, 0.5);
+  const [blockWithSpans] = fillSpansInBlocks(allBboxes, spans, 0.5);
   const fixBlocks = fixBlockSpans(blockWithSpans);
 
   const sortedBlocks = await sortBlocksByBbox(fixBlocks, pageW, pageH, footnoteBlocks, pagePilImg);
@@ -183,10 +160,10 @@ export async function pageModelInfoToPageInfo(
 }
 
 // ---------------------------------------------------------------------------
-// _process_vl_ocr_spans
+// processVlOcrSpans
 // ---------------------------------------------------------------------------
 
-function processVlOcrSpans(spans, vlOcrSpans, allBboxes, allDiscardedBlocks) {
+function processVlOcrSpans(spans, vlOcrSpans) {
   for (const vlSpan of vlOcrSpans) {
     vlSpan.score = vlSpan.score ?? 0.95;
     vlSpan.type = ContentType.TEXT;
@@ -196,13 +173,11 @@ function processVlOcrSpans(spans, vlOcrSpans, allBboxes, allDiscardedBlocks) {
 }
 
 // ---------------------------------------------------------------------------
-// result_to_middle_json
+// resultToMiddleJson
 // ---------------------------------------------------------------------------
 
 /**
  * Convert all model outputs to an intermediate JSON.
- * PORTING NOTE: result_to_middle_json(...) → async resultToMiddleJson(...)
- *
  * @param {object[]} modelList
  * @param {object[]} imagesList
  * @param {object[]} pageDictList
@@ -225,6 +200,10 @@ export async function resultToMiddleJson(
     pdf_pages_batch = 0,
   } = {}
 ) {
+  if (!modelList || !modelList.length) {
+    return { pdf_info: [], _backend: "pipeline", _version_name: __version__ };
+  }
+
   const middleJson = {
     pdf_info: [],
     _backend: "pipeline",
@@ -233,7 +212,6 @@ export async function resultToMiddleJson(
 
   formula_enabled = getFormulaEnable(formula_enabled);
 
-  // Determine VL OCR mode
   const atomModelManager = AtomModelSingleton.getInstance();
   const ocrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
     det_db_box_thresh: 0.3,
@@ -241,52 +219,61 @@ export async function resultToMiddleJson(
     ocr_config,
   });
   const useVlOcr = typeof ocrModel.batchPredict === "function" &&
-                   !("ocr" in ocrModel);  // CustomBaseModel heuristic
+                   !("ocr" in ocrModel);
 
   for (let pageIndex = 0; pageIndex < modelList.length; pageIndex++) {
     const pageModelInfo = modelList[pageIndex];
-    const pageDict = pageDictList[pageIndex];
-    const imageDict = imagesList[pageIndex];
-
+    const pageDict = pageDictList?.[pageIndex];
+    const imageDict = imagesList?.[pageIndex];
     const pageId = pageIndex + (batch_idx * pdf_pages_batch);
 
-    let pageInfo = await pageModelInfoToPageInfo(
-      pageModelInfo, imageDict, pageDict, imageWriter, pageId,
-      { ocr_enable, formula_enabled, image_config, use_vl_ocr: useVlOcr }
-    );
+    try {
+      let pageInfo = await pageModelInfoToPageInfo(
+        pageModelInfo, imageDict, pageDict, imageWriter, pageId,
+        { ocr_enable, formula_enabled, image_config, use_vl_ocr: useVlOcr }
+      );
 
-    if (pageInfo === null) {
-      const [pageW, pageH] = (pageDict.size || [0, 0]).map(Number);
-      pageInfo = makePageInfoDict([], pageId, pageW, pageH, []);
+      if (pageInfo == null) {
+        const [pageW, pageH] = (pageDict?.size || [0, 0]).map(Number);
+        pageInfo = makePageInfoDict([], pageId, pageW, pageH, []);
+      }
+
+      middleJson.pdf_info.push(pageInfo);
+    } catch (err) {
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: 'middleJson',
+        module: 'resultToMiddleJson',
+        message: err.message,
+        pageIndex: pageId,
+        recoverable: true,
+      }));
+      const [pageW, pageH] = (pageDict?.size || [0, 0]).map(Number);
+      middleJson.pdf_info.push(makePageInfoDict([], pageId, pageW, pageH, []));
     }
-
-    middleJson.pdf_info.push(pageInfo);
   }
 
-  // Post-process OCR (non-VL mode)
   if (!useVlOcr) {
     await postProcessOcr(middleJson, lang, ocr_config);
   }
 
-  // Paragraph split
   paraSplit(middleJson.pdf_info);
-
-  // Cross-page table merge
   crossPageTableMerge(middleJson.pdf_info);
 
   if (modelList.length >= 10) {
     cleanMemory(getDevice());
   }
 
-  console.info('[resultToMiddleJson] Done.');
   return middleJson;
 }
 
 // ---------------------------------------------------------------------------
-// _post_process_ocr
+// postProcessOcr
 // ---------------------------------------------------------------------------
 
 async function postProcessOcr(middleJson, lang, ocrConfig) {
+  if (!middleJson?.pdf_info?.length) return;
+
   const needOcrList = [];
   const imgCropList = [];
 
@@ -356,12 +343,11 @@ async function postProcessOcr(middleJson, lang, ocrConfig) {
 }
 
 // ---------------------------------------------------------------------------
-// make_page_info_dict
+// makePageInfoDict
 // ---------------------------------------------------------------------------
 
 /**
  * Construct a page_info dict.
- * PORTING NOTE: make_page_info_dict(blocks, page_id, page_w, page_h, discarded_blocks)
  * @param {object[]} blocks
  * @param {number} pageId
  * @param {number} pageW

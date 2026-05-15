@@ -1,16 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-/**
- * PORTING NOTE: language.py → language.js
- *
- * WORKAROUND: fast_langdetect Python library
- * REASON: Not available in browser
- * SOLUTION: Use franc-min (npm) for language identification
- *           frank-min returns ISO 639-3 codes; we return lowercase language codes.
- *
- * WORKAROUND: os.environ["FTLANG_CACHE"] path setup
- * REASON: No filesystem or environment in browser
- * SOLUTION: Not needed; franc-min ships its own data
- */
 
 import { franc } from 'franc-min';
 
@@ -25,8 +13,6 @@ export function removeInvalidSurrogates(text) {
 
 /**
  * Detect the language of a text string.
- * PORTING NOTE: detect_language(text) → franc(text) with ISO 639-3 → ISO 639-1 mapping
- *
  * Returns a lowercase language code (e.g. "en", "zh", "ja").
  * Returns "" for empty or undetermined text.
  *
@@ -62,9 +48,7 @@ export function detectLang(text) {
 }
 
 /**
- * ISO 639-3 → ISO 639-1 / pipeline language code mapping.
- * PORTING NOTE: fast_langdetect returns uppercase 2-letter codes;
- *   franc returns 3-letter. We normalize here.
+ * ISO 639-3 → pipeline language code mapping.
  * @param {string} iso3
  * @returns {string}
  */

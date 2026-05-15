@@ -1,29 +1,30 @@
 // Copyright (c) Opendatalab. All rights reserved.
-/**
- * PORTING NOTE: block_sort.py → block_sort.js
- *
- * WORKAROUND: statistics.median() (Python stdlib)
- * REASON: No equivalent in JS stdlib
- * SOLUTION: Inline sort-based median function.
- *
- * WORKAROUND: numpy.array() for OCR box aggregation
- * REASON: numpy not available in browser
- * SOLUTION: Plain JS arrays; Float32Array where typed buffer needed.
- *
- * WORKAROUND: copy.deepcopy()
- * REASON: No stdlib deepcopy in JS
- * SOLUTION: JSON.parse(JSON.stringify(...)) for plain data objects.
- *
- * WORKAROUND: logger.exception(e) (loguru)
- * REASON: loguru not in browser
- * SOLUTION: console.error(e)
- */
 
 import { BlockType, ContentType } from './enum_class.js';
 import { bboxToPoints } from './ocr_utils.js';
-import { getLayoutParsingRes } from '../model/reading_order/layout_parsing/xycut_plus_v3.js';
-import { xycutPlusSort } from '../model/reading_order/xycut_plus.js';
-import { blocktype_to_sort_label } from '../model/reading_order/layout_parsing/setting.js';
+
+/**
+ * Default reading order providers — set by the pipeline layer via `configureReadingOrder`.
+ * This avoids utils/ importing directly from model/.
+ * @type {{ getLayoutParsingRes: Function|null, xycutPlusSort: Function|null, blocktype_to_sort_label: object|null }}
+ */
+const _readingOrderProviders = {
+  getLayoutParsingRes: null,
+  xycutPlusSort: null,
+  blocktype_to_sort_label: null,
+};
+
+/**
+ * Configure reading order providers. Must be called before sortBlocksByBbox.
+ * Typically called once during pipeline initialization.
+ *
+ * @param {{ getLayoutParsingRes?: Function, xycutPlusSort?: Function, blocktype_to_sort_label?: object }} providers
+ */
+export function configureReadingOrder(providers) {
+  if (providers.getLayoutParsingRes) _readingOrderProviders.getLayoutParsingRes = providers.getLayoutParsingRes;
+  if (providers.xycutPlusSort) _readingOrderProviders.xycutPlusSort = providers.xycutPlusSort;
+  if (providers.blocktype_to_sort_label) _readingOrderProviders.blocktype_to_sort_label = providers.blocktype_to_sort_label;
+}
 
 /**
  * Compute the median of an array of numbers.
@@ -49,16 +50,17 @@ function deepCopy(obj) {
 
 /**
  * Sort blocks within a page using line-height analysis and xycut-plus layout ordering.
- * PORTING NOTE: sort_blocks_by_bbox(...) → sortBlocksByBbox(...)
  *
  * @param {Array<object>} blocks
  * @param {number} pageW
  * @param {number} pageH
  * @param {Array} footnoteBlocks
  * @param {ImageBitmap|null} pagePilImg
- * @returns {Array<object>}
+ * @returns {Promise<Array<object>>}
  */
 export async function sortBlocksByBbox(blocks, pageW, pageH, footnoteBlocks, pagePilImg) {
+  if (!blocks || blocks.length === 0) return [];
+
   const lineHeight = getLineHeight(blocks);
   addLinesToBlocks(blocks, pageW, pageH, lineHeight, footnoteBlocks);
   const sorted = await sortBlocksByXycutPlus(blocks, pagePilImg);
@@ -74,12 +76,13 @@ export async function sortBlocksByBbox(blocks, pageW, pageH, footnoteBlocks, pag
 
 /**
  * Compute median line height from text-type blocks.
- * PORTING NOTE: get_line_height → getLineHeight
  *
  * @param {Array<object>} blocks
  * @returns {number}
  */
 export function getLineHeight(blocks) {
+  if (!blocks || blocks.length === 0) return 10;
+
   const heights = [];
   const textTypes = new Set([
     BlockType.TEXT, BlockType.TITLE,
@@ -99,7 +102,6 @@ export function getLineHeight(blocks) {
 
 /**
  * Add virtual lines to blocks based on computed line_height.
- * PORTING NOTE: add_lines_to_blocks → addLinesToBlocks
  *
  * @param {Array<object>} fixBlocks
  * @param {number} pageW
@@ -108,6 +110,8 @@ export function getLineHeight(blocks) {
  * @param {Array} footnoteBlocks
  */
 export function addLinesToBlocks(fixBlocks, pageW, pageH, lineHeight, footnoteBlocks) {
+  if (!fixBlocks) return;
+
   const textTypes = new Set([
     BlockType.TEXT, BlockType.TITLE,
     BlockType.IMAGE_CAPTION, BlockType.IMAGE_FOOTNOTE,
@@ -127,8 +131,6 @@ export function addLinesToBlocks(fixBlocks, pageW, pageH, lineHeight, footnoteBl
           (block.bbox[3] - block.bbox[1]) > lineHeight * 2) {
         block.real_lines = deepCopy(block.lines);
         addLinesToBlock(block);
-      } else {
-        // Keep existing lines — no-op
       }
     } else if (block.type === BlockType.IMAGE_BODY || block.type === BlockType.TABLE_BODY ||
         block.type === BlockType.INTERLINE_EQUATION) {
@@ -137,15 +139,16 @@ export function addLinesToBlocks(fixBlocks, pageW, pageH, lineHeight, footnoteBl
     }
   }
 
-  for (const block of footnoteBlocks) {
-    const footnoteBlock = { bbox: block.slice(0, 4), lines: [] };
-    addLinesToBlock(footnoteBlock);
+  if (Array.isArray(footnoteBlocks)) {
+    for (const block of footnoteBlocks) {
+      const footnoteBlock = { bbox: block.slice(0, 4), lines: [] };
+      addLinesToBlock(footnoteBlock);
+    }
   }
 }
 
 /**
  * Divide a block bbox into multiple horizontal line bboxes.
- * PORTING NOTE: insert_lines_into_block → insertLinesIntoBlock
  *
  * @param {number[]} blockBbox [x0, y0, x1, y1]
  * @param {number} lineHeight
@@ -154,21 +157,23 @@ export function addLinesToBlocks(fixBlocks, pageW, pageH, lineHeight, footnoteBl
  * @returns {number[][]}
  */
 export function insertLinesIntoBlock(blockBbox, lineHeight, pageW, pageH) {
+  if (!blockBbox || blockBbox.length < 4) return [];
+
   const [x0, y0, x1, y1] = blockBbox;
   const blockHeight = y1 - y0;
-  const blockWeight = x1 - x0;
+  const blockWidth = x1 - x0;
 
   if (lineHeight * 2 < blockHeight) {
     let lines;
-    if (blockHeight > pageH * 0.25 && blockWeight < pageW * 0.5 && blockWeight > pageW * 0.25) {
+    if (blockHeight > pageH * 0.25 && blockWidth < pageW * 0.5 && blockWidth > pageW * 0.25) {
       lines = Math.floor(blockHeight / lineHeight);
-    } else if (blockWeight > pageW * 0.4) {
+    } else if (blockWidth > pageW * 0.4) {
       lines = 3;
-    } else if (blockWeight > pageW * 0.25) {
+    } else if (blockWidth > pageW * 0.25) {
       lines = Math.floor(blockHeight / lineHeight);
     } else {
-      if (blockHeight / blockWeight > 1.2) return [[x0, y0, x1, y1]];
-      else lines = 2;
+      if (blockHeight / blockWidth > 1.2) return [[x0, y0, x1, y1]];
+      lines = 2;
     }
 
     const sliceH = (y1 - y0) / lines;
@@ -186,19 +191,21 @@ export function insertLinesIntoBlock(blockBbox, lineHeight, pageW, pageH) {
 
 /**
  * Compute the original_order for a block (from block.original_order or min span order).
- * PORTING NOTE: extract_block_original_order → extractBlockOriginalOrder
  *
  * @param {object} block
  * @returns {number}
  */
 export function extractBlockOriginalOrder(block) {
+  if (!block) return -1;
+
   const order = block.original_order;
-  if (order !== undefined && order !== null && order >= 0) return order;
+  if (order != null && order >= 0) return order;
+
   const orders = [];
   for (const line of block.lines ?? []) {
     for (const span of line.spans ?? []) {
       const o = span.original_order;
-      if (o !== undefined && o !== null && o >= 0) orders.push(o);
+      if (o != null && o >= 0) orders.push(o);
     }
   }
   return orders.length > 0 ? Math.min(...orders) : -1;
@@ -206,13 +213,14 @@ export function extractBlockOriginalOrder(block) {
 
 /**
  * Sort blocks using xycut-plus-v3 layout parsing, falling back to xycut-plus.
- * PORTING NOTE: sort_blocks_by_xycut_plus → sortBlocksByXycutPlus
  *
  * @param {Array<object>} fixBlocks
  * @param {ImageBitmap|null} pagePilImg
  * @returns {Promise<Array<object>>}
  */
 export async function sortBlocksByXycutPlus(fixBlocks, pagePilImg) {
+  if (!fixBlocks || fixBlocks.length === 0) return [];
+
   // Restore real_lines for image/table/title/equation blocks
   for (const block of fixBlocks) {
     block.bbox = block.bbox.map(v => Math.max(0, v));
@@ -244,7 +252,7 @@ export async function sortBlocksByXycutPlus(fixBlocks, pagePilImg) {
       return fixBlocks;
     }
   } catch (e) {
-    console.error(e);
+    console.warn('[sortBlocksByXycutPlus] original_order check failed:', e?.message ?? e);
   }
 
   // Build OCR result arrays
@@ -275,12 +283,15 @@ export async function sortBlocksByXycutPlus(fixBlocks, pagePilImg) {
     if (Object.keys(labelCounter).length > 0) {
       mostCommonLabel = Object.entries(labelCounter).reduce((a, b) => b[1] > a[1] ? b : a)[0];
     } else {
-      mostCommonLabel = blocktype_to_sort_label?.[block.type] ?? 'unknown';
+      mostCommonLabel = _readingOrderProviders.blocktype_to_sort_label?.[block.type] ?? 'unknown';
     }
     layoutDetRes.push({ coordinate: block.bbox, label: mostCommonLabel, score: 1.0 });
   }
 
   try {
+    if (!_readingOrderProviders.getLayoutParsingRes) {
+      throw new Error('Reading order providers not configured');
+    }
     const layoutDetResObj = { boxes: layoutDetRes };
     const regionDetRes = { boxes: [] };
     const overallOcrRes = {
@@ -292,8 +303,7 @@ export async function sortBlocksByXycutPlus(fixBlocks, pagePilImg) {
       dt_polys: dtPolys,
     };
 
-    // pagePilImg can be an HTMLImageElement/ImageBitmap or null
-    const parsingResList = await getLayoutParsingRes(
+    const parsingResList = await _readingOrderProviders.getLayoutParsingRes(
       pagePilImg,
       regionDetRes,
       layoutDetResObj,
@@ -308,16 +318,18 @@ export async function sortBlocksByXycutPlus(fixBlocks, pagePilImg) {
       fixBlocks[i].index = indexToOrder[i] ?? fixBlocks.length;
     }
   } catch (e) {
-    console.error(e);
-    // Fall back to xycut-plus
+    console.warn('[sortBlocksByXycutPlus] layout parsing failed, falling back to xycut-plus:', e?.message ?? e);
     try {
-      const sortedIndices = xycutPlusSort(blockBboxes);
+      if (!_readingOrderProviders.xycutPlusSort) {
+        throw new Error('xycutPlusSort provider not configured');
+      }
+      const sortedIndices = _readingOrderProviders.xycutPlusSort(blockBboxes);
       const sortedBoxes = sortedIndices.map(i => blockBboxes[i]);
       for (let i = 0; i < fixBlocks.length; i++) {
         fixBlocks[i].index = sortedBoxes.findIndex(b => b === blockBboxes[i]);
       }
     } catch (e2) {
-      console.error(e2);
+      console.warn('[sortBlocksByXycutPlus] xycut-plus fallback failed:', e2?.message ?? e2);
       for (let i = 0; i < fixBlocks.length; i++) {
         fixBlocks[i].index = i;
       }
@@ -338,12 +350,13 @@ export async function sortBlocksByXycutPlus(fixBlocks, pagePilImg) {
 
 /**
  * Group IMAGE_BODY/TABLE_BODY blocks back into IMAGE/TABLE group objects.
- * PORTING NOTE: revert_group_blocks → revertGroupBlocks
  *
  * @param {Array<object>} blocks
  * @returns {Array<object>}
  */
 export function revertGroupBlocks(blocks) {
+  if (!blocks || blocks.length === 0) return [];
+
   const imageGroups = {};
   const tableGroups = {};
   const newBlocks = [];
@@ -374,7 +387,6 @@ export function revertGroupBlocks(blocks) {
 
 /**
  * Combine a group of sub-blocks into a single parent block.
- * PORTING NOTE: process_block_list → processBlockList
  *
  * @param {Array<object>} blocks
  * @param {*} bodyType

@@ -1,6 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/utils/download_file.py → download_file.js
-// Same W4 pattern as formula's download_file.js with a different DB name.
 
 import { getFileSha256 } from "./utils.js";
 

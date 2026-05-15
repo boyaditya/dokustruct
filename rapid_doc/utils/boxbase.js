@@ -1,12 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-/**
- * PORTING NOTE: boxbase.py → boxbase.js
- *
- * Direct translation of pure geometric utility functions.
- * Python numpy removed (plain arithmetic).
- * cv2.rotate kept as cv calls in rotate_image.
- * merge_adjacent_bboxes: np.mean() → average utility.
- */
 
 /**
  * Returns true if box1 is completely inside box2.
@@ -34,20 +26,20 @@ export function bboxRelativePos(bbox1, bbox2) {
 
 /**
  * Euclidean distance between two bounding boxes.
+ * Returns 0 when boxes overlap, otherwise the shortest edge-to-edge distance.
  * @param {number[]} bbox1
  * @param {number[]} bbox2
  * @returns {number}
  */
 export function bboxDistance(bbox1, bbox2) {
-  const dist = (p1, p2) => Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2);
   const [x1, y1, x1b, y1b] = bbox1;
   const [x2, y2, x2b, y2b] = bbox2;
   const [left, right, bottom, top] = bboxRelativePos(bbox1, bbox2);
 
-  if (top && left)    return dist([x1, y1b], [x2b, y2]);
-  if (left && bottom) return dist([x1, y1], [x2b, y2b]);
-  if (bottom && right) return dist([x1b, y1], [x2, y2b]);
-  if (right && top)  return dist([x1b, y1b], [x2, y2]);
+  if (top && left)    return Math.sqrt((x1 - x2b) ** 2 + (y1b - y2) ** 2);
+  if (left && bottom) return Math.sqrt((x1 - x2b) ** 2 + (y1 - y2b) ** 2);
+  if (bottom && right) return Math.sqrt((x1b - x2) ** 2 + (y1 - y2b) ** 2);
+  if (right && top)   return Math.sqrt((x1b - x2) ** 2 + (y1b - y2) ** 2);
   if (left)   return x1 - x2b;
   if (right)  return x2 - x1b;
   if (bottom) return y1 - y2b;
@@ -86,11 +78,13 @@ export function calculateOverlapArea2MinboxAreaRatio(bbox1, bbox2) {
   const xRight  = Math.min(bbox1[2], bbox2[2]);
   const yBottom = Math.min(bbox1[3], bbox2[3]);
   if (xRight < xLeft || yBottom < yTop) return 0.0;
+
   const intersection = (xRight - xLeft) * (yBottom - yTop);
   const area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1]);
   const area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1]);
   const minArea = Math.min(area1, area2);
-  return minArea === 0 ? 0 : intersection / minArea;
+  if (minArea === 0) return 0.0;
+  return intersection / minArea;
 }
 
 /**
@@ -105,11 +99,13 @@ export function calculateIou(bbox1, bbox2) {
   const xRight  = Math.min(bbox1[2], bbox2[2]);
   const yBottom = Math.min(bbox1[3], bbox2[3]);
   if (xRight < xLeft || yBottom < yTop) return 0.0;
+
   const intersection = (xRight - xLeft) * (yBottom - yTop);
   const area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1]);
   const area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1]);
-  if (area1 === 0 || area2 === 0) return 0;
-  return intersection / (area1 + area2 - intersection);
+  const union = area1 + area2 - intersection;
+  if (union === 0) return 0.0;
+  return intersection / union;
 }
 
 /**
@@ -124,9 +120,11 @@ export function calculateOverlapAreaInBbox1AreaRatio(bbox1, bbox2) {
   const xRight  = Math.min(bbox1[2], bbox2[2]);
   const yBottom = Math.min(bbox1[3], bbox2[3]);
   if (xRight < xLeft || yBottom < yTop) return 0.0;
+
   const intersection = (xRight - xLeft) * (yBottom - yTop);
   const area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1]);
-  return area1 === 0 ? 0 : intersection / area1;
+  if (area1 === 0) return 0.0;
+  return intersection / area1;
 }
 
 /**
@@ -141,27 +139,35 @@ export function calculateVerticalProjectionOverlapRatio(block1, block2) {
   const xLeft  = Math.max(x0_1, x0_2);
   const xRight = Math.min(x1_1, x1_2);
   if (xRight < xLeft) return 0.0;
+
   const intersectionLength = xRight - xLeft;
   const block1Length = x1_1 - x0_1;
-  return block1Length === 0 ? 0.0 : intersectionLength / block1Length;
+  if (block1Length === 0) return 0.0;
+  return intersectionLength / block1Length;
 }
+
+/** Default font size used when span has no font.size property. */
+const DEFAULT_FONT_SIZE = 10;
+
+/** Default x-gap ratio for horizontal merge threshold. */
+const DEFAULT_X_GAP_RATIO = 0.6;
+
+/** Default y-tolerance ratio for vertical line clustering. */
+const DEFAULT_Y_TOLERANCE_RATIO = 0.8;
 
 /**
  * Merge adjacent or overlapping text spans by clustering into lines.
- * PORTING NOTE: numpy mean → plain average; logic identical.
  * @param {object[]} spans
  * @param {number} [xGapRatio=0.6]
  * @param {number} [yToleranceRatio=0.8]
  * @param {boolean} [returnText=false]
  * @returns {object[]}
  */
-export function mergeAdjacentBboxes(spans, xGapRatio = 0.6, yToleranceRatio = 0.8, returnText = false) {
-  if (!spans.length) return [];
+export function mergeAdjacentBboxes(spans, xGapRatio = DEFAULT_X_GAP_RATIO, yToleranceRatio = DEFAULT_Y_TOLERANCE_RATIO, returnText = false) {
+  if (!spans || !spans.length) return [];
 
   // Sort by (y0, x0)
   spans = [...spans].sort((a, b) => (a.bbox[1] - b.bbox[1]) || (a.bbox[0] - b.bbox[0]));
-
-  function avg(arr) { return arr.reduce((s, x) => s + x, 0) / arr.length; }
 
   // Annotate center/height
   for (const s of spans) {
@@ -170,12 +176,30 @@ export function mergeAdjacentBboxes(spans, xGapRatio = 0.6, yToleranceRatio = 0.
   }
 
   // Phase 1: vertical clustering
+  const lines = clusterSpansIntoLines(spans, yToleranceRatio);
+
+  // Phase 2: horizontal merging within each line
+  const mergedResult = mergeSpansHorizontally(lines, xGapRatio, returnText);
+
+  // Cleanup temp fields
+  for (const s of mergedResult) { delete s._cy; delete s._h; }
+
+  return mergedResult;
+}
+
+/**
+ * Cluster spans into lines based on vertical proximity.
+ * @param {object[]} spans - Spans annotated with _cy and _h
+ * @param {number} yToleranceRatio
+ * @returns {object[][]}
+ */
+function clusterSpansIntoLines(spans, yToleranceRatio) {
   const lines = [];
   for (const span of spans) {
     let assigned = false;
     for (const line of lines) {
-      const avgH = avg(line.map(s => s._h));
-      const lineCy = avg(line.map(s => s._cy));
+      const avgH = line.reduce((s, x) => s + x._h, 0) / line.length;
+      const lineCy = line.reduce((s, x) => s + x._cy, 0) / line.length;
       if (Math.abs(span._cy - lineCy) < avgH * yToleranceRatio) {
         line.push(span);
         assigned = true;
@@ -184,19 +208,27 @@ export function mergeAdjacentBboxes(spans, xGapRatio = 0.6, yToleranceRatio = 0.
     }
     if (!assigned) lines.push([span]);
   }
+  return lines;
+}
 
+/**
+ * Merge spans horizontally within each line based on x-gap threshold.
+ * @param {object[][]} lines
+ * @param {number} xGapRatio
+ * @param {boolean} returnText
+ * @returns {object[]}
+ */
+function mergeSpansHorizontally(lines, xGapRatio, returnText) {
   const mergedResult = [];
-
-  // Phase 2: horizontal merging within each line
   for (let line of lines) {
     line = [...line].sort((a, b) => a.bbox[0] - b.bbox[0]);
     let current = { ...line[0] };
 
     for (const span of line.slice(1)) {
-      const [ax0, , ax1] = current.bbox;
+      const [, , ax1] = current.bbox;
       const [bx0] = span.bbox;
-      const sizeA = current.font?.size ?? 10;
-      const sizeB = span.font?.size ?? 10;
+      const sizeA = current.font?.size ?? DEFAULT_FONT_SIZE;
+      const sizeB = span.font?.size ?? DEFAULT_FONT_SIZE;
       const sizeAvg = (sizeA + sizeB) / 2;
       if (bx0 - ax1 <= sizeAvg * xGapRatio) {
         const x0 = Math.min(current.bbox[0], span.bbox[0]);
@@ -212,16 +244,12 @@ export function mergeAdjacentBboxes(spans, xGapRatio = 0.6, yToleranceRatio = 0.
     }
     mergedResult.push(current);
   }
-
-  // Cleanup temp fields
-  for (const s of mergedResult) { delete s._cy; delete s._h; }
-
   return mergedResult;
 }
 
 /**
  * Rotate a table image according to angle.
- * PORTING NOTE: cv2.rotate → cv.rotate (OpenCV.js)
+ * Uses OpenCV.js cv.rotate — browser-specific workaround for cv2.rotate.
  * @param {object} imgInfo - object with table_img (cv.Mat)
  * @param {number} angle - 0, 90, 180, or 270
  */
@@ -242,6 +270,13 @@ export function rotateImage(imgInfo, angle) {
   // 180 and 0 → no-op
 }
 
+/**
+ * Return a rotated copy of the image Mat.
+ * Uses OpenCV.js cv.rotate — browser-specific workaround for cv2.rotate.
+ * @param {object} img - cv.Mat
+ * @param {number} angle - 0, 90, 180, or 270
+ * @returns {object} rotated Mat (caller owns the returned Mat if different from input)
+ */
 export function getRotateImage(img, angle) {
   if (typeof cv === 'undefined') return img;
   const label = String(angle);
@@ -258,16 +293,21 @@ export function getRotateImage(img, angle) {
   return img;
 }
 
+/**
+ * Restore polygon coordinates from a rotated image back to original image space.
+ * @param {number[]} poly - 8-point polygon [xmin, ymin, xmax, ymin, xmax, ymax, xmin, ymax]
+ * @param {number|string} angle - rotation angle: 0, 90, 180, or 270
+ * @param {number} origW - original image width
+ * @param {number} origH - original image height
+ * @returns {number[]} restored 8-point polygon
+ */
 export function restorePoly(poly, angle, origW, origH) {
   if (!Array.isArray(poly) || poly.length < 8) return poly;
   const label = String(angle);
   const [xmin, ymin, xmax, , , ymax] = poly.map(Number);
   if (label === "0") return poly;
 
-  let newXmin;
-  let newYmin;
-  let newXmax;
-  let newYmax;
+  let newXmin, newYmin, newXmax, newYmax;
   if (label === "90") {
     newXmin = origW - 1 - ymax;
     newYmin = xmin;

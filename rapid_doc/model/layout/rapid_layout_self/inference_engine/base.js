@@ -1,31 +1,8 @@
 /**
- * PORTING NOTE: inference_engine/base.py → base.js
+ * InferSession abstract base class and engine factory.
  *
- * WORKAROUND: Python uses ABC (abstract base class) with static class-level
- *             OmegaConf.load(engine_cfg.yaml) executed at import time.
- * REASON:
- *   1. JavaScript has no abstract class enforcement — we simulate with runtime
- *      throws in method bodies.
- *   2. fetch() is async — cannot be called at module scope synchronously.
- * SOLUTION:
- *   - engine_cfg is embedded as a plain JS constant (mirrors the YAML content)
- *     so no I/O is needed at import time.  An `async loadEngineCfg(url)` helper
- *     is also exported to allow overriding the config from a remote YAML at
- *     runtime (used by OrtInferSession.create()).
- *   - `_verify_model(modelPath)` filesystem check → replaced by a URL
- *     well-formedness check (fetch will surface errors naturally).
- *   - OpenVINO engine type is kept in getEngine() but throws an
- *     "unsupported in browser" error.
- *   - `import_package` (importlib) → dynamic `import()`.
- *
- * AFFECTED METHODS:
- *   InferSession.__init__        → constructor() [no-op; use static create()]
- *   InferSession.__call__        → async run(inputContent, scaleFactor)
- *   InferSession._verify_model   → static _verifyModel(modelUrl) [URL check]
- *   InferSession.update_params   → static updateParams(cfg, params)
- *   InferSession.get_character_list → getCharacterList(key)
- *   InferSession.have_key        → haveKey(key)
- *   get_engine()                 → getEngine(engineType)
+ * BROWSER WORKAROUND: engine_cfg is embedded as a plain JS constant (no I/O at import).
+ * Only ONNXRUNTIME is supported in the browser; OpenVINO throws a clear error.
  */
 
 import { getLogger } from '../../../../utils/logger.js';
@@ -34,9 +11,6 @@ import { EngineType } from '../../../../utils/typings.js';
 const logger = getLogger('inference_engine.base');
 
 // ─── Embedded engine_cfg (mirrors engine_cfg.yaml) ───────────────────────────
-//
-// Embedded here so the module loads synchronously with no I/O.
-// OrtInferSession.create() may override this with a fetched version.
 
 export const DEFAULT_ENGINE_CFG = Object.freeze({
   onnxruntime: {
@@ -86,9 +60,8 @@ export const DEFAULT_ENGINE_CFG = Object.freeze({
 // ─── Optional async loader (override from URL) ────────────────────────────────
 
 /**
- * Fetch and parse engine_cfg.yaml from a URL, returning a plain JS object.
+ * Fetch and parse engine_cfg.yaml from a URL.
  * Falls back to DEFAULT_ENGINE_CFG on any error.
- *
  * @param {string} url
  * @returns {Promise<Object>}
  */
@@ -110,16 +83,10 @@ export async function loadEngineCfg(url) {
 // ─── InferSession abstract base class ────────────────────────────────────────
 
 export class InferSession {
-  /**
-   * Subclasses must NOT call model loading logic here.
-   * Use a `static async create(cfg)` factory pattern instead.
-   */
+  /** Subclasses must use a `static async create(cfg)` factory pattern. */
   constructor() {
-    // Engine config — populated by subclass create() after loading
     this.engineCfg = null;
   }
-
-  // ── Abstract method stubs (throw if not overridden) ────────────────────────
 
   /**
    * Run inference.
@@ -155,7 +122,7 @@ export class InferSession {
     return this.getCharacterList();
   }
 
-  // ── Input / output name helpers (overridden by OrtInferSession) ────────────
+  // ── Input / output name helpers ─────────────────────────────────────────────
 
   /** @returns {string[]} */
   getInputNames() {
@@ -170,10 +137,8 @@ export class InferSession {
   // ── Static utilities ───────────────────────────────────────────────────────
 
   /**
-   * Validate a model URL (replaces Python filesystem _verify_model).
+   * Validate a model URL.
    * Throws if the URL is null / empty / not a string.
-   * Actual reachability is verified naturally when the buffer is fetched.
-   *
    * @param {string|null} modelUrl
    */
   static _verifyModel(modelUrl) {
@@ -183,10 +148,8 @@ export class InferSession {
   }
 
   /**
-   * Merge override params into a config object (replaces OmegaConf.update).
-   * Deep-merges `params` into a shallow copy of `cfg`.
-   *
-   * @param {Object} cfg    - Base config (plain JS object)
+   * Merge override params into a config object (deep-merge).
+   * @param {Object} cfg    - Base config
    * @param {Object} params - Override params
    * @returns {Object}
    */
@@ -210,13 +173,9 @@ export class InferSession {
 
 /**
  * Return the concrete InferSession subclass for the requested engine type.
- * Mirrors Python: get_engine(engine_type)
- *
- * Browser note: only ONNXRUNTIME is supported.
- * OpenVINO is explicitly refused with a clear error message.
- *
+ * Only ONNXRUNTIME is supported in the browser.
  * @param {string} engineType - One of EngineType.*
- * @returns {Promise<typeof InferSession>}  The constructor (not an instance)
+ * @returns {Promise<typeof InferSession>}
  */
 export async function getEngine(engineType) {
   logger.info(`Using engine_name: ${engineType}`);

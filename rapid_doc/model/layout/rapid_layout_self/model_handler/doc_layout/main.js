@@ -1,23 +1,6 @@
 /**
- * PORTING NOTE: model_handler/doc_layout/main.py → main.js
- *
  * DocLayoutModelHandler: single-image pipeline for DocLayout YOLO models
  * (doclayout_docstructbench).
- *
- * CHANGE: All methods renamed to camelCase.
- *   __call__   → async call(oriImgList)
- *   preprocess → _preprocess(image)       (prefixed to avoid method/property collision)
- *   postprocess→ _postprocess(preds, ...) (same)
- *
- * CHANGE: performance.now() replaces time.perf_counter().
- *
- * NOTE on commented-out batch path in Python source:
- *   The batch path (np.concatenate) is NOT ported because it was already
- *   commented out in the Python source.  The implemented single-image loop is
- *   what we port.
- *
- * INPUT:  cv.Mat[] list (BGR, HWC)
- * OUTPUT: RapidLayoutOutput[]
  */
 
 import { BaseModelHandler } from '../base/index.js';
@@ -42,8 +25,6 @@ export class DocLayoutModelHandler extends BaseModelHandler {
 
   /**
    * Run inference on a list of images.
-   * Mirrors: __call__(ori_img_list)
-   *
    * @param {cv.Mat[]} oriImgList
    * @returns {Promise<import('../../utils/typings.js').RapidLayoutOutput[]>}
    */

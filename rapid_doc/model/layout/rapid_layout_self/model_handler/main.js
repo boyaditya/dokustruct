@@ -1,16 +1,6 @@
 /**
- * PORTING NOTE: model_handler/main.py → main.js
- *
  * ModelHandler: routes between PPDocLayoutModelHandler and DocLayoutModelHandler
  * depending on cfg.modelType.
- *
- * CHANGE: Constructor is synchronous; session is already created before being
- * passed in. session.characters is now session.getCharacterList() (method call).
- *
- * CHANGE: __call__ → async call()
- *
- * CHANGE: model_type.value (Python Enum .value) → the JS string value directly
- * since our ModelType is Object.freeze({...}) and values are already strings.
  */
 
 import { PPDocLayoutModelHandler } from './pp_doclayout/index.js';
@@ -31,8 +21,6 @@ export class ModelHandler {
 
   /**
    * Initialise the correct sub-handler based on model type.
-   * Mirrors: _init_handler(cfg, session)
-   *
    * @param {import('../utils/typings.js').RapidLayoutInput} cfg
    * @param {import('../inference_engine/base.js').InferSession} session
    * @returns {import('./base/index.js').BaseModelHandler}
@@ -40,7 +28,6 @@ export class ModelHandler {
   _initHandler(cfg, session) {
     const modelType = cfg.model_type ?? cfg.modelType;
 
-    // characters = custom metadata list from ONNX model meta
     const characters = session.getCharacterList?.() ?? [];
     logger.info(`${modelType} contains ${characters.length} character entries`);
 

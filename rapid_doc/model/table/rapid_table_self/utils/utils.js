@@ -1,5 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/utils/utils.py → utils.js
 
 /**
  * Check if a string is a URL.
@@ -12,7 +11,6 @@ export function isUrl(s) {
 
 /**
  * Format OCR results into table-compatible bounding boxes.
- * PORTING NOTE: format_ocr_results(ocr_results, img_h, img_w) → JS array
  * @param {Array<{bbox: number[], text: string, score?: number}>} ocrResults
  * @param {number} imgH
  * @param {number} imgW
@@ -26,10 +24,8 @@ export function formatOcrResults(ocrResults, imgH, imgW) {
   const recRes = [];
   for (const item of ocrResults) {
     const bbox = item.bbox ?? item;
-    // Normalize to [x0,y0,x1,y1] absolute coords
     let x0, y0, x1, y1;
     if (Array.isArray(bbox[0])) {
-      // polygon [[x,y],[x,y],[x,y],[x,y]]
       const xs = bbox.map(pt => pt[0]);
       const ys = bbox.map(pt => pt[1]);
       x0 = Math.min(...xs); y0 = Math.min(...ys);
@@ -83,7 +79,7 @@ export async function getFileSha256(data) {
   return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** No-op stubs */
+/** No-op stubs for Python filesystem operations (not applicable in browser). */
 export function importPackage(_pkgName) { return null; }
 export function mkdir(_dirPath) { /* no-op in browser */ }
 export function saveImg(_img, _path) { /* no-op */ }

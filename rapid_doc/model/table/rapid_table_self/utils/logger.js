@@ -1,13 +1,10 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: table logger — simple console wrapper with lru_cache pattern
-// getLogger(name) → returns logger object (cached per name)
 
 /** @type {Map<string, object>} */
 const _loggerCache = new Map();
 
 /**
  * Get (or create) a logger for the given name.
- * PORTING NOTE: Python lru_cache(maxsize=None) → JS Map cache
  * @param {string} name
  * @returns {{ debug: Function, info: Function, warn: Function, warning: Function, error: Function }}
  */

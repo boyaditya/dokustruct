@@ -73,6 +73,7 @@ scripts/*
 !scripts/check_table_init.mjs
 !scripts/check_table_model_only.mjs
 !scripts/generate_native_baseline.py
+!scripts/parity_audit.mjs
 
 mineru.net*/
 RapidOrientation-main/

@@ -1,31 +1,23 @@
 // Copyright (c) Opendatalab. All rights reserved.
 /**
- * PORTING NOTE: pdf_classify.py → pdf_classify.js
+ * PDF classification: determines whether a PDF needs OCR or can use text extraction.
  *
- * WORKAROUND: pdfminer (PDFPageAggregator, LTImage, LTFigure, extract_text)
- * REASON: pdfminer is a Python-only library
- * SOLUTION:
- *   - getAvgCleanedCharsPerPage → pdfjs-dist getTextContent()
- *   - getHighImageCoverageRatio → pdfjs-dist getOperatorList() + OPS.paintImageXObject
- *   - detectInvalidChars → regex on pdfjs text content
- *   - extractPages → pdfjs PDFDocumentProxy page slicing via exportAsPDF workaround
- *     (browser has no pdfium.PdfDocument.import_pages; used a simplified approach: return full bytes)
- *
- * WORKAROUND: numpy.random.choice
- * REASON: numpy not in browser
- * SOLUTION: crypto.getRandomValues-based sampling
- *
- * WORKAROUND: pypdfium2.PdfDocument.new() + import_pages + save()
- * REASON: pypdfium2 not in browser; pdfjs-dist is read-only
- * SOLUTION: extractPages returns a subset via pdf-lib (if available) or returns original bytes.
- *   Falls back to returning original bytes if pdf-lib is not installed (conservative approach).
+ * Browser workarounds:
+ * - pdfminer → pdfjs-dist getTextContent() / getOperatorList()
+ * - numpy.random.choice → crypto.getRandomValues Fisher-Yates sampling
+ * - pypdfium2 page extraction → pdf-lib
  */
 
 import { getPdfjsLib } from './pdfjs_loader.js';
 
+const CHARS_THRESHOLD = 50;
+const HIGH_COVERAGE_IMAGE_OPS = 3;
+const HIGH_COVERAGE_RATIO_THRESHOLD = 0.8;
+const CID_RATIO_THRESHOLD = 0.05;
+const MAX_SAMPLE_PAGES = 10;
+
 /**
  * Get a cryptographically random sample of integers without replacement.
- * PORTING NOTE: numpy.random.choice(total, count, replace=False) → randomChoice(total, count)
  *
  * @param {number} total
  * @param {number} count
@@ -33,7 +25,6 @@ import { getPdfjsLib } from './pdfjs_loader.js';
  */
 function randomChoice(total, count) {
   const indices = Array.from({ length: total }, (_, i) => i);
-  // Fisher-Yates partial shuffle
   const rng = new Uint32Array(total);
   crypto.getRandomValues(rng);
   for (let i = total - 1; i > 0; i--) {
@@ -50,7 +41,6 @@ function randomChoice(total, count) {
  */
 async function loadPdfDoc(pdfBytes) {
   const pdfjsLib = await getPdfjsLib();
-  // Always pass a copy so PDF.js cannot detach the caller's buffer
   const _data = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes instanceof ArrayBuffer ? pdfBytes.slice(0) : pdfBytes);
   const loadingTask = pdfjsLib.getDocument({ data: _data });
   return loadingTask.promise;
@@ -58,12 +48,13 @@ async function loadPdfDoc(pdfBytes) {
 
 /**
  * Classify whether a PDF can have text extracted directly or needs OCR.
- * PORTING NOTE: classify(pdf_bytes) → classify(pdfBytes)
  *
  * @param {Uint8Array} pdfBytes
  * @returns {Promise<'txt'|'ocr'>}
  */
 export async function classify(pdfBytes) {
+  if (!pdfBytes || pdfBytes.length === 0) return 'ocr';
+
   let sampleBytes;
   try {
     sampleBytes = await extractPages(pdfBytes);
@@ -82,16 +73,15 @@ export async function classify(pdfBytes) {
     const pageCount = pdfDoc.numPages;
     if (pageCount === 0) return 'ocr';
 
-    const pagesToCheck = Math.min(pageCount, 10);
-    const CHARS_THRESHOLD = 50;
+    const pagesToCheck = Math.min(pageCount, MAX_SAMPLE_PAGES);
 
     if ((await getAvgCleanedCharsPerPage(pdfDoc, pagesToCheck)) < CHARS_THRESHOLD) return 'ocr';
     if (await detectInvalidCharsInDoc(pdfDoc)) return 'ocr';
-    if ((await getHighImageCoverageRatioInDoc(pdfDoc, pagesToCheck)) >= 0.8) return 'ocr';
+    if ((await getHighImageCoverageRatioInDoc(pdfDoc, pagesToCheck)) >= HIGH_COVERAGE_RATIO_THRESHOLD) return 'ocr';
 
     return 'txt';
   } catch (e) {
-    console.error('PDF classify error:', e);
+    console.warn('[classify] PDF classification error:', e?.message ?? e);
     return 'ocr';
   } finally {
     try { await pdfDoc.cleanup?.(); } catch { /* ignore */ }
@@ -101,13 +91,14 @@ export async function classify(pdfBytes) {
 
 /**
  * Compute average cleaned character count per page.
- * PORTING NOTE: get_avg_cleaned_chars_per_page → getAvgCleanedCharsPerPage
  *
  * @param {import('pdfjs-dist').PDFDocumentProxy} pdfDoc
  * @param {number} pagesToCheck
  * @returns {Promise<number>}
  */
 export async function getAvgCleanedCharsPerPage(pdfDoc, pagesToCheck) {
+  if (!pdfDoc || pagesToCheck <= 0) return 0;
+
   let cleanedTotal = 0;
   for (let i = 0; i < pagesToCheck; i++) {
     const page = await pdfDoc.getPage(i + 1);
@@ -120,19 +111,16 @@ export async function getAvgCleanedCharsPerPage(pdfDoc, pagesToCheck) {
 
 /**
  * Estimate image coverage ratio using pdfjs operator list.
- * PORTING NOTE: get_high_image_coverage_ratio → getHighImageCoverageRatio
- *   (pdfminer LTImage/LTFigure → pdfjs OPS.paintImageXObject)
- *
- * NOTE: pdfjs does not expose image rectangle sizes directly; this counts image paint calls
- *   as a heuristic. Pages with ≥ 3 image operations are flagged as high-coverage.
+ * Pages with >= 3 image operations are flagged as high-coverage.
  *
  * @param {Uint8Array} samplePdfBytes
  * @param {number} pagesToCheck
  * @returns {Promise<number>}
  */
 export async function getHighImageCoverageRatio(samplePdfBytes, pagesToCheck) {
-  const pdfDoc = await loadPdfDoc(samplePdfBytes);
+  if (!samplePdfBytes) return 0;
 
+  const pdfDoc = await loadPdfDoc(samplePdfBytes);
   try {
     return await getHighImageCoverageRatioInDoc(pdfDoc, pagesToCheck);
   } finally {
@@ -144,37 +132,36 @@ export async function getHighImageCoverageRatio(samplePdfBytes, pagesToCheck) {
 async function getHighImageCoverageRatioInDoc(pdfDoc, pagesToCheck) {
   let highCoverageCount = 0;
   const pageCount = Math.min(pdfDoc.numPages, pagesToCheck);
+  if (pageCount === 0) return 0;
 
   for (let i = 0; i < pageCount; i++) {
     const page = await pdfDoc.getPage(i + 1);
     const opList = await page.getOperatorList();
     // OPS.paintImageXObject = 85, paintJpegXObject = 82, paintInlineImageXObject = 83
     const imageOps = opList.fnArray.filter(op => op === 85 || op === 82 || op === 83).length;
-    // Heuristic: >= 3 image ops -> likely image-heavy page
-    if (imageOps >= 3) highCoverageCount++;
+    if (imageOps >= HIGH_COVERAGE_IMAGE_OPS) highCoverageCount++;
   }
 
-  return pageCount > 0 ? highCoverageCount / pageCount : 0;
+  return highCoverageCount / pageCount;
 }
 
 /**
  * Extract a random sample of up to 10 pages as a new PDF.
- * PORTING NOTE: extract_pages(src_pdf_bytes) → extractPages(srcPdfBytes)
- *
- * WORKAROUND: pypdfium2 PdfDocument.new() + import_pages + save()
- * SOLUTION: Try to use pdf-lib if available; otherwise return original bytes.
+ * Uses pdf-lib if available; otherwise returns original bytes.
  *
  * @param {Uint8Array} srcPdfBytes
  * @returns {Promise<Uint8Array>}
  */
 export async function extractPages(srcPdfBytes) {
+  if (!srcPdfBytes || srcPdfBytes.length === 0) return new Uint8Array(0);
+
   try {
     const { PDFDocument } = await import('pdf-lib');
     const srcDoc = await PDFDocument.load(srcPdfBytes, { ignoreEncryption: true });
     const totalPages = srcDoc.getPageCount();
     if (totalPages === 0) return new Uint8Array(0);
 
-    const selectCount = Math.min(10, totalPages);
+    const selectCount = Math.min(MAX_SAMPLE_PAGES, totalPages);
     const pageIndices = randomChoice(totalPages, selectCount).sort((a, b) => a - b);
 
     const newDoc = await PDFDocument.create();
@@ -183,20 +170,19 @@ export async function extractPages(srcPdfBytes) {
 
     return newDoc.save();
   } catch {
-    // pdf-lib not available or failed — return original bytes
     return srcPdfBytes;
   }
 }
 
 /**
  * Detect garbled/CID-encoded text in a PDF.
- * PORTING NOTE: detect_invalid_chars(sample_pdf_bytes) → detectInvalidChars(samplePdfBytes)
- *   pdfminer extract_text → pdfjs getTextContent
  *
  * @param {Uint8Array} samplePdfBytes
  * @returns {Promise<boolean>}
  */
 export async function detectInvalidChars(samplePdfBytes) {
+  if (!samplePdfBytes) return false;
+
   let pdfDoc;
   try {
     pdfDoc = await loadPdfDoc(samplePdfBytes);
@@ -220,7 +206,6 @@ async function detectInvalidCharsInDoc(pdfDoc) {
     fullText += textContent.items.map(item => item.str ?? '').join('');
   }
 
-  // Detect (cid:NNN) patterns indicating garbled/embedded encoding
   const cidPattern = /\(cid:\d+\)/g;
   const matches = fullText.match(cidPattern) ?? [];
   const cidCount = matches.length;
@@ -230,5 +215,5 @@ async function detectInvalidCharsInDoc(pdfDoc) {
   if (textLen === 0) return false;
 
   const cidCharsRatio = cidCount / (cidCount + textLen - cidLen);
-  return cidCharsRatio > 0.05;
+  return cidCharsRatio > CID_RATIO_THRESHOLD;
 }

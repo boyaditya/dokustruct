@@ -1,6 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: unet_table_rec.py → unet_table_rec.js
-// UnetTableRecognition: Full pipeline for UNet table recognition with OCR matching
 
 import { TSRUnetStructurer } from "./main.js";
 import { TableRecover } from "./table_recover.js";
@@ -11,6 +9,8 @@ import {
   sortedOcrBoxes,
   gatherOcrListByRow,
 } from "./utils/utils_table_recover.js";
+import { AbortException } from "../../../../../utils/exceptions.js";
+import { formatPipelineError } from "../../../../../utils/browser_utils.js";
 
 export class UnetTableRecognition {
   constructor(cfg = {}) {
@@ -112,7 +112,14 @@ export class UnetTableRecognition {
         logicPointsList.push(finalLogiPoints);
 
       } catch (err) {
-        console.warn("UnetTableRecognition error:", err);
+        if (err instanceof AbortException) throw err;
+        console.warn(formatPipelineError({
+          stage: 'table',
+          module: 'UnetTableRecognition',
+          message: `Failed to process table image ${i}: ${err?.message ?? err}`,
+          pageIndex: i,
+          recoverable: true,
+        }));
         predHtmls.push("");
         cellBboxes.push([]);
         logicPointsList.push([]);
@@ -173,6 +180,16 @@ export class UnetTableRecognition {
       cellBoxMap[i] = [[box, "", 1]];
     }
     return cellBoxMap;
+  }
+
+  /**
+   * Dispose the underlying table structure model.
+   */
+  async dispose() {
+    if (this.tableStructure && typeof this.tableStructure.dispose === 'function') {
+      await this.tableStructure.dispose();
+    }
+    this.tableStructure = null;
   }
 }
 

@@ -1,11 +1,10 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/utils/load_image.py → load_image.js
-// Table LoadImage — same pattern as formula but no BGR conversion (returns native format).
-// W5: cv.Mat cleanup in try/finally
 
+/**
+ * Load image from various browser-compatible sources into cv.Mat (BGR uint8).
+ */
 export class LoadImage {
   /**
-   * Load image from various browser-compatible sources into cv.Mat (BGR uint8).
    * @param {HTMLImageElement|ImageBitmap|ImageData|Uint8Array|string} img
    * @returns {Promise<cv.Mat>}
    */

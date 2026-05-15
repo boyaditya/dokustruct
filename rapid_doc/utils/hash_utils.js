@@ -1,13 +1,8 @@
 /**
- * PORTING NOTE: hash_utils.py → hash_utils.js
+ * hash_utils.js — SHA-256 (via SubtleCrypto) and MD5 (pure-JS) hashing utilities.
  *
- * WORKAROUND: Python uses hashlib (synchronous) for MD5/SHA256
- * REASON: Browser SubtleCrypto API is asynchronous; MD5 is not natively
- *         supported (SHA-256 is). For MD5 compatibility a small pure-JS
- *         implementation is included.
- * SOLUTION: SHA-256 via SubtleCrypto.digest(); MD5 via inline pure-JS impl.
- *
- * AFFECTED METHODS: bytes_md5 → async bytesMd5(); str_sha256 → async strSha256()
+ * Browser workaround: SubtleCrypto is async and doesn't support MD5 natively,
+ * so a minimal pure-JS MD5 implementation is included for compatibility.
  */
 
 // ─── SHA-256 via SubtleCrypto ─────────────────────────────────────────────────
@@ -24,18 +19,7 @@ export async function strSha256(text) {
   return bufferToHex(hashBuffer);
 }
 
-/**
- * Compute SHA-256 hex digest of an ArrayBuffer.
- * @param {ArrayBuffer} buffer
- * @returns {Promise<string>} hex string
- */
-export async function bufferSha256(buffer) {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  return bufferToHex(hashBuffer);
-}
-
 // ─── MD5 (pure-JS, synchronous) ───────────────────────────────────────────────
-// Minimal RFC 1321 implementation — used only for bytes_md5 compatibility.
 
 /**
  * Compute MD5 hex digest of an ArrayBuffer or Uint8Array.
@@ -59,7 +43,6 @@ export function strMd5(text) {
 
 /**
  * Convert any value to a stable, hashable representation.
- * Mirrors Python: make_hashable(value)
  *
  * - dict/object → JSON-stringified with sorted keys
  *   (objects with a 'custom_model' key have that value replaced by its type name)

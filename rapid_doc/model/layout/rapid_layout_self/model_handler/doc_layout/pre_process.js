@@ -1,24 +1,11 @@
 /**
- * PORTING NOTE: model_handler/doc_layout/pre_process.py → pre_process.js
- *
  * DocLayoutPreProcess: resize with letterbox, flip channels BGR→RGB, transpose
  * HWC → NCHW, normalise to [0, 1].
  *
- * CHANGE: numpy ndarray operations are replaced by Float32Array loops.
- *   - input_img[None, ...]                        → batch dim added manually
- *   - input_img[..., ::-1]                        → BGR→RGB channel flip
- *   - .transpose(0, 3, 1, 2)                      → HWC→CHW reorder loop
- *   - / 255 + astype(np.float32)                  → Float32Array element-wise
- *
- * CHANGE: LetterBox call signature:
- *   Python: LetterBox(new_shape, auto, stride).__call__(image=image)
- *   JS:     new LetterBox({newShape, auto, stride}).call(imageMat)
- *
  * INPUT:  cv.Mat (BGR, uint8, HWC)
  * OUTPUT: { data: Float32Array, shape: [1, 3, H, W] }
- *         Callers pass both to OrtInferSession.run(data, null, shape).
  *
- * IMPORTANT: The letterbox result Mat is deleted inside call() (try/finally).
+ * The letterbox result Mat is deleted inside call() (try/finally).
  */
 
 /* global cv */

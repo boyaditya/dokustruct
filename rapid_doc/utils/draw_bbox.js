@@ -1,44 +1,21 @@
 /**
- * PORTING NOTE: draw_bbox.py → draw_bbox.js
+ * draw_bbox.js — Render bounding box overlays onto PDF pages.
  *
- * WORKAROUND: Python uses reportlab (canvas drawing) + pypdf (PDF read/write)
- * REASON: reportlab and pypdf are not available in the browser
- * SOLUTION:
- *   - PDF reading → pdfjs-dist (read-only rendering to OffscreenCanvas)
- *   - Canvas drawing → Canvas 2D API (OffscreenCanvas)
- *   - PDF writing/merging → draw overlays directly on the rendered canvas,
- *     then return an array of PNG Blobs (one per page).
- *     If PDF output is needed, the caller can use pdf-lib to reassemble.
- *   - reportlab coordinate system (origin bottom-left, y-up) is preserved
- *     inside calCanvasRect() / calCanvasPolygon() for correctness, then the
- *     final drawing maps those to the HTML canvas coordinate system (y-down).
- *
- * AFFECTED METHODS:
- *   cal_canvas_rect     → calCanvasRect(pageInfo, bbox)        [sync, pure math]
- *   cal_canvas_polygon  → calCanvasPolygon(pageInfo, poly)     [sync, pure math]
- *   draw_polygon        → drawPolygon(ctx, points, rgb, fill)  [sync]
- *   draw_bbox_without_number → drawBboxWithoutNumber(...)      [sync]
- *   draw_bbox_with_number    → drawBboxWithNumber(...)         [sync]
- *   draw_layout_bbox    → async drawLayoutBbox(pdfInfo, pdfBytes, filename)
- *   draw_span_bbox      → async drawSpanBbox(pdfInfo, pdfBytes, filename)
- *   draw_line_sort_bbox → async drawLineSortBbox(pdfInfo, pdfBytes, filename)
- *
- * OUTPUT CHANGE: Instead of writing a PDF to disk, all three top-level draw_*
- * functions return an array of PNG Blobs (one per page) and optionally trigger
- * a browser download of a ZIP via the download helper.
+ * Browser workaround: Python uses reportlab + pypdf for PDF drawing.
+ * Here we render pages via pdfjs-dist to OffscreenCanvas, draw overlays
+ * with Canvas 2D API, and return PNG Blobs (one per page).
+ * reportlab coordinate system (origin bottom-left, y-up) is preserved
+ * inside calCanvasRect/calCanvasPolygon for correctness, then mapped
+ * to HTML canvas coordinates (y-down).
  */
 
 import { getPdfjsLib } from './pdfjs_loader.js';
 import { BlockType, ContentType, SplitFlag } from './enum_class.js';
-import { getLogger } from './logger.js';
-
-const logger = getLogger('draw_bbox');
 
 // ─── Page-info helper ─────────────────────────────────────────────────────────
 
 /**
  * Extract page size and rotation from a PDF.js page object.
- * Mimics PyPDF2 page.cropbox + page.get('/Rotate').
  *
  * @param {import('pdfjs-dist').PDFPageProxy} pdfPage
  * @returns {{ pageWidth: number, pageHeight: number, rotation: number }}
@@ -152,7 +129,6 @@ export function drawPolygon(ctx, points, rgb, fill) {
 
 /**
  * Draw bounding boxes (or polygons) for all items on page `i` without labels.
- * Matches Python: draw_bbox_without_number(i, bbox_list, page, c, rgb_config, fill_config)
  *
  * @param {number}   pageIdx
  * @param {Array<Array<{bbox?:number[], polygon_points?:number[][]}>>} bboxList
@@ -189,7 +165,6 @@ export function drawBboxWithoutNumber(pageIdx, bboxList, pageInfo, ctx, rgbConfi
 
 /**
  * Draw bounding boxes with sequence numbers.
- * Matches Python: draw_bbox_with_number(i, bbox_list, page, c, rgb_config, fill_config, draw_bbox=True)
  *
  * @param {number}   pageIdx
  * @param {Array}    bboxList
@@ -238,7 +213,6 @@ export function drawBboxWithNumber(pageIdx, bboxList, pageInfo, ctx, rgbConfig, 
 
 /**
  * Normalise an item to { bbox, polygon_points } format.
- * Matches Python: _layout_item(bbox, polygon_points=None)
  *
  * @param {number[]} bbox
  * @param {number[][]|null} [polygonPoints]
@@ -273,9 +247,6 @@ async function renderPageToCanvas(pdfPage, scale = 1.0) {
 /**
  * Render layout bounding box overlays onto each PDF page.
  * Returns an array of PNG Blobs (one per page).
- *
- * Matches Python: draw_layout_bbox(pdf_info, pdf_bytes, out_path, filename)
- * OUTPUT CHANGE: returns Blob[] instead of writing to disk.
  *
  * @param {Object[]} pdfInfo   - Parsed middle-JSON page structures
  * @param {ArrayBuffer} pdfBytes
@@ -434,8 +405,6 @@ export async function drawLayoutBbox(pdfInfo, pdfBytes) {
  * Render span-level bounding box overlays.
  * Returns an array of PNG Blobs (one per page).
  *
- * Matches Python: draw_span_bbox(pdf_info, pdf_bytes, out_path, filename)
- *
  * @param {Object[]} pdfInfo
  * @param {ArrayBuffer} pdfBytes
  * @returns {Promise<Blob[]>}
@@ -514,8 +483,6 @@ export async function drawSpanBbox(pdfInfo, pdfBytes) {
 /**
  * Render line-level reading-order labels on each page.
  * Returns an array of PNG Blobs (one per page).
- *
- * Matches Python: draw_line_sort_bbox(pdf_info, pdf_bytes, out_path, filename)
  *
  * @param {Object[]} pdfInfo
  * @param {ArrayBuffer} pdfBytes

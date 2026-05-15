@@ -1,41 +1,20 @@
-/**
- * PORTING NOTE: rapid_doc/model/layout/rapid_layout.py → rapid_layout.js
- *
- * RapidLayoutModel: high-level adapter that sits above RapidLayout.
- *   - Receives a layout_config plain object (equivalent to Python dict).
- *   - Resolves CategoryId mappings per model type.
- *   - Applies DPI-based image downscaling before inference.
- *   - Converts RapidLayoutOutput objects to the final layout_res dict format.
- *   - Checks for inline formulas (formula box is mostly contained inside a text box).
- *
- * CHANGE: __init__  → static async create(layoutConfig) factory.
- *         model = RapidLayout(cfg=cfg) → session created with await RapidLayout.create().
- *
- * CHANGE: cv2.resize → cv.resize (OpenCV.js). Images are cv.Mat in JS.
- *
- * CHANGE: No CLI / __main__ block.
- *
- * CHANGE: get_device() / CUDA / NPU engine_cfg selection:
- *   CUDA and NPU device paths are replaced by WebGPU availability (handled
- *   transparently by ProviderConfig). Engine cfg overrides are not needed.
- *
- * INPUT:  layoutConfig — plain JS object (mirrors Python dict layout_config).
- * OUTPUT: getClsDicts() → three JS Map<string, number> objects.
- *         batchPredict() → Array<Array<{category_id, bbox, poly, score, ...}>>
- */
-
 /* global cv */
 
 import { RapidLayout } from './rapid_layout_self/main.js';
 import { RapidLayoutInput, ModelType } from './rapid_layout_self/utils/typings.js';
 import { CategoryId } from '../../utils/enum_class.js';
+import { deleteMat } from '../../utils/resource_utils.js';
+import { formatPipelineError } from '../../utils/browser_utils.js';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const INLINE_FORMULA_IOU_THRESH = 0.9;
+const DPI_DOWNSCALE_THRESHOLD = 2200;
+const DPI_SCALE_FACTOR = 144;
 
 // ─── Inline helpers ───────────────────────────────────────────────────────────
 
 /**
- * Calculate IoU ratio for two [x1,y1,x2,y2] boxes.
- * Mirrors: calculate_iou from rapid_doc/utils/boxbase.py
- *
  * @param {[number,number,number,number]} box1
  * @param {[number,number,number,number]} box2
  * @returns {number}
@@ -55,16 +34,14 @@ function calculateIou(box1, box2) {
   return union <= 0 ? 0 : intersect / union;
 }
 
-function isContained(box1, box2, thresh = 0.9) {
-  return calculateIou(box1, box2) >= thresh;
+function isContained(box1, box2) {
+  return calculateIou(box1, box2) >= INLINE_FORMULA_IOU_THRESH;
 }
 
 // ─── get_cls_dicts ────────────────────────────────────────────────────────────
 
 /**
  * Build three label→CategoryId maps for the active markdown_ignore_labels list.
- * Mirrors: get_cls_dicts(markdown_ignore_labels)
- *
  * @param {string[]} markdownIgnoreLabels
  * @returns {{ ppDocLayoutCls: Object, ppDocLayoutPlusCls: Object, ppDocLayoutV2Cls: Object }}
  */
@@ -75,7 +52,6 @@ export function getClsDicts(markdownIgnoreLabels = []) {
       Object.entries(map).map(([k, v]) => [k, ignore.has(k) ? CategoryId.Abandon : v]),
     );
 
-  // PP-DocLayout-L/M/S — 23 classes
   const ppDocLayoutCls = _resolve({
     paragraph_title:   CategoryId.Title,
     image:             CategoryId.ImageBody,
@@ -102,7 +78,6 @@ export function getClsDicts(markdownIgnoreLabels = []) {
     aside_text:        CategoryId.Text,
   });
 
-  // PP-DocLayout_plus-L — 20 classes
   const ppDocLayoutPlusCls = _resolve({
     paragraph_title:           CategoryId.Title,
     image:                     CategoryId.ImageBody,
@@ -126,7 +101,6 @@ export function getClsDicts(markdownIgnoreLabels = []) {
     reference_content:         CategoryId.Text,
   });
 
-  // PP-DocLayoutV2/V3 — 25 classes
   const ppDocLayoutV2Cls = _resolve({
     abstract:           CategoryId.Text,
     algorithm:          CategoryId.Text,
@@ -179,8 +153,7 @@ export class RapidLayoutModel {
   }
 
   /**
-   * Async factory — mirrors __init__(layout_config=None)
-   *
+   * Async factory.
    * @param {Object|null} [layoutConfig]
    * @returns {Promise<RapidLayoutModel>}
    */
@@ -189,14 +162,10 @@ export class RapidLayoutModel {
 
     const cfg = new RapidLayoutInput({ model_type: ModelType.PP_DOCLAYOUTV2 });
 
-    // CHANGE: CUDA/NPU → TargetDevice selection no longer needed.
-    // WebGPU is auto-selected by ProviderConfig when available.
-
     if (layoutConfig !== null) {
       if (layoutConfig.model_type)        cfg.model_type     = layoutConfig.model_type;
       if (layoutConfig.layout_shape_mode) cfg.layout_shape_mode = layoutConfig.layout_shape_mode;
 
-      // Auto-lower conf_thresh for certain models when not explicitly set
       if (!layoutConfig.conf_thresh) {
         if (cfg.model_type === ModelType.PP_DOCLAYOUT_S ||
             cfg.model_type === ModelType.DOCLAYOUT_DOCSTRUCTBENCH) {
@@ -204,12 +173,10 @@ export class RapidLayoutModel {
         }
       }
 
-      // Apply remaining layout_config keys
       for (const [key, value] of Object.entries(layoutConfig)) {
-        // Map snake_case keys to camelCase equivalents in cfg
         const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-        if (camel in cfg)      cfg[camel]  = value;
-        if (key  in cfg)       cfg[key]    = value;
+        if (camel in cfg) cfg[camel] = value;
+        if (key  in cfg)  cfg[key]   = value;
       }
     }
 
@@ -228,11 +195,9 @@ export class RapidLayoutModel {
 
     instance.modelType = cfg.modelType ?? cfg.model_type ?? ModelType.PP_DOCLAYOUTV2;
 
-    instance.model     = await RapidLayout.create(cfg);
+    instance.model = await RapidLayout.create(cfg);
     return instance;
   }
-
-  // ── predict ────────────────────────────────────────────────────────────────
 
   /**
    * Run layout detection on a single image.
@@ -244,19 +209,18 @@ export class RapidLayoutModel {
     return results[0];
   }
 
-  // ── batchPredict ───────────────────────────────────────────────────────────
-
   /**
    * Run layout detection on a batch of images.
-   * Mirrors: batch_predict(images, batch_size, dpi=200)
-   *
    * @param {cv.Mat[]} images
    * @param {number}   batchSize
    * @param {number}   [dpi=200]
    * @returns {Promise<Array<Array<Object>>>}
    */
   async batchPredict(images, batchSize, dpi = 200) {
-    // ── DPI-based downscaling (matches Python logic) ─────────────────────────
+    if (!this.model) {
+      throw new Error('[RapidLayoutModel] model is null — was dispose() called before batchPredict()?');
+    }
+
     const processedImages = [];
     const scales = [];
 
@@ -264,8 +228,8 @@ export class RapidLayoutModel {
       const h = img.rows;
       const w = img.cols;
 
-      if (Math.max(h, w) > 2200) {
-        const scale = 144 / dpi;
+      if (Math.max(h, w) > DPI_DOWNSCALE_THRESHOLD) {
+        const scale = DPI_SCALE_FACTOR / dpi;
         const resized = new cv.Mat();
         cv.resize(
           img, resized,
@@ -280,10 +244,15 @@ export class RapidLayoutModel {
       }
     }
 
-    // ── Inference ─────────────────────────────────────────────────────────────
-    const allResults = await this.model.call(processedImages, batchSize);
+    let allResults;
+    try {
+      allResults = await this.model.call(processedImages, batchSize);
+    } finally {
+      for (let i = 0; i < processedImages.length; i++) {
+        if (scales[i] !== 1.0) deleteMat(processedImages[i]);
+      }
+    }
 
-    // ── Format outputs ────────────────────────────────────────────────────────
     const imagesLayoutRes = [];
 
     for (let imgIdx = 0; imgIdx < allResults.length; imgIdx++) {
@@ -291,14 +260,10 @@ export class RapidLayoutModel {
       const scale = scales[imgIdx];
       const restoreScale = 1.0 / scale;
 
-      // Clean up scaled Mat if we created one
-      if (scale !== 1.0) processedImages[imgIdx].delete();
-
       const { boxes, scores, class_names: classNames } = results;
-      const orders         = results.orders         ?? Array(boxes.length).fill(-1);
-      const polygonPointses = results.polygon_points ?? Array(boxes.length).fill(null);
+      const orders          = results.orders          ?? Array(boxes.length).fill(-1);
+      const polygonPointses = results.polygon_points  ?? Array(boxes.length).fill(null);
 
-      // ── Build temp_results ───────────────────────────────────────────────
       const tempResults = [];
       for (let k = 0; k < boxes.length; k++) {
         const xyxy = boxes[k];
@@ -309,18 +274,7 @@ export class RapidLayoutModel {
 
         const [xmin, ymin, xmax, ymax] = xyxy.map(p => Math.round(p * 100) / 100);
 
-        let categoryId;
-        if (this.modelType === ModelType.PP_DOCLAYOUT_PLUS_L) {
-          categoryId = this.ppDocLayoutPlusClsDict[cla] ?? CategoryId.Abandon;
-        } else if ([ModelType.PP_DOCLAYOUTV2, ModelType.PP_DOCLAYOUTV3].includes(this.modelType)) {
-          categoryId = this.ppDocLayoutV2ClsDict[cla] ?? CategoryId.Abandon;
-        } else if (this.modelType === ModelType.DOCLAYOUT_DOCSTRUCTBENCH) {
-          categoryId = cla === 'isolate_formula'
-            ? 14
-            : (this.doclayoutYoloList.indexOf(cla) ?? CategoryId.Abandon);
-        } else {
-          categoryId = this.ppDocLayoutClsDict[cla] ?? CategoryId.Abandon;
-        }
+        const categoryId = this._resolveCategoryId(cla);
 
         tempResults.push({
           category_id:    categoryId,
@@ -332,13 +286,12 @@ export class RapidLayoutModel {
         });
       }
 
-      // ── Inline formula check (skip for V2/V3 — they have inline_formula class) ──
+      // V2/V3 already have inline_formula class — skip inline check
       const withInlineCheck =
         [ModelType.PP_DOCLAYOUTV2, ModelType.PP_DOCLAYOUTV3].includes(this.modelType)
           ? tempResults
           : this.checkInlineFormula(tempResults);
 
-      // ── Restore scale + build final layout_res ───────────────────────────
       const layoutRes = [];
       for (const item of withInlineCheck) {
         let [x1, y1, x2, y2] = item.bbox;
@@ -348,7 +301,7 @@ export class RapidLayoutModel {
         y2 *= restoreScale;
 
         let polyPoints = item.polygon_points;
-        if (polyPoints !== null && polyPoints !== undefined) {
+        if (polyPoints != null) {
           polyPoints = polyPoints.map(([px, py]) => [
             px * restoreScale,
             py * restoreScale,
@@ -359,9 +312,9 @@ export class RapidLayoutModel {
           category_id:    item.category_id,
           original_label: item.original_label,
           original_order: item.original_order,
-          poly:   [x1, y1, x2, y1, x2, y2, x1, y2],
+          poly:           [x1, y1, x2, y1, x2, y2, x1, y2],
           polygon_points: polyPoints,
-          score:  item.score,
+          score:          item.score,
         });
       }
 
@@ -371,13 +324,9 @@ export class RapidLayoutModel {
     return imagesLayoutRes;
   }
 
-  // ── checkInlineFormula ────────────────────────────────────────────────────
-
   /**
-   * Detect inline formulas — a formula box that is mostly contained
-   * within a text box is reclassified as InlineEquation.
-   * Mirrors: check_inline_formula(temp_results)
-   *
+   * Detect inline formulas — a formula box mostly contained within a text box
+   * is reclassified as InlineEquation.
    * @param {Object[]} tempResults
    * @returns {Object[]}
    */
@@ -395,5 +344,48 @@ export class RapidLayoutModel {
       }
     }
     return tempResults;
+  }
+
+  /**
+   * Dispose the underlying ONNX session and release resources.
+   */
+  async dispose() {
+    if (this.model?.session) {
+      try {
+        if (typeof this.model.session.release === 'function') {
+          await this.model.session.release();
+        }
+      } catch (err) {
+        console.warn(formatPipelineError({
+          stage: 'dispose',
+          module: 'RapidLayoutModel',
+          message: `Failed to release layout session: ${err?.message ?? err}`,
+          recoverable: true,
+        }));
+      }
+      this.model.session = null;
+    }
+    this.model = null;
+  }
+
+  /**
+   * Resolve a class name to a CategoryId based on the active model type.
+   * @param {string} cla
+   * @returns {number}
+   * @private
+   */
+  _resolveCategoryId(cla) {
+    if (this.modelType === ModelType.PP_DOCLAYOUT_PLUS_L) {
+      return this.ppDocLayoutPlusClsDict[cla] ?? CategoryId.Abandon;
+    }
+    if ([ModelType.PP_DOCLAYOUTV2, ModelType.PP_DOCLAYOUTV3].includes(this.modelType)) {
+      return this.ppDocLayoutV2ClsDict[cla] ?? CategoryId.Abandon;
+    }
+    if (this.modelType === ModelType.DOCLAYOUT_DOCSTRUCTBENCH) {
+      if (cla === 'isolate_formula') return 14;
+      const idx = this.doclayoutYoloList.indexOf(cla);
+      return idx >= 0 ? idx : CategoryId.Abandon;
+    }
+    return this.ppDocLayoutClsDict[cla] ?? CategoryId.Abandon;
   }
 }

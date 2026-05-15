@@ -1,24 +1,5 @@
-// Copyright (c) RapidAI. All rights reserved.
-/**
- * PORTING NOTE: batch_analyze.py → batch_analyze.js
- *
- * WORKAROUND: Python synchronous __call__ with tqdm progress
- * REASON: All model inference is async in the browser
- * SOLUTION: async call() method; tqdm loops replaced with plain async iterations
- *
- * AFFECTED METHODS:
- *   BatchAnalyze.__call__ → async call(imagesWithExtraInfo)
- *   _run_layout_detection → async _runLayoutDetection()
- *   _run_formula_recognition → async _runFormulaRecognition()
- *   _run_custom_ocr → async _runCustomOcr()
- *   _run_traditional_ocr → async _runTraditionalOcr()
- *   _run_table_recognition → async _runTableRecognition()
- *   _run_traditional_table_recognition → async _runTraditionalTableRecognition()
- */
-
 import {
   extractTextFromPdf, runOcrDetBatch, runOcrRecPostprocess, processSingleTable,
-  extractTableFillImage,
 } from "./analyze_utils.js";
 import { AtomModelSingleton } from "./model_init.js";
 import { removeLayoutInOriImages, filterOverlapBoxes } from "../utils/utils.js";
@@ -26,33 +7,17 @@ import { normalizeToIntBbox } from "../../utils/bbox_utils.js";
 import { checkboxPredict } from "../../utils/checkbox_det_cls.js";
 import { getFormulaEnable, getTableEnable } from "../../utils/config_reader.js";
 import { CategoryId } from "../../utils/enum_class.js";
-import { cropImg, getResListFromLayoutRes, cleanVram, toMatBgr } from "../../utils/model_utils.js";
+import { AbortException } from "../../utils/exceptions.js";
+import { cropImg, getResListFromLayoutRes, toMatBgr } from "../../utils/model_utils.js";
 import { getCropNpImg } from "../../utils/pdf_image_tools.js";
-import { extractTableFillImage as _extractTableFillImage } from "../../utils/span_pre_proc.js";
+import { extractTableFillImage } from "../../utils/span_pre_proc.js";
 import { AtomicModel } from "./model_list.js";
 import { getRotateImage, restorePoly } from "../../utils/boxbase.js";
-
-function deleteMat(mat) {
-  if (mat && typeof cv !== 'undefined' && mat instanceof cv.Mat && !mat.isDeleted?.()) {
-    mat.delete();
-  }
-}
-
-function clearLayoutImageList(tableRes) {
-  const list = tableRes?.layout_image_list;
-  if (Array.isArray(list)) {
-    for (const item of list) deleteMat(item?.pil_image);
-  }
-  if (tableRes) delete tableRes.layout_image_list;
-}
-
-async function yieldToBrowser() {
-  await new Promise(resolve => setTimeout(resolve, 0));
-}
+import { deleteMat, clearLayoutImageList } from "../../utils/resource_utils.js";
+import { yieldToBrowser, formatPipelineError } from "../../utils/browser_utils.js";
 
 /**
  * Batch analysis processor — orchestrates layout, formula, OCR, and table models.
- * PORTING NOTE: BatchAnalyze class with __call__ → call()
  */
 export class BatchAnalyze {
   /**
@@ -91,6 +56,7 @@ export class BatchAnalyze {
     this.formulaConfig = formulaConfig || {};
     this.tableConfig = tableConfig || {};
     this.orientationConfig = orientationConfig || {};
+
     const ratioBatch = Math.max(1, Number(this.batchRatio) || 1);
     if (!this.ocrConfig["Det.rec_batch_num"]) this.ocrConfig["Det.rec_batch_num"] = Math.min(4, ratioBatch);
     if (!this.layoutConfig.batch_num) this.layoutConfig.batch_num = Math.min(4, ratioBatch);
@@ -111,10 +77,8 @@ export class BatchAnalyze {
     this.layoutBaseBatchSize = this.layoutConfig.batch_num;
 
     this.formulaLevel = this.formulaConfig.formula_level || 0;
-    // WEBGPU LIMITATION: PP-FormulaNet Plus M is a ~100M param Transformer.
-    // Batch size > 1 causes session.run() to hang permanently on RX 580 (and similar GPUs)
-    // because the intermediate attention tensors exceed WebGPU dispatch/buffer limits.
-    // batchSize=1 is the ONLY safe configuration for WebGPU Transformer inference.
+    // WebGPU limitation: batch size > 1 causes session.run() to hang on some GPUs
+    // because intermediate attention tensors exceed WebGPU dispatch/buffer limits.
     this.formulaBaseBatchSize = this.formulaConfig.batch_num || 1;
 
     this.tableForceOcr = this.tableConfig.force_ocr ?? false;
@@ -139,10 +103,9 @@ export class BatchAnalyze {
 
   /**
    * Execute batch analysis.
-   * PORTING NOTE: BatchAnalyze.__call__(images_with_extra_info) → async call(...)
    *
    * @param {Array<[any, number, boolean, string, object]>} imagesWithExtraInfo
-   *   Each entry: [PIL image (as ImageBitmap/etc), scale, ocr_enable, lang, pdf_dict]
+   *   Each entry: [page image, scale, ocr_enable, lang, pdf_dict]
    * @returns {Promise<object[][]>} images_layout_res
    */
   async call(imagesWithExtraInfo) {
@@ -157,7 +120,6 @@ export class BatchAnalyze {
       postprocessing: 0,
     };
 
-    // Initialize models
     this.model = await this.modelManager.getModel({
       lang: this.lang,
       formula_enable: this.formulaEnable,
@@ -177,103 +139,115 @@ export class BatchAnalyze {
     const pdfDictList = imagesWithExtraInfo.map(([,,,, pdfDict]) => pdfDict);
     const scaleList = imagesWithExtraInfo.map(([, scale]) => scale);
 
-    // Convert raw page images (OffscreenCanvas / ImageBitmap from PDF.js) to BGR
-    // cv.Mat objects that all downstream pipeline code (cropImg, OCR, etc.) expects.
-    // owned[i]=true means we created the Mat and must delete it when we're done.
+    // Convert raw page images to BGR cv.Mat objects for downstream pipeline code.
+    // owned[i]=true means we created the Mat and must delete it when done.
     const matResults = imagesWithExtraInfo.map(([image]) => toMatBgr(image));
-    const npImages   = matResults.map(r => r.mat);
-    const ownedMats  = matResults.map(r => r.owned);
-    const imgOriOrientationList = [];
+    const npImages = matResults.map(r => r.mat);
+    const ownedMats = matResults.map(r => r.owned);
 
-    if (this.useDocOrientationClassify) {
-      const atomModelManager = AtomModelSingleton.getInstance();
-      const imgOrientationClsModel = await atomModelManager.getAtomModel(
-        AtomicModel.ImgOrientationCls,
-        { orientation_config: this.orientationConfig }
-      );
-      for (let i = 0; i < npImages.length; i++) {
-        const npImg = npImages[i];
-        const h = npImg.rows;
-        const w = npImg.cols;
-        const rotateLabel = await imgOrientationClsModel.predict(npImg);
-        if (rotateLabel === "90" || rotateLabel === "270") {
-          const rotated = getRotateImage(npImg, rotateLabel);
-          if (rotated !== npImg && ownedMats[i]) npImg.delete();
-          npImages[i] = rotated;
-        }
-        pdfDictList[i].rotate_label = rotateLabel;
-        imgOriOrientationList.push([h, w, rotateLabel]);
-      }
-    }
+    try {
+      const imgOriOrientationList = await this._runOrientationClassify(npImages, pdfDictList, ownedMats);
 
-    // 1. Layout detection
-    const tLayout0 = performance.now();
-    const imagesLayoutRes = await this._runLayoutDetection(npImages, pdfDictList, scaleList);
-    stageTimings.layout = performance.now() - tLayout0;
-    await yieldToBrowser();
-
-    // 2. Collect detection regions
-    const [ocrResAllPage, tableResAllPage, formulaResAllPage] =
-      await this._collectDetectionRegions(imagesLayoutRes, npImages, imagesWithExtraInfo);
-
-    // 3. Formula recognition
-    if (this.formulaEnable) {
-      const tFormula0 = performance.now();
-      await this._runFormulaRecognition(formulaResAllPage);
-      stageTimings.formula = performance.now() - tFormula0;
+      // 1. Layout detection
+      const tLayout0 = performance.now();
+      const imagesLayoutRes = await this._runLayoutDetection(npImages, pdfDictList, scaleList);
+      stageTimings.layout = performance.now() - tLayout0;
       await yieldToBrowser();
-    }
 
-    // 4. OCR
-    if (this.useCustomOcr) {
-      const tOcr0 = performance.now();
-      await this._runCustomOcr(ocrResAllPage);
-      stageTimings.ocr = performance.now() - tOcr0;
-    } else {
-      const tOcr0 = performance.now();
-      await this._runTraditionalOcr(ocrResAllPage, pdfDictList, scaleList);
-      stageTimings.ocr = performance.now() - tOcr0;
-    }
-    await yieldToBrowser();
+      // 2. Collect detection regions
+      const [ocrResAllPage, tableResAllPage, formulaResAllPage] =
+        await this._collectDetectionRegions(imagesLayoutRes, npImages, imagesWithExtraInfo);
 
-    // 5. Table recognition
-    if (this.tableEnable) {
-      const tTable0 = performance.now();
-      await this._runTableRecognition(tableResAllPage, pdfDictList, scaleList);
-      stageTimings.table = performance.now() - tTable0;
-    }
-    await yieldToBrowser();
+      // 3. Formula recognition
+      if (this.formulaEnable) {
+        const tFormula0 = performance.now();
+        await this._runFormulaRecognition(formulaResAllPage);
+        stageTimings.formula = performance.now() - tFormula0;
+        await yieldToBrowser();
+      }
 
-    // 6. Post-process OCR rec results
-    const tPost0 = performance.now();
-    await runOcrRecPostprocess(imagesLayoutRes, this.ocrConfig);
-    stageTimings.postprocessing = performance.now() - tPost0;
-    await yieldToBrowser();
+      // 4. OCR
+      if (this.useCustomOcr) {
+        const tOcr0 = performance.now();
+        await this._runCustomOcr(ocrResAllPage);
+        stageTimings.ocr = performance.now() - tOcr0;
+      } else {
+        const tOcr0 = performance.now();
+        await this._runTraditionalOcr(ocrResAllPage, pdfDictList, scaleList);
+        stageTimings.ocr = performance.now() - tOcr0;
+      }
+      await yieldToBrowser();
 
-    if (this.sealEnable) {
-      await this._runSealOcr(npImages, imagesLayoutRes);
-    }
+      // 5. Table recognition
+      if (this.tableEnable) {
+        const tTable0 = performance.now();
+        await this._runTableRecognition(tableResAllPage, pdfDictList, scaleList);
+        stageTimings.table = performance.now() - tTable0;
+      }
+      await yieldToBrowser();
 
-    if (imgOriOrientationList.length) {
-      for (let index = 0; index < imagesLayoutRes.length; index++) {
-        const [h, w, rotateLabel] = imgOriOrientationList[index];
-        for (const layoutRe of imagesLayoutRes[index]) {
-          layoutRe.rotate_label = rotateLabel;
-          if (rotateLabel === "90" || rotateLabel === "270") {
-            layoutRe.poly = restorePoly(layoutRe.poly, rotateLabel, w, h);
+      // 6. Post-process OCR rec results
+      const tPost0 = performance.now();
+      await runOcrRecPostprocess(imagesLayoutRes, this.ocrConfig);
+      stageTimings.postprocessing = performance.now() - tPost0;
+      await yieldToBrowser();
+
+      if (this.sealEnable) {
+        await this._runSealOcr(npImages, imagesLayoutRes);
+      }
+
+      // Restore orientation-rotated polys
+      if (imgOriOrientationList.length) {
+        for (let index = 0; index < imagesLayoutRes.length; index++) {
+          const [h, w, rotateLabel] = imgOriOrientationList[index];
+          for (const layoutRe of imagesLayoutRes[index]) {
+            layoutRe.rotate_label = rotateLabel;
+            if (rotateLabel === "90" || rotateLabel === "270") {
+              layoutRe.poly = restorePoly(layoutRe.poly, rotateLabel, w, h);
+            }
           }
         }
       }
-    }
 
-    // Release any cv.Mat objects that we created from OffscreenCanvas/ImageBitmap
+      this.lastStageTimings = stageTimings;
+      return imagesLayoutRes;
+    } finally {
+      // Release any cv.Mat objects that we created from OffscreenCanvas/ImageBitmap
+      for (let i = 0; i < npImages.length; i++) {
+        if (ownedMats[i]) deleteMat(npImages[i]);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Orientation classification
+  // ---------------------------------------------------------------------------
+
+  async _runOrientationClassify(npImages, pdfDictList, ownedMats) {
+    const imgOriOrientationList = [];
+    if (!this.useDocOrientationClassify) return imgOriOrientationList;
+
+    const atomModelManager = AtomModelSingleton.getInstance();
+    const imgOrientationClsModel = await atomModelManager.getAtomModel(
+      AtomicModel.ImgOrientationCls,
+      { orientation_config: this.orientationConfig }
+    );
+
     for (let i = 0; i < npImages.length; i++) {
-      if (ownedMats[i]) npImages[i].delete();
+      const npImg = npImages[i];
+      const h = npImg.rows;
+      const w = npImg.cols;
+      const rotateLabel = await imgOrientationClsModel.predict(npImg);
+      if (rotateLabel === "90" || rotateLabel === "270") {
+        const rotated = getRotateImage(npImg, rotateLabel);
+        if (rotated !== npImg && ownedMats[i]) npImg.delete();
+        npImages[i] = rotated;
+      }
+      pdfDictList[i].rotate_label = rotateLabel;
+      imgOriOrientationList.push([h, w, rotateLabel]);
     }
 
-    this.lastStageTimings = stageTimings;
-
-    return imagesLayoutRes;
+    return imgOriOrientationList;
   }
 
   // ---------------------------------------------------------------------------
@@ -290,8 +264,7 @@ export class BatchAnalyze {
       imagesLayoutRes = removeLayoutInOriImages(imagesLayoutRes, pdfDictList, scaleList);
     }
 
-    // Align with 0.9.1 baseline: when formula is disabled, inline equations
-    // are filtered at layout stage (same as formula level 1 behavior).
+    // When formula is disabled, inline equations are filtered at layout stage
     if (!this.formulaEnable || this.formulaLevel === 1) {
       imagesLayoutRes = imagesLayoutRes.map(page =>
         page.filter(item => item.category_id !== CategoryId.InlineEquation)
@@ -311,7 +284,7 @@ export class BatchAnalyze {
     const formulaResAllPage = [];
 
     for (let index = 0; index < npImages.length; index++) {
-      const [,, ocrEnable, _lang, ] = imagesWithExtraInfo[index];
+      const [,, ocrEnable, lang,] = imagesWithExtraInfo[index];
       const npImg = npImages[index];
       const layoutRes = imagesLayoutRes[index];
 
@@ -326,19 +299,20 @@ export class BatchAnalyze {
             res.bbox[0], res.bbox[1], res.bbox[2], res.bbox[1],
             res.bbox[2], res.bbox[3], res.bbox[0], res.bbox[3],
           ];
-          layoutRes.push({
+          const entry = {
             bbox: res.bbox, poly,
             category_id: CategoryId.CheckBox,
             checkbox: res.text, score: 0.9,
-          });
-          checkboxRes.push({ bbox: res.bbox, poly, category_id: CategoryId.CheckBox, checkbox: res.text, score: 0.9 });
+          };
+          layoutRes.push(entry);
+          checkboxRes.push(entry);
         }
       }
 
       // OCR region
       ocrResAllPage.push({
         ocr_res_list: ocrResList,
-        lang: _lang,
+        lang,
         ocr_enable: ocrEnable,
         np_img: npImg,
         single_page_mfdetrec_res: formulaResList,
@@ -348,54 +322,9 @@ export class BatchAnalyze {
       });
 
       // Table regions
-      for (const tableRes of tableResList) {
-        try {
-          // New implementation: use scale=5 for better table quality
-          const poly = tableRes.poly;
-          let tableImg, usefulList;
-
-          if (!poly || poly.length < 6) {
-            tableImg = new cv.Mat(0, 0, cv.CV_8UC3);
-            usefulList = [];
-          } else {
-            let bbox = normalizeToIntBbox(poly, [npImg.rows, npImg.cols]);
-            const scale = 5;
-            bbox = bbox ? bbox.map(v => v / scale) : null;
-
-            const intBbox = normalizeToIntBbox(bbox);
-
-            if (!intBbox) {
-              tableImg = new cv.Mat(0, 0, cv.CV_8UC3);
-              usefulList = [];
-            } else {
-              const result = getCropNpImg(intBbox, npImg, scale, true); // return_list=true
-              tableImg = result.mat;
-              usefulList = result.usefulList;
-              if (!tableImg || tableImg.cols <= 0 || tableImg.rows <= 0) {
-                if (tableImg && typeof tableImg.delete === "function" && !tableImg.isDeleted?.()) tableImg.delete();
-                const fallback = cropImg(tableRes, npImg, 0, 0, { layoutShapeMode: "rect" });
-                tableImg = fallback.newImage;
-                usefulList = fallback.usefulList;
-              }
-            }
-          }
-
-          tableResAllPage.push({
-            table_res: tableRes,
-            lang: _lang,
-            table_img: tableImg,
-            rect_table_img: tableImg, // Same now (no separate rect crop)
-            single_page_mfdetrec_res: formulaResList,
-            checkbox_res: checkboxRes,
-            useful_list: usefulList,
-            ocr_enable: ocrEnable,
-            page_idx: index,
-          });
-        } catch (err) {
-          console.warn('[BatchAnalyze] table crop skipped:', formatPipelineError(err));
-          tableRes.html = "";
-        }
-      }
+      this._collectTableRegions(
+        tableResList, npImg, lang, ocrEnable, formulaResList, checkboxRes, index, tableResAllPage
+      );
 
       // Formula regions
       if (this.formulaEnable) {
@@ -403,7 +332,7 @@ export class BatchAnalyze {
           const { newImage: formulaImg } = cropImg(formulaRes, npImg);
           formulaResAllPage.push({
             formula_res: formulaRes,
-            lang: _lang,
+            lang,
             formula_img: formulaImg,
           });
         }
@@ -413,13 +342,73 @@ export class BatchAnalyze {
     return [ocrResAllPage, tableResAllPage, formulaResAllPage];
   }
 
+  _collectTableRegions(tableResList, npImg, lang, ocrEnable, formulaResList, checkboxRes, pageIdx, tableResAllPage) {
+    for (const tableRes of tableResList) {
+      let tableImg = null;
+      try {
+        const poly = tableRes.poly;
+        let usefulList;
+
+        if (!poly || poly.length < 6) {
+          tableImg = new cv.Mat(0, 0, cv.CV_8UC3);
+          usefulList = [];
+        } else {
+          let bbox = normalizeToIntBbox(poly, [npImg.rows, npImg.cols]);
+          const scale = 5;
+          bbox = bbox ? bbox.map(v => v / scale) : null;
+          const intBbox = normalizeToIntBbox(bbox);
+
+          if (!intBbox) {
+            tableImg = new cv.Mat(0, 0, cv.CV_8UC3);
+            usefulList = [];
+          } else {
+            const result = getCropNpImg(intBbox, npImg, scale, true);
+            tableImg = result.mat;
+            usefulList = result.usefulList;
+            if (!tableImg || tableImg.cols <= 0 || tableImg.rows <= 0) {
+              deleteMat(tableImg);
+              const fallback = cropImg(tableRes, npImg, 0, 0, { layoutShapeMode: "rect" });
+              tableImg = fallback.newImage;
+              usefulList = fallback.usefulList;
+            }
+          }
+        }
+
+        tableResAllPage.push({
+          table_res: tableRes,
+          lang,
+          table_img: tableImg,
+          rect_table_img: tableImg,
+          single_page_mfdetrec_res: formulaResList,
+          checkbox_res: checkboxRes,
+          useful_list: usefulList,
+          ocr_enable: ocrEnable,
+          page_idx: pageIdx,
+        });
+      } catch (err) {
+        if (err instanceof AbortException) throw err;
+        deleteMat(tableImg);
+        console.warn(formatPipelineError({
+          stage: 'table', module: 'BatchAnalyze',
+          message: `table crop skipped: ${err.message}`,
+          pageIndex: pageIdx, recoverable: true,
+        }));
+        tableRes.html = "";
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Formula
   // ---------------------------------------------------------------------------
 
   async _runFormulaRecognition(formulaResAllPage) {
     if (!this.model.formulaModel) {
-      console.warn('[BatchAnalyze] formulaModel is null (likely failed to load). Skipping formula recognition.');
+      console.warn(formatPipelineError({
+        stage: 'formula', module: 'BatchAnalyze',
+        message: 'formulaModel is null (likely failed to load), skipping formula recognition',
+        recoverable: true,
+      }));
       return;
     }
     const formulaImgs = formulaResAllPage.map(d => d.formula_img);
@@ -434,12 +423,22 @@ export class BatchAnalyze {
       for (let i = 0; i < formulaResAllPage.length; i++) {
         const d = formulaResAllPage[i];
         const res = recFormulas[i];
-        if (res !== undefined && res !== null) {
+        if (res != null) {
           d.formula_res.latex = res;
         } else {
-          console.warn('[BatchAnalyze] latex recognition processing fails');
+          console.warn(formatPipelineError({
+            stage: 'formula', module: 'BatchAnalyze',
+            message: `latex recognition failed for formula ${i}`,
+            recoverable: true,
+          }));
         }
       }
+    } catch (err) {
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: 'formula', module: 'BatchAnalyze',
+        message: err.message, recoverable: true,
+      }));
     } finally {
       for (const img of formulaImgs) deleteMat(img);
     }
@@ -477,7 +476,7 @@ export class BatchAnalyze {
         const text = ocrTexts[i];
         const res = region.res;
 
-        const vlOcrResult = {
+        region.layoutRes.push({
           poly: res.poly,
           category_id: CategoryId.OcrText,
           score: 0.95,
@@ -486,9 +485,14 @@ export class BatchAnalyze {
           original_label: res.original_label ?? null,
           original_order: res.original_order ?? null,
           polygon_points: res.polygon_points ?? null,
-        };
-        region.layoutRes.push(vlOcrResult);
+        });
       }
+    } catch (err) {
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: 'ocr', module: 'BatchAnalyze',
+        message: err.message, recoverable: true,
+      }));
     } finally {
       for (const img of images) deleteMat(img);
     }
@@ -513,51 +517,58 @@ export class BatchAnalyze {
   // ---------------------------------------------------------------------------
 
   async _runTableRecognition(tableResAllPage, pdfDictList, scaleList) {
-    // VL/custom table model
     if (this.useCustomTable) {
-      const tableImgs = [];
-      const fillImageResList = [];
-
-      for (const tableResDict of tableResAllPage) {
-        const pageIdx = tableResDict.page_idx;
-        const pageDict = pdfDictList[pageIdx];
-        const scale = scaleList[pageIdx];
-        let fillImageRes = [];
-        if (this.tableImageEnable) {
-          fillImageRes = _extractTableFillImage(pageDict, tableResDict, scale, this.tableExtractOriginalImage);
-        }
-        tableImgs.push(tableResDict.table_img);
-        fillImageResList.push(fillImageRes);
-      }
-
-      if (tableImgs.length) {
-        try {
-          const tableResults = await this.model.tableModel.batchPredict(
-            tableImgs, { fillImageResList }
-          );
-          const tableHtmls = Array.isArray(tableResults) ? tableResults : (tableResults?.htmls ?? []);
-          for (let i = 0; i < tableResAllPage.length; i++) {
-            const tableResDict = tableResAllPage[i];
-            clearLayoutImageList(tableResDict.table_res);
-            if (tableHtmls[i]) {
-              tableResDict.table_res.html = tableHtmls[i];
-            }
-          }
-        } finally {
-          for (const tableResDict of tableResAllPage) {
-            if (tableResDict.table_img === tableResDict.rect_table_img) {
-              deleteMat(tableResDict.table_img);
-            } else {
-              deleteMat(tableResDict.table_img);
-              deleteMat(tableResDict.rect_table_img);
-            }
-            tableResDict.table_img = null;
-            tableResDict.rect_table_img = null;
-          }
-        }
-      }
+      await this._runCustomTableRecognition(tableResAllPage, pdfDictList, scaleList);
     } else {
       await this._runTraditionalTableRecognition(tableResAllPage, pdfDictList, scaleList);
+    }
+  }
+
+  async _runCustomTableRecognition(tableResAllPage, pdfDictList, scaleList) {
+    const tableImgs = [];
+    const fillImageResList = [];
+
+    for (const tableResDict of tableResAllPage) {
+      const pageIdx = tableResDict.page_idx;
+      const pageDict = pdfDictList[pageIdx];
+      const scale = scaleList[pageIdx];
+      let fillImageRes = [];
+      if (this.tableImageEnable) {
+        fillImageRes = extractTableFillImage(pageDict, tableResDict, scale, this.tableExtractOriginalImage);
+      }
+      tableImgs.push(tableResDict.table_img);
+      fillImageResList.push(fillImageRes);
+    }
+
+    if (!tableImgs.length) return;
+
+    try {
+      const tableResults = await this.model.tableModel.batchPredict(
+        tableImgs, { fillImageResList }
+      );
+      const tableHtmls = Array.isArray(tableResults) ? tableResults : (tableResults?.htmls ?? []);
+      for (let i = 0; i < tableResAllPage.length; i++) {
+        const tableResDict = tableResAllPage[i];
+        clearLayoutImageList(tableResDict.table_res);
+        if (tableHtmls[i]) {
+          tableResDict.table_res.html = tableHtmls[i];
+        }
+      }
+    } catch (err) {
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: 'table', module: 'BatchAnalyze',
+        message: err.message, recoverable: true,
+      }));
+    } finally {
+      for (const tableResDict of tableResAllPage) {
+        if (tableResDict.table_img !== tableResDict.rect_table_img) {
+          deleteMat(tableResDict.rect_table_img);
+        }
+        deleteMat(tableResDict.table_img);
+        tableResDict.table_img = null;
+        tableResDict.rect_table_img = null;
+      }
     }
   }
 
@@ -586,18 +597,21 @@ export class BatchAnalyze {
             this.tableConfig, this.ocrConfig, this.orientationConfig
           );
         } catch (err) {
-          console.warn('[BatchAnalyze] table recognition skipped:', formatPipelineError(err));
+          if (err instanceof AbortException) throw err;
+          console.warn(formatPipelineError({
+            stage: 'table', module: 'BatchAnalyze',
+            message: `table recognition skipped: ${err.message}`,
+            pageIndex: pageIdx, recoverable: true,
+          }));
           if (tableResDict?.table_res) {
             clearLayoutImageList(tableResDict.table_res);
             tableResDict.table_res.html = tableResDict.table_res.html ?? "";
           }
         } finally {
-          if (tableResDict.table_img === tableResDict.rect_table_img) {
-            deleteMat(tableResDict.table_img);
-          } else {
-            deleteMat(tableResDict.table_img);
+          if (tableResDict.table_img !== tableResDict.rect_table_img) {
             deleteMat(tableResDict.rect_table_img);
           }
+          deleteMat(tableResDict.table_img);
           tableResDict.table_img = null;
           tableResDict.rect_table_img = null;
         }
@@ -607,6 +621,10 @@ export class BatchAnalyze {
       }
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Seal OCR
+  // ---------------------------------------------------------------------------
 
   async _runSealOcr(npImages, imagesLayoutRes) {
     const sealOcrItems = [];
@@ -622,7 +640,6 @@ export class BatchAnalyze {
 
     if (!sealOcrItems.length) return;
 
-    let sealOcrModel = null;
     try {
       if (this.useCustomOcr && typeof this.model.ocrModel?.batchPredict === "function") {
         const sealTexts = await this.model.ocrModel.batchPredict(
@@ -637,36 +654,43 @@ export class BatchAnalyze {
       }
 
       const atomModelManager = AtomModelSingleton.getInstance();
-      sealOcrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
+      const sealOcrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
         is_seal: true,
         det_db_thresh: this.ocrConfig?.["Det.det_db_thresh"] ?? this.ocrConfig?.det_db_thresh ?? 0.3,
         ocr_config: this.ocrConfig,
       });
+
       for (const [sealCropBgr, layoutRe] of sealOcrItems) {
-        const sealOcrRes = await sealOcrModel.ocr(sealCropBgr, { det: true, rec: true });
-        const pairs = Array.isArray(sealOcrRes?.[0]) ? sealOcrRes[0] : [];
-        const sealTexts = [];
-        for (const sealItem of pairs) {
-          const recResult = sealItem?.[1];
-          const recText = Array.isArray(recResult) ? recResult[0] : "";
-          if (recText) sealTexts.push(recText);
+        try {
+          const sealOcrRes = await sealOcrModel.ocr(sealCropBgr, { det: true, rec: true });
+          const pairs = Array.isArray(sealOcrRes?.[0]) ? sealOcrRes[0] : [];
+          const sealTexts = [];
+          for (const sealItem of pairs) {
+            const recResult = sealItem?.[1];
+            const recText = Array.isArray(recResult) ? recResult[0] : "";
+            if (recText) sealTexts.push(recText);
+          }
+          if (sealTexts.length) layoutRe.text = sealTexts;
+        } catch (err) {
+          if (err instanceof AbortException) throw err;
+          console.warn(formatPipelineError({
+            stage: 'ocr', module: 'BatchAnalyze',
+            message: `seal OCR failed: ${err.message}`,
+            recoverable: true,
+          }));
         }
-        if (sealTexts.length) layoutRe.text = sealTexts;
       }
+    } catch (err) {
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: 'ocr', module: 'BatchAnalyze',
+        message: `seal OCR stage failed: ${err.message}`,
+        recoverable: true,
+      }));
     } finally {
       for (const [sealImg] of sealOcrItems) {
-        if (sealImg && typeof sealImg.delete === "function" && !sealImg.isDeleted?.()) sealImg.delete();
+        deleteMat(sealImg);
       }
     }
-  }
-}
-
-function formatPipelineError(err) {
-  if (err instanceof Error) return err.stack || err.message;
-  if (typeof err === "number") return `native runtime error code ${err}`;
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return String(err);
   }
 }

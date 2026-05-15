@@ -1,15 +1,4 @@
 /**
- * PORTING NOTE: enum_class.py → enum_class.js
- *
- * WORKAROUND: Python uses `class X(Enum)` with `.value` access pattern
- * REASON: JavaScript has no built-in Enum type
- * SOLUTION: Object.freeze() to create immutable enum-like objects; values are
- *           plain strings/numbers matching the Python Enum `.value` equivalents.
- *
- * AFFECTED METHODS: All enum classes → Object.freeze() constants
- */
-
-/**
  * @readonly
  * @enum {string}
  */
@@ -90,17 +79,8 @@ export const MakeMode = Object.freeze({
  * @readonly
  * @enum {string}
  */
-export const DocElementType = Object.freeze({
-  PARAGRAPH: 'paragraph',
-  INDEX: 'index',
-});
-
-/**
- * @readonly
- * @enum {string}
- */
 export const ImageType = Object.freeze({
-  PIL:    'pil_img',
+  PIL: 'pil_img',
   BASE64: 'base64_img',
 });
 
@@ -109,6 +89,6 @@ export const ImageType = Object.freeze({
  * @enum {string}
  */
 export const SplitFlag = Object.freeze({
-  CROSS_PAGE:    'cross_page',
+  CROSS_PAGE: 'cross_page',
   LINES_DELETED: 'lines_deleted',
 });

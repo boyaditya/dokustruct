@@ -1,13 +1,4 @@
 // Copyright (c) RapidAI. All rights reserved.
-/**
- * PORTING NOTE: pipeline_magic_model.py → pipeline_magic_model.js
- *
- * WORKAROUND: Python class with private name-mangled methods (__fix_axis, etc.)
- * SOLUTION: JS private fields & methods using # prefix or closure pattern.
- * All logic ported 1-to-1 using JS object manipulation.
- *
- * AFFECTED METHODS: All — ported directly, no async required (pure data transform)
- */
 
 import {
   bboxRelativePos, calculateIou, bboxDistance, getMinboxIfOverlapByRatio,
@@ -17,21 +8,48 @@ import {
   tieUpCategoryByDistanceV3, reductOverlap,
 } from "../../utils/magic_model_utils.js";
 
+const LOW_CONFIDENCE_THRESHOLD = 0.05;
+const HIGH_IOU_THRESHOLD = 0.9;
+const OVERLAP_RATIO_THRESHOLD = 0.8;
+const DISTANCE_DIVERGENCE_FACTOR = 0.3;
+
+const RELEVANT_CATEGORIES = new Set([
+  CategoryId.Title, CategoryId.Text, CategoryId.ImageBody,
+  CategoryId.ImageCaption, CategoryId.TableBody, CategoryId.TableCaption,
+  CategoryId.TableFootnote, CategoryId.InterlineEquation_Layout,
+  CategoryId.InterlineEquationNumber_Layout,
+]);
+
+const SPAN_CATEGORY_IDS = new Set([
+  CategoryId.ImageBody,
+  CategoryId.TableBody,
+  CategoryId.InlineEquation,
+  CategoryId.InterlineEquation_YOLO,
+  CategoryId.OcrText,
+  CategoryId.CheckBox,
+]);
+
 /**
- * Page model info processor.
- * PORTING NOTE: MagicModel(page_model_info, scale) constructor
+ * Page model info processor — groups layout detections into semantic blocks
+ * (images, tables, equations, text) with caption/footnote association.
  */
 export class MagicModel {
-  static LOW_CONFIDENCE_THRESHOLD = 0.05;
-  static HIGH_IOU_THRESHOLD = 0.9;
+  static LOW_CONFIDENCE_THRESHOLD = LOW_CONFIDENCE_THRESHOLD;
+  static HIGH_IOU_THRESHOLD = HIGH_IOU_THRESHOLD;
 
   /**
    * @param {object} pageModelInfo - Raw model output with layout_dets
    * @param {number} scale - Page image scale factor
    */
   constructor(pageModelInfo, scale) {
+    if (!pageModelInfo || !Array.isArray(pageModelInfo.layout_dets)) {
+      this._pageModelInfo = { layout_dets: [] };
+      this._scale = scale || 1;
+      return;
+    }
+
     this._pageModelInfo = pageModelInfo;
-    this._scale = scale;
+    this._scale = scale || 1;
 
     this._fixAxis();
     this._fixByRemoveLowConfidence();
@@ -45,11 +63,17 @@ export class MagicModel {
   // ---------------------------------------------------------------------------
 
   _fixAxis() {
-    const needRemoveList = [];
     const layoutDets = this._pageModelInfo.layout_dets;
     const scale = this._scale;
+    const needRemoveIndices = [];
 
-    for (const layoutDet of layoutDets) {
+    for (let i = 0; i < layoutDets.length; i++) {
+      const layoutDet = layoutDets[i];
+      if (!layoutDet.poly || layoutDet.poly.length < 6) {
+        needRemoveIndices.push(i);
+        continue;
+      }
+
       const [x0, y0, , , x1, y1] = layoutDet.poly;
       const bbox = [
         Math.floor(x0 / scale * 100) / 100,
@@ -57,7 +81,7 @@ export class MagicModel {
         Math.floor(x1 / scale * 100) / 100,
         Math.floor(y1 / scale * 100) / 100,
       ];
-      
+
       layoutDet.bbox = bbox;
 
       const polygonPoints = layoutDet.polygon_points;
@@ -69,55 +93,45 @@ export class MagicModel {
       }
 
       if (bbox[2] - bbox[0] <= 0 || bbox[3] - bbox[1] <= 0) {
-        needRemoveList.push(layoutDet);
+        needRemoveIndices.push(i);
       }
     }
 
-    for (const item of needRemoveList) {
-      const idx = layoutDets.indexOf(item);
-      if (idx !== -1) layoutDets.splice(idx, 1);
+    for (let i = needRemoveIndices.length - 1; i >= 0; i--) {
+      layoutDets.splice(needRemoveIndices[i], 1);
     }
   }
 
   _fixByRemoveLowConfidence() {
     const layoutDets = this._pageModelInfo.layout_dets;
-    const toRemove = layoutDets.filter(d => d.score <= MagicModel.LOW_CONFIDENCE_THRESHOLD);
-    for (const item of toRemove) {
-      const idx = layoutDets.indexOf(item);
-      if (idx !== -1) layoutDets.splice(idx, 1);
+    for (let i = layoutDets.length - 1; i >= 0; i--) {
+      if ((layoutDets[i].score ?? 0) <= LOW_CONFIDENCE_THRESHOLD) {
+        layoutDets.splice(i, 1);
+      }
     }
   }
 
   _fixByRemoveHighIouAndLowConfidence() {
-    const needRemoveList = [];
-    const relevantCategories = new Set([
-      CategoryId.Title, CategoryId.Text, CategoryId.ImageBody,
-      CategoryId.ImageCaption, CategoryId.TableBody, CategoryId.TableCaption,
-      CategoryId.TableFootnote, CategoryId.InterlineEquation_Layout,
-      CategoryId.InterlineEquationNumber_Layout,
-    ]);
+    const layoutDets = this._pageModelInfo.layout_dets;
+    const relevantDets = layoutDets.filter(x => RELEVANT_CATEGORIES.has(x.category_id));
+    const needRemoveSet = new Set();
 
-    const layoutDets = this._pageModelInfo.layout_dets.filter(
-      x => relevantCategories.has(x.category_id)
-    );
-
-    for (let i = 0; i < layoutDets.length; i++) {
-      for (let j = i + 1; j < layoutDets.length; j++) {
-        const det1 = layoutDets[i];
-        const det2 = layoutDets[j];
-        if (calculateIou(det1.bbox, det2.bbox) > MagicModel.HIGH_IOU_THRESHOLD) {
-          const detToRemove = det1.score < det2.score ? det1 : det2;
-          if (!needRemoveList.includes(detToRemove)) {
-            needRemoveList.push(detToRemove);
-          }
+    for (let i = 0; i < relevantDets.length; i++) {
+      for (let j = i + 1; j < relevantDets.length; j++) {
+        const det1 = relevantDets[i];
+        const det2 = relevantDets[j];
+        if (!det1.bbox || !det2.bbox) continue;
+        if (calculateIou(det1.bbox, det2.bbox) > HIGH_IOU_THRESHOLD) {
+          const detToRemove = (det1.score ?? 0) < (det2.score ?? 0) ? det1 : det2;
+          needRemoveSet.add(detToRemove);
         }
       }
     }
 
-    const allDets = this._pageModelInfo.layout_dets;
-    for (const item of needRemoveList) {
-      const idx = allDets.indexOf(item);
-      if (idx !== -1) allDets.splice(idx, 1);
+    for (let i = layoutDets.length - 1; i >= 0; i--) {
+      if (needRemoveSet.has(layoutDets[i])) {
+        layoutDets.splice(i, 1);
+      }
     }
   }
 
@@ -134,18 +148,21 @@ export class MagicModel {
 
     for (let i = 0; i < footnotes.length; i++) {
       const footnote = footnotes[i];
+      if (!footnote.bbox) continue;
 
       for (const figure of figures) {
+        if (!figure.bbox) continue;
         const posFlagCount = bboxRelativePos(footnote.bbox, figure.bbox).filter(Boolean).length;
         if (posFlagCount > 1) continue;
-        const d = this._bboxDistance(figure.bbox, footnote.bbox);
+        const d = this._computeDistance(figure.bbox, footnote.bbox);
         disFigureFootnote[i] = Math.min(d, disFigureFootnote[i] ?? Infinity);
       }
 
       for (const table of tables) {
+        if (!table.bbox) continue;
         const posFlagCount = bboxRelativePos(footnote.bbox, table.bbox).filter(Boolean).length;
         if (posFlagCount > 1) continue;
-        const d = this._bboxDistance(table.bbox, footnote.bbox);
+        const d = this._computeDistance(table.bbox, footnote.bbox);
         disTableFootnote[i] = Math.min(d, disTableFootnote[i] ?? Infinity);
       }
     }
@@ -160,49 +177,57 @@ export class MagicModel {
   }
 
   _fixByRemoveOverlapImageTableBody() {
-    const needRemoveList = [];
     const layoutDets = this._pageModelInfo.layout_dets;
     const imageBlocks = layoutDets.filter(x => x.category_id === CategoryId.ImageBody);
     const tableBlocks = layoutDets.filter(x => x.category_id === CategoryId.TableBody);
+    const needRemoveSet = new Set();
 
-    const processOverlappingBlocks = (blocks) => {
+    const mergeOverlappingBlocks = (blocks) => {
       for (let i = 0; i < blocks.length; i++) {
         for (let j = i + 1; j < blocks.length; j++) {
           const b1 = blocks[i];
           const b2 = blocks[j];
-          const overlapBox = getMinboxIfOverlapByRatio(b1.bbox, b2.bbox, 0.8);
-          if (overlapBox !== null) {
-            const area1 = (b1.bbox[2] - b1.bbox[0]) * (b1.bbox[3] - b1.bbox[1]);
-            const area2 = (b2.bbox[2] - b2.bbox[0]) * (b2.bbox[3] - b2.bbox[1]);
-            const [smallBlock, largeBlock] = area1 <= area2 ? [b1, b2] : [b2, b1];
+          if (!b1.bbox || !b2.bbox) continue;
+          const overlapBox = getMinboxIfOverlapByRatio(b1.bbox, b2.bbox, OVERLAP_RATIO_THRESHOLD);
+          if (overlapBox === null) continue;
 
-            if (!needRemoveList.includes(smallBlock)) {
-              const [x1, y1, x2, y2] = largeBlock.bbox;
-              const [sx1, sy1, sx2, sy2] = smallBlock.bbox;
-              largeBlock.bbox = [
-                Math.min(x1, sx1), Math.min(y1, sy1),
-                Math.max(x2, sx2), Math.max(y2, sy2),
-              ];
-              needRemoveList.push(smallBlock);
-            }
+          const area1 = (b1.bbox[2] - b1.bbox[0]) * (b1.bbox[3] - b1.bbox[1]);
+          const area2 = (b2.bbox[2] - b2.bbox[0]) * (b2.bbox[3] - b2.bbox[1]);
+          const [smallBlock, largeBlock] = area1 <= area2 ? [b1, b2] : [b2, b1];
+
+          if (!needRemoveSet.has(smallBlock)) {
+            const [x1, y1, x2, y2] = largeBlock.bbox;
+            const [sx1, sy1, sx2, sy2] = smallBlock.bbox;
+            largeBlock.bbox = [
+              Math.min(x1, sx1), Math.min(y1, sy1),
+              Math.max(x2, sx2), Math.max(y2, sy2),
+            ];
+            needRemoveSet.add(smallBlock);
           }
         }
       }
     };
 
-    processOverlappingBlocks(imageBlocks);
-    processOverlappingBlocks(tableBlocks);
+    mergeOverlappingBlocks(imageBlocks);
+    mergeOverlappingBlocks(tableBlocks);
 
-    for (const item of needRemoveList) {
-      const idx = layoutDets.indexOf(item);
-      if (idx !== -1) layoutDets.splice(idx, 1);
+    for (let i = layoutDets.length - 1; i >= 0; i--) {
+      if (needRemoveSet.has(layoutDets[i])) {
+        layoutDets.splice(i, 1);
+      }
     }
   }
 
-  _bboxDistance(bbox1, bbox2) {
+  /**
+   * Compute distance between two bboxes with size-divergence check.
+   * Returns Infinity if bboxes are in multiple relative positions or
+   * the second bbox is significantly larger than the first.
+   */
+  _computeDistance(bbox1, bbox2) {
+    if (!bbox1 || !bbox2) return Infinity;
+
     const [left, right, bottom, top] = bboxRelativePos(bbox1, bbox2);
-    const flags = [left, right, bottom, top];
-    const count = flags.filter(Boolean).length;
+    const count = [left, right, bottom, top].filter(Boolean).length;
     if (count > 1) return Infinity;
 
     let l1, l2;
@@ -213,7 +238,9 @@ export class MagicModel {
       l1 = bbox1[2] - bbox1[0];
       l2 = bbox2[2] - bbox2[0];
     }
-    if (l2 > l1 && (l2 - l1) / l1 > 0.3) return Infinity;
+
+    if (l1 <= 0) return Infinity;
+    if (l2 > l1 && (l2 - l1) / l1 > DISTANCE_DIVERGENCE_FACTOR) return Infinity;
     return bboxDistance(bbox1, bbox2);
   }
 
@@ -224,9 +251,9 @@ export class MagicModel {
         .map(x => ({
           bbox: x.bbox,
           score: x.score,
-          original_label: x.original_label,
-          original_order: x.original_order,
-          polygon_points: x.polygon_points,
+          original_label: x.original_label ?? null,
+          original_order: x.original_order ?? null,
+          polygon_points: x.polygon_points ?? null,
         }))
     );
     const getObjects = () => reductOverlap(
@@ -235,9 +262,9 @@ export class MagicModel {
         .map(x => ({
           bbox: x.bbox,
           score: x.score,
-          original_label: x.original_label,
-          original_order: x.original_order,
-          polygon_points: x.polygon_points,
+          original_label: x.original_label ?? null,
+          original_order: x.original_order ?? null,
+          polygon_points: x.polygon_points ?? null,
         }))
     );
     return tieUpCategoryByDistanceV3(getSubjects, getObjects);
@@ -247,9 +274,7 @@ export class MagicModel {
   // Public getters
   // ---------------------------------------------------------------------------
 
-  /**
-   * @returns {object[]}
-   */
+  /** @returns {object[]} */
   getImgs() {
     const withCaptions = this._tieUpCategoryByDistanceV3(CategoryId.ImageBody, CategoryId.ImageCaption);
     const withFootnotes = this._tieUpCategoryByDistanceV3(CategoryId.ImageBody, CategoryId.ImageFootnote);
@@ -264,9 +289,7 @@ export class MagicModel {
     });
   }
 
-  /**
-   * @returns {object[]}
-   */
+  /** @returns {object[]} */
   getTables() {
     const withCaptions = this._tieUpCategoryByDistanceV3(CategoryId.TableBody, CategoryId.TableCaption);
     const withFootnotes = this._tieUpCategoryByDistanceV3(CategoryId.TableBody, CategoryId.TableFootnote);
@@ -312,66 +335,16 @@ export class MagicModel {
    */
   getAllSpans() {
     const allSpans = [];
-    const allowCategoryIds = new Set([
-      CategoryId.ImageBody,
-      CategoryId.TableBody,
-      CategoryId.InlineEquation,
-      CategoryId.InterlineEquation_YOLO,
-      CategoryId.OcrText,
-      CategoryId.CheckBox,
-    ]);
 
     for (const layoutDet of this._pageModelInfo.layout_dets) {
-      const categoryId = layoutDet.category_id;
-      if (!allowCategoryIds.has(categoryId)) continue;
-
-      // Skip VL OCR results (handled separately)
+      if (!SPAN_CATEGORY_IDS.has(layoutDet.category_id)) continue;
       if (layoutDet.vl_ocr) continue;
 
-      const span = {
-        bbox: layoutDet.bbox,
-        score: layoutDet.score,
-        original_label: layoutDet.original_label ?? null,
-        original_order: layoutDet.original_order ?? null,
-        polygon_points: layoutDet.polygon_points ?? null,
-      };
-
-      if (categoryId === CategoryId.ImageBody) {
-        span.type = ContentType.IMAGE;
-      } else if (categoryId === CategoryId.TableBody) {
-        const latex = layoutDet.latex;
-        const html = layoutDet.html || layoutDet.table_res?.html;
-        if (latex) {
-          span.latex = latex;
-        } else if (html) {
-          span.html = html;
-          if (layoutDet.latex_boxes) span.latex_boxes = layoutDet.latex_boxes;
-          else if (layoutDet.img_boxes || layoutDet.table_res?.img_boxes) {
-            span.img_boxes = layoutDet.img_boxes || layoutDet.table_res?.img_boxes;
-          }
-        }
-        span.type = ContentType.TABLE;
-      } else if (categoryId === CategoryId.InlineEquation) {
-        span.content = layoutDet.latex || layoutDet.formula_res?.latex || '';
-        span.type = ContentType.INLINE_EQUATION;
-      } else if (
-        categoryId === CategoryId.InterlineEquation_Layout ||
-        categoryId === CategoryId.InterlineEquation_YOLO
-      ) {
-        span.content = layoutDet.latex || layoutDet.formula_res?.latex || '';
-        span.type = ContentType.INTERLINE_EQUATION;
-      } else if (categoryId === CategoryId.CheckBox) {
-        span.content = layoutDet.checkbox || '';
-        span.type = ContentType.CHECKBOX;
-      } else if (categoryId === CategoryId.OcrText) {
-        span.content = layoutDet.text;
-        span.type = ContentType.TEXT;
-      }
-
-      allSpans.push(span);
+      const span = this._buildSpan(layoutDet);
+      if (span) allSpans.push(span);
     }
 
-    return MagicModel._removeDuplicateSpans(allSpans);
+    return removeDuplicateSpans(allSpans);
   }
 
   /**
@@ -399,6 +372,72 @@ export class MagicModel {
     return vlOcrSpans;
   }
 
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build a span object from a layout detection entry.
+   * @param {object} layoutDet
+   * @returns {object|null}
+   */
+  _buildSpan(layoutDet) {
+    const categoryId = layoutDet.category_id;
+    const span = {
+      bbox: layoutDet.bbox,
+      score: layoutDet.score,
+      original_label: layoutDet.original_label ?? null,
+      original_order: layoutDet.original_order ?? null,
+      polygon_points: layoutDet.polygon_points ?? null,
+    };
+
+    if (categoryId === CategoryId.ImageBody) {
+      span.type = ContentType.IMAGE;
+      if (layoutDet.original_label === 'seal') {
+        span.content = layoutDet.text ?? null;
+      }
+    } else if (categoryId === CategoryId.TableBody) {
+      this._populateTableSpan(span, layoutDet);
+    } else if (categoryId === CategoryId.InlineEquation) {
+      span.content = layoutDet.latex || layoutDet.formula_res?.latex || '';
+      span.type = ContentType.INLINE_EQUATION;
+    } else if (
+      categoryId === CategoryId.InterlineEquation_Layout ||
+      categoryId === CategoryId.InterlineEquation_YOLO
+    ) {
+      span.content = layoutDet.latex || layoutDet.formula_res?.latex || '';
+      span.type = ContentType.INTERLINE_EQUATION;
+    } else if (categoryId === CategoryId.CheckBox) {
+      span.content = layoutDet.checkbox || '';
+      span.type = ContentType.CHECKBOX;
+    } else if (categoryId === CategoryId.OcrText) {
+      span.content = layoutDet.text ?? '';
+      span.type = ContentType.TEXT;
+    }
+
+    return span;
+  }
+
+  /**
+   * Populate table-specific fields on a span.
+   */
+  _populateTableSpan(span, layoutDet) {
+    const latex = layoutDet.latex;
+    const html = layoutDet.html || layoutDet.table_res?.html;
+
+    if (latex) {
+      span.latex = latex;
+    } else if (html) {
+      span.html = html;
+      if (layoutDet.latex_boxes) {
+        span.latex_boxes = layoutDet.latex_boxes;
+      } else if (layoutDet.img_boxes || layoutDet.table_res?.img_boxes) {
+        span.img_boxes = layoutDet.img_boxes || layoutDet.table_res?.img_boxes;
+      }
+    }
+    span.type = ContentType.TABLE;
+  }
+
   /**
    * @param {number} categoryType
    * @param {string[]} [extraCols=[]]
@@ -406,38 +445,43 @@ export class MagicModel {
    */
   _getBlocksByType(categoryType, extraCols = []) {
     const blocks = [];
-    for (const item of (this._pageModelInfo.layout_dets || [])) {
-      if (item.category_id === categoryType) {
-        const block = {
-          bbox: item.bbox,
-          original_label: item.original_label ?? null,
-          original_order: item.original_order ?? null,
-          polygon_points: item.polygon_points ?? null,
-          score: item.score,
-        };
-        for (const col of extraCols) {
-          block[col] = item[col] ?? null;
-        }
-        blocks.push(block);
+    for (const item of this._pageModelInfo.layout_dets) {
+      if (item.category_id !== categoryType) continue;
+      const block = {
+        bbox: item.bbox,
+        original_label: item.original_label ?? null,
+        original_order: item.original_order ?? null,
+        polygon_points: item.polygon_points ?? null,
+        score: item.score,
+      };
+      for (const col of extraCols) {
+        block[col] = item[col] ?? null;
       }
+      blocks.push(block);
     }
     return blocks;
   }
+}
 
-  /**
-   * @param {object[]} spans
-   * @returns {object[]}
-   */
-  static _removeDuplicateSpans(spans) {
-    const seen = [];
-    const unique = [];
-    for (const span of spans) {
-      const key = JSON.stringify(span);
-      if (!seen.includes(key)) {
-        seen.push(key);
-        unique.push(span);
-      }
+// ---------------------------------------------------------------------------
+// Module-level helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove duplicate spans by JSON key comparison.
+ * @param {object[]} spans
+ * @returns {object[]}
+ */
+function removeDuplicateSpans(spans) {
+  if (!spans || !spans.length) return [];
+  const seen = new Set();
+  const unique = [];
+  for (const span of spans) {
+    const key = JSON.stringify(span);
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(span);
     }
-    return unique;
   }
+  return unique;
 }

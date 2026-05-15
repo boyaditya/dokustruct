@@ -1,35 +1,24 @@
 // Copyright (c) Opendatalab. All rights reserved.
 /**
- * PORTING NOTE: pdf_text_tool.py → pdf_text_tool.js
+ * PDF text extraction utilities using pdfjs-dist.
  *
- * WORKAROUND: pdftext library (get_chars, get_spans, get_lines, get_blocks, etc.)
- * REASON: pdftext is a Python-only library using pypdfium2 internally
- * SOLUTION: Use pdfjs-dist getTextContent() to extract text spans and reconstruct
- *   the same page dict structure expected by downstream pipeline.
- *
- * WORKAROUND: PyPDFium2Parser.lock (threading.Lock)
- * REASON: No threading in browser
- * SOLUTION: Single-threaded; lock is a no-op (already stubbed in PyPDFium2Parser.js).
+ * Browser workaround: Python uses pdftext library (get_chars, get_spans, get_lines, get_blocks).
+ * Here we use pdfjs-dist getTextContent() and reconstruct the same page dict structure.
  */
+
+const LINE_TOLERANCE = 4;  // px — y-proximity threshold for grouping spans into lines
+const BLOCK_GAP = 16;      // px — vertical gap threshold for splitting lines into blocks
 
 /**
  * Extract text page data from a pdfjs PDFPageProxy.
- * PORTING NOTE: get_page(page, ...) → getPage(page, opts)
- *
  * Returns a dict matching the Python `page` structure:
  *   { size, bbox, width, height, rotation, blocks }
  *
- * PORTING NOTE: pdftext get_chars/get_spans/get_lines/get_blocks pipeline
- *   → pdfjs getTextContent() + manual span/line/block grouping
- *
- * NOTE: The `blocks` structure is simplified compared to pdftext output.
- *   Each block contains { bbox, lines: [{ bbox, spans: [{ bbox, content, ... }] }] }.
- *
  * @param {import('pdfjs-dist').PDFPageProxy} page
  * @param {object} [opts]
- * @param {boolean}   [opts.quoteLoosebox=true]     - unused (pdftext specific)
- * @param {number}    [opts.superscriptHeightThreshold=0.7] - unused
- * @param {number}    [opts.lineDistanceThreshold=0.1]      - unused
+ * @param {boolean}   [opts.quoteLoosebox=true]
+ * @param {number}    [opts.superscriptHeightThreshold=0.7]
+ * @param {number}    [opts.lineDistanceThreshold=0.1]
  * @returns {Promise<object>}
  */
 export async function getPage(page, {
@@ -37,19 +26,18 @@ export async function getPage(page, {
   superscriptHeightThreshold = 0.7,
   lineDistanceThreshold = 0.1,
 } = {}) {
+  if (!page) {
+    return { size: [0, 0], bbox: [0, 0, 0, 0], width: 0, height: 0, rotation: 0, blocks: [] };
+  }
+
   const viewport = page.getViewport({ scale: 1 });
   const pageWidth = Math.ceil(viewport.width);
   const pageHeight = Math.ceil(viewport.height);
-
-  // pdfjs viewport bbox: [x0, y0, x1, y1] in user space (origin bottom-left in pdf spec, top-left in pdfjs)
   const pageBbox = [0, 0, pageWidth, pageHeight];
   const pageRotation = page.rotate ?? 0;
 
-  // Extract text content
   const textContent = await page.getTextContent();
-
-  // Group items into lines by approximate y coordinate, then into blocks
-  const blocks = groupTextContentToBlocks(textContent.items, viewport, pageHeight);
+  const blocks = groupTextContentToBlocks(textContent.items, pageHeight);
 
   return {
     size: [pageWidth, pageHeight],
@@ -63,27 +51,43 @@ export async function getPage(page, {
 
 /**
  * Group pdfjs TextItem[] into block→line→span hierarchy.
- * PORTING NOTE: replaces pdftext get_spans / get_lines / get_blocks
  *
  * @param {Array<import('pdfjs-dist').TextItem>} items
- * @param {import('pdfjs-dist').PageViewport} viewport
  * @param {number} pageHeight
  * @returns {Array<object>}
  */
-function groupTextContentToBlocks(items, viewport, pageHeight) {
+function groupTextContentToBlocks(items, pageHeight) {
   if (!items || items.length === 0) return [];
 
-  // Transform each item's transform matrix to [x0, y0, x1, y1] bounding box
+  const spans = buildSpansFromItems(items, pageHeight);
+  if (spans.length === 0) return [];
+
+  // Sort top→bottom, left→right
+  spans.sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0]);
+
+  const lines = groupSpansIntoLines(spans);
+  const lineObjects = lines.map(lineSpans => ({
+    bbox: mergeBboxes(lineSpans.map(s => s.bbox)),
+    spans: lineSpans,
+  }));
+
+  return groupLinesIntoBlocks(lineObjects);
+}
+
+/**
+ * Transform pdfjs text items into span objects with bounding boxes.
+ */
+function buildSpansFromItems(items, pageHeight) {
   const spans = [];
   let charIdx = 0;
+
   for (const item of items) {
     if (!item.str || item.str.length === 0) continue;
 
     const [, , , , tx, ty] = item.transform;
-    // flip y: pdfjs y increases downward from top
     const x0 = tx;
-    const y1 = pageHeight - ty;           // bottom of text in top-left coords
-    const y0 = y1 - (item.height || 8);   // top of text
+    const y1 = pageHeight - ty;
+    const y0 = y1 - (item.height || 8);
     const x1 = x0 + (item.width || 0);
     const bbox = [x0, y0, x1, y1];
     const chars = buildChars(item.str, bbox, charIdx);
@@ -100,13 +104,13 @@ function groupTextContentToBlocks(items, viewport, pageHeight) {
     });
   }
 
-  if (spans.length === 0) return [];
+  return spans;
+}
 
-  // Sort top→bottom, left→right
-  spans.sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0]);
-
-  // Group into lines by y proximity
-  const LINE_TOLERANCE = 4; // px
+/**
+ * Group spans into lines by y-proximity.
+ */
+function groupSpansIntoLines(spans) {
   const lines = [];
   let currentLine = [spans[0]];
 
@@ -122,13 +126,14 @@ function groupTextContentToBlocks(items, viewport, pageHeight) {
     }
   }
   lines.push(currentLine);
+  return lines;
+}
 
-  // Compute line bbox and group into blocks by vertical proximity
-  const BLOCK_GAP = 16; // px gap > BLOCK_GAP → new block
-  const lineObjects = lines.map(lineSpans => ({
-    bbox: mergeBboxes(lineSpans.map(s => s.bbox)),
-    spans: lineSpans,
-  }));
+/**
+ * Group line objects into blocks by vertical gap.
+ */
+function groupLinesIntoBlocks(lineObjects) {
+  if (lineObjects.length === 0) return [];
 
   const blocks = [];
   let currentBlock = [lineObjects[0]];
@@ -152,6 +157,9 @@ function groupTextContentToBlocks(items, viewport, pageHeight) {
   }));
 }
 
+/**
+ * Build character-level bounding boxes from text and its span bbox.
+ */
 function buildChars(text, bbox, startIdx) {
   const graphemes = Array.from(String(text || ''));
   if (!graphemes.length) return [];

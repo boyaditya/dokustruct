@@ -1,15 +1,10 @@
-/**
- * model_handler/base/__init__.py → base/index.js
- * Mirrors the ABC base class with a runtime-only abstract enforcement.
- */
-
 export class BaseModelHandler {
   /**
    * Run the model handler on a batch of images.
    * @param {cv.Mat[]} imgList
    * @returns {Promise<import('../../utils/typings.js').RapidLayoutOutput[]>}
    */
-  async call(imgList) {          // mirrors __call__
+  async call(imgList) {
     throw new Error(`${this.constructor.name}.call() not implemented`);
   }
 

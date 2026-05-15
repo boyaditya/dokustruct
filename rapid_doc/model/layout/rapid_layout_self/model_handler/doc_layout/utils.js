@@ -1,16 +1,7 @@
 /**
- * PORTING NOTE: model_handler/doc_layout/utils.py → utils.js
+ * LetterBox, scaleBoxes, clipBoxes — image resize/pad and box coordinate utilities.
  *
- * LetterBox, scale_boxes, clip_boxes are straightforward algorithmic ports.
- * cv2.resize  → declared global `cv` (OpenCV.js).
- * cv2.BORDER_CONSTANT / cv2.INTER_LINEAR → same enum names in cv.
- * numpy clip → Math.min/max or Float32Array w/ clamp.
- *
- * CHANGE: LetterBox.__call__(labels, image) in Python accepts either a dict or
- * an ndarray.  In JS, the method is named call() and accepts (image, labels={}).
- * When labels is an empty object, only the processed cv.Mat is returned.
- *
- * IMPORTANT: This module returns raw cv.Mat objects.  Callers are responsible
+ * This module returns raw cv.Mat objects. Callers are responsible
  * for calling .delete() on every Mat returned (try/finally pattern).
  */
 

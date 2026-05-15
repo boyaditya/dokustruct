@@ -1,8 +1,9 @@
 // Copyright (c) Opendatalab. All rights reserved.
 /**
  * Character utility functions for text normalization
- * PORTING NOTE: char_utils.py → char_utils.js
  */
+
+import { ContentType } from './enum_class.js';
 
 // PDF text extraction: English cross-line word breaks may be encoded as various hyphen characters.
 // Only used to detect "line-end English word break", don't extend to en/em dash.
@@ -63,4 +64,27 @@ export function fullToHalf(text) {
     }
   }
   return result.join('');
+}
+
+/**
+ * Extract plain text content from a block's spans.
+ * Concatenates all text-type span content without markdown formatting.
+ *
+ * @param {object} block - Block with lines[].spans[] structure
+ * @returns {string} Plain text content of the block
+ */
+export function extractBlockPlainText(block) {
+  if (!block) return '';
+  const lines = block.lines || [];
+  if (!lines.length) return '';
+
+  let text = '';
+  for (const line of lines) {
+    for (const span of (line.spans || [])) {
+      if (span.type === ContentType.TEXT && span.content) {
+        text += span.content;
+      }
+    }
+  }
+  return text;
 }

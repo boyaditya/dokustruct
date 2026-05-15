@@ -1,12 +1,21 @@
 // Copyright (c) RapidAI. All rights reserved.
-// PORTING NOTE: para_split.py → para_split.js
 // Pure data transformation — no async required.
 
 import { ContentType, BlockType, SplitFlag } from "../../utils/enum_class.js";
 import { detectLang } from "../../utils/language.js";
 
-const LINE_STOP_FLAG = ['.', '!', '?', '。', '！', '？', ')', '）', '"', '”', ':', '：', ';', '；'];
+const LINE_STOP_FLAG = ['.', '!', '?', '。', '！', '？', ')', '）', '"', '"', ':', '：', ';', '；'];
 const LIST_END_FLAG = ['.', '。', ';', '；'];
+
+const CJK_LANGUAGES = new Set(['zh', 'ja', 'ko']);
+const LEFT_CLOSE_RATIO_THRESHOLD = 0.8;
+const RIGHT_CLOSE_RATIO_THRESHOLD = 0.5;
+const EXTERNAL_SIDES_RATIO_THRESHOLD = 0.5;
+const BLOCK_ASPECT_RATIO_THRESHOLD = 0.4;
+const WIDE_BLOCK_WEIGHT_RATIO = 0.5;
+const NARROW_CLOSED_AREA_FACTOR = 0.36;
+const WIDE_CLOSED_AREA_FACTOR = 0.26;
+const RIGHT_GAP_RATIO = 0.1;
 
 /**
  * @readonly
@@ -23,45 +32,36 @@ export const ListLineTag = Object.freeze({
 
 /**
  * Pre-process blocks into groups: continuous text blocks → one group, others individual.
- * PORTING NOTE: __process_blocks(blocks) → processBlocks(blocks)
  * @param {object[]} blocks
  * @returns {object[]} groups
  */
 function processBlocks(blocks) {
+  if (!blocks || !blocks.length) return [];
+
   const result = [];
   let currentGroup = [];
 
-  function flushCurrentGroup() {
+  const flushCurrentGroup = () => {
     if (currentGroup.length > 0) {
       result.push({ group_type: "text", blocks: currentGroup });
       currentGroup = [];
     }
-  }
+  };
 
   for (let i = 0; i < blocks.length; i++) {
     const currentBlock = blocks[i];
 
     if (currentBlock.type === "text") {
-      // Recalculate bbox_fs from lines
-      currentBlock.bbox_fs = currentBlock.bbox ? [...currentBlock.bbox] : [0, 0, 0, 0];
-      if (currentBlock.lines && currentBlock.lines.length > 0) {
-        currentBlock.bbox_fs = [
-          Math.min(...currentBlock.lines.map(l => l.bbox[0])),
-          Math.min(...currentBlock.lines.map(l => l.bbox[1])),
-          Math.max(...currentBlock.lines.map(l => l.bbox[2])),
-          Math.max(...currentBlock.lines.map(l => l.bbox[3])),
-        ];
-      }
+      currentBlock.bbox_fs = computeBlockBboxFs(currentBlock);
       currentGroup.push(currentBlock);
     } else {
       flushCurrentGroup();
       result.push({ group_type: currentBlock.type, blocks: [currentBlock] });
     }
 
-    // If next block is title or interline_equation, break current text group
     if (i + 1 < blocks.length) {
       const nextBlock = blocks[i + 1];
-      if (["title", "interline_equation"].includes(nextBlock.type)) {
+      if (nextBlock.type === "title" || nextBlock.type === "interline_equation") {
         flushCurrentGroup();
       }
     }
@@ -71,8 +71,25 @@ function processBlocks(blocks) {
 }
 
 /**
+ * Compute the bounding box from lines, falling back to block bbox.
+ * @param {object} block
+ * @returns {number[]}
+ */
+function computeBlockBboxFs(block) {
+  const lines = block.lines;
+  if (!lines || !lines.length) {
+    return block.bbox ? [...block.bbox] : [0, 0, 0, 0];
+  }
+  return [
+    Math.min(...lines.map(l => l.bbox[0])),
+    Math.min(...lines.map(l => l.bbox[1])),
+    Math.max(...lines.map(l => l.bbox[2])),
+    Math.max(...lines.map(l => l.bbox[3])),
+  ];
+}
+
+/**
  * Classify a block as LIST, INDEX, or TEXT based on line geometry.
- * PORTING NOTE: __is_list_or_index_block(block) → isListOrIndexBlock(block)
  * @param {object} block
  * @returns {string} BlockType
  */
@@ -81,44 +98,69 @@ function isListOrIndexBlock(block) {
   if (!lines || lines.length < 2) return BlockType.TEXT;
 
   const firstLine = lines[0];
-  const lastLine = lines[lines.length - 1];
   const lineHeight = firstLine.bbox[3] - firstLine.bbox[1];
+  if (lineHeight <= 0) return BlockType.TEXT;
+
   const blockWeight = block.bbox_fs[2] - block.bbox_fs[0];
   const blockHeight = block.bbox_fs[3] - block.bbox_fs[1];
   const [pageWeight] = block.page_size || [1, 1];
-
   const blockWeightRatio = pageWeight > 0 ? blockWeight / pageWeight : 0;
 
+  const multipleParaFlag = detectMultipleParagraphs(lines, block, lineHeight);
+  const { linesTextList, blockLang } = extractTextAndLang(lines);
+  const alignment = computeAlignment(lines, block, lineHeight, blockWeight, blockWeightRatio, blockLang);
+  const lineFlags = computeLineFlags(linesTextList);
+
+  return classifyBlock(
+    lines, block, linesTextList, lineHeight, blockWeight, blockHeight,
+    alignment, lineFlags, multipleParaFlag
+  );
+}
+
+/**
+ * Detect if block contains multiple paragraphs based on first/last line indentation.
+ */
+function detectMultipleParagraphs(lines, block, lineHeight) {
+  const firstLine = lines[0];
+  const lastLine = lines[lines.length - 1];
+  return (
+    firstLine.bbox[0] - block.bbox_fs[0] > lineHeight / 2 &&
+    Math.abs(lastLine.bbox[0] - block.bbox_fs[0]) < lineHeight / 2 &&
+    block.bbox_fs[2] - lastLine.bbox[2] > lineHeight
+  );
+}
+
+/**
+ * Extract text content from lines and detect language.
+ */
+function extractTextAndLang(lines) {
+  const linesTextList = [];
+  for (const line of lines) {
+    let lineText = '';
+    if (line.spans) {
+      for (const span of line.spans) {
+        if (span.type === ContentType.TEXT) {
+          lineText += (span.content || '').trim();
+        }
+      }
+    }
+    linesTextList.push(lineText);
+  }
+  const blockText = linesTextList.join('');
+  const blockLang = detectLang(blockText);
+  return { linesTextList, blockLang };
+}
+
+/**
+ * Compute alignment statistics for all lines in a block.
+ */
+function computeAlignment(lines, block, lineHeight, blockWeight, blockWeightRatio, blockLang) {
   let leftCloseNum = 0;
   let leftNotCloseNum = 0;
   let rightNotCloseNum = 0;
   let rightCloseNum = 0;
   let centerCloseNum = 0;
   let externalSidesNotCloseNum = 0;
-  let multiplParaFlag = false;
-
-  if (
-    firstLine.bbox[0] - block.bbox_fs[0] > lineHeight / 2 &&
-    Math.abs(lastLine.bbox[0] - block.bbox_fs[0]) < lineHeight / 2 &&
-    block.bbox_fs[2] - lastLine.bbox[2] > lineHeight
-  ) {
-    multiplParaFlag = true;
-  }
-
-  const linesTextList = [];
-  let blockText = '';
-  for (const line of lines) {
-    let lineText = '';
-    for (const span of line.spans) {
-      if (span.type === ContentType.TEXT) {
-        lineText += (span.content || '').trim();
-      }
-    }
-    linesTextList.push(lineText);
-    blockText = linesTextList.join('');
-  }
-
-  const blockLang = detectLang(blockText);
 
   for (const line of lines) {
     const lineMidX = (line.bbox[0] + line.bbox[2]) / 2;
@@ -141,17 +183,27 @@ function isListOrIndexBlock(block) {
       rightCloseNum++;
     } else {
       let closedArea;
-      if (blockLang === 'zh' || blockLang === 'ja' || blockLang === 'ko') {
-        closedArea = 0.26 * blockWeight;
+      if (CJK_LANGUAGES.has(blockLang)) {
+        closedArea = WIDE_CLOSED_AREA_FACTOR * blockWeight;
       } else {
-        closedArea = blockWeightRatio >= 0.5 ? 0.26 * blockWeight : 0.36 * blockWeight;
+        closedArea = blockWeightRatio >= WIDE_BLOCK_WEIGHT_RATIO
+          ? WIDE_CLOSED_AREA_FACTOR * blockWeight
+          : NARROW_CLOSED_AREA_FACTOR * blockWeight;
       }
       if (block.bbox_fs[2] - line.bbox[2] > closedArea) rightNotCloseNum++;
     }
   }
 
-  let lineEndFlag = false;
-  let lineNumFlag = false;
+  return {
+    leftCloseNum, leftNotCloseNum, rightNotCloseNum,
+    rightCloseNum, centerCloseNum, externalSidesNotCloseNum,
+  };
+}
+
+/**
+ * Compute line-level flags (numeric start/end, punctuation end).
+ */
+function computeLineFlags(linesTextList) {
   let numStartCount = 0;
   let numEndCount = 0;
   let flagEndCount = 0;
@@ -163,26 +215,38 @@ function isListOrIndexBlock(block) {
       if (/\d$/.test(lineText)) numEndCount++;
     }
   }
-  if (linesTextList.length > 0) {
-    if (numStartCount / linesTextList.length >= 0.8 || numEndCount / linesTextList.length >= 0.8) lineNumFlag = true;
-    if (flagEndCount / linesTextList.length >= 0.8) lineEndFlag = true;
-  }
 
-  // INDEX: left or right flush + numeric rule
+  const total = linesTextList.length;
+  const lineNumFlag = total > 0 && (numStartCount / total >= 0.8 || numEndCount / total >= 0.8);
+  const lineEndFlag = total > 0 && (flagEndCount / total >= 0.8);
+
+  return { numStartCount, flagEndCount, lineNumFlag, lineEndFlag };
+}
+
+/**
+ * Final classification logic based on alignment and line flags.
+ */
+function classifyBlock(
+  lines, block, linesTextList, lineHeight, blockWeight, blockHeight,
+  alignment, lineFlags, multipleParaFlag
+) {
+  const { leftCloseNum, leftNotCloseNum, rightNotCloseNum, rightCloseNum, centerCloseNum, externalSidesNotCloseNum } = alignment;
+  const { numStartCount, flagEndCount, lineNumFlag, lineEndFlag } = lineFlags;
+  const lineCount = lines.length;
+
   if (
-    (leftCloseNum / lines.length >= 0.8 || rightCloseNum / lines.length >= 0.8) &&
+    (leftCloseNum / lineCount >= LEFT_CLOSE_RATIO_THRESHOLD || rightCloseNum / lineCount >= LEFT_CLOSE_RATIO_THRESHOLD) &&
     lineNumFlag
   ) {
     for (const line of lines) line[ListLineTag.IS_LIST_START_LINE] = true;
     return BlockType.INDEX;
   }
 
-  // Centered list
   if (
     externalSidesNotCloseNum >= 2 &&
-    centerCloseNum === lines.length &&
-    externalSidesNotCloseNum / lines.length >= 0.5 &&
-    blockHeight / blockWeight > 0.4
+    centerCloseNum === lineCount &&
+    externalSidesNotCloseNum / lineCount >= EXTERNAL_SIDES_RATIO_THRESHOLD &&
+    blockHeight / blockWeight > BLOCK_ASPECT_RATIO_THRESHOLD
   ) {
     for (const line of lines) line[ListLineTag.IS_LIST_START_LINE] = true;
     return BlockType.LIST;
@@ -191,47 +255,9 @@ function isListOrIndexBlock(block) {
   if (
     leftCloseNum >= 2 &&
     (rightNotCloseNum >= 2 || lineEndFlag || leftNotCloseNum >= 2) &&
-    !multiplParaFlag
+    !multipleParaFlag
   ) {
-    if (leftCloseNum / lines.length > 0.8) {
-      if (flagEndCount === 0 && rightCloseNum / lines.length < 0.5) {
-        for (const line of lines) {
-          if (Math.abs(block.bbox_fs[0] - line.bbox[0]) < lineHeight / 2) {
-            line[ListLineTag.IS_LIST_START_LINE] = true;
-          }
-        }
-      } else if (lineEndFlag) {
-        for (let i = 0; i < lines.length; i++) {
-          const lt = linesTextList[i];
-          if (lt.length > 0 && LIST_END_FLAG.includes(lt[lt.length - 1])) {
-            lines[i][ListLineTag.IS_LIST_END_LINE] = true;
-            if (i + 1 < lines.length) lines[i + 1][ListLineTag.IS_LIST_START_LINE] = true;
-          }
-        }
-      } else {
-        let lineStartFlag = false;
-        for (let i = 0; i < lines.length; i++) {
-          if (lineStartFlag) { lines[i][ListLineTag.IS_LIST_START_LINE] = true; lineStartFlag = false; }
-          if (Math.abs(block.bbox_fs[2] - lines[i].bbox[2]) > 0.1 * blockWeight) {
-            lines[i][ListLineTag.IS_LIST_END_LINE] = true;
-            lineStartFlag = true;
-          }
-        }
-      }
-    } else if (numStartCount >= 2 && numStartCount === flagEndCount) {
-      for (let i = 0; i < lines.length; i++) {
-        const lt = linesTextList[i];
-        if (lt.length > 0) {
-          if (/^\d/.test(lt)) lines[i][ListLineTag.IS_LIST_START_LINE] = true;
-          if (LIST_END_FLAG.includes(lt[lt.length - 1])) lines[i][ListLineTag.IS_LIST_END_LINE] = true;
-        }
-      }
-    } else {
-      for (const line of lines) {
-        if (Math.abs(block.bbox_fs[0] - line.bbox[0]) < lineHeight / 2) line[ListLineTag.IS_LIST_START_LINE] = true;
-        if (Math.abs(block.bbox_fs[2] - line.bbox[2]) > lineHeight) line[ListLineTag.IS_LIST_END_LINE] = true;
-      }
-    }
+    classifyListLines(lines, block, linesTextList, lineHeight, blockWeight, leftCloseNum, rightCloseNum, flagEndCount, lineEndFlag, numStartCount);
     return BlockType.LIST;
   }
 
@@ -239,14 +265,61 @@ function isListOrIndexBlock(block) {
 }
 
 /**
+ * Assign list start/end line tags based on alignment patterns.
+ */
+function classifyListLines(lines, block, linesTextList, lineHeight, blockWeight, leftCloseNum, rightCloseNum, flagEndCount, lineEndFlag, numStartCount) {
+  const lineCount = lines.length;
+
+  if (leftCloseNum / lineCount > LEFT_CLOSE_RATIO_THRESHOLD) {
+    if (flagEndCount === 0 && rightCloseNum / lineCount < RIGHT_CLOSE_RATIO_THRESHOLD) {
+      for (const line of lines) {
+        if (Math.abs(block.bbox_fs[0] - line.bbox[0]) < lineHeight / 2) {
+          line[ListLineTag.IS_LIST_START_LINE] = true;
+        }
+      }
+    } else if (lineEndFlag) {
+      for (let i = 0; i < lines.length; i++) {
+        const lt = linesTextList[i];
+        if (lt.length > 0 && LIST_END_FLAG.includes(lt[lt.length - 1])) {
+          lines[i][ListLineTag.IS_LIST_END_LINE] = true;
+          if (i + 1 < lines.length) lines[i + 1][ListLineTag.IS_LIST_START_LINE] = true;
+        }
+      }
+    } else {
+      let lineStartFlag = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (lineStartFlag) { lines[i][ListLineTag.IS_LIST_START_LINE] = true; lineStartFlag = false; }
+        if (Math.abs(block.bbox_fs[2] - lines[i].bbox[2]) > RIGHT_GAP_RATIO * blockWeight) {
+          lines[i][ListLineTag.IS_LIST_END_LINE] = true;
+          lineStartFlag = true;
+        }
+      }
+    }
+  } else if (numStartCount >= 2 && numStartCount === flagEndCount) {
+    for (let i = 0; i < lines.length; i++) {
+      const lt = linesTextList[i];
+      if (lt.length > 0) {
+        if (/^\d/.test(lt)) lines[i][ListLineTag.IS_LIST_START_LINE] = true;
+        if (LIST_END_FLAG.includes(lt[lt.length - 1])) lines[i][ListLineTag.IS_LIST_END_LINE] = true;
+      }
+    }
+  } else {
+    for (const line of lines) {
+      if (Math.abs(block.bbox_fs[0] - line.bbox[0]) < lineHeight / 2) line[ListLineTag.IS_LIST_START_LINE] = true;
+      if (Math.abs(block.bbox_fs[2] - line.bbox[2]) > lineHeight) line[ListLineTag.IS_LIST_END_LINE] = true;
+    }
+  }
+}
+
+/**
  * Merge two consecutive text blocks if conditions are met.
- * PORTING NOTE: __merge_2_text_blocks(block1, block2) → merge2TextBlocks(block1, block2)
  * @param {object} block1 - current block (end of group)
  * @param {object} block2 - previous block (beginning of group)
  * @returns {[object, object]}
  */
-function merge2TextBlocks(block1, block2) {
-  if (!block1.lines || block1.lines.length === 0) return [block1, block2];
+function mergeTextBlocks(block1, block2) {
+  if (!block1.lines || !block1.lines.length) return [block1, block2];
+  if (!block2.lines || !block2.lines.length) return [block1, block2];
 
   const firstLine = block1.lines[0];
   const lineHeight = firstLine.bbox[3] - firstLine.bbox[1];
@@ -257,28 +330,28 @@ function merge2TextBlocks(block1, block2) {
   if (Math.abs(block1.bbox_fs[0] - firstLine.bbox[0]) >= lineHeight / 2) return [block1, block2];
 
   const lastLine = block2.lines[block2.lines.length - 1];
-  if (!lastLine || lastLine.spans.length === 0) return [block1, block2];
+  if (!lastLine?.spans?.length) return [block1, block2];
 
   const lastSpan = lastLine.spans[lastLine.spans.length - 1];
-  const lh2 = lastLine.bbox[3] - lastLine.bbox[1];
-  if (!firstLine.spans || firstLine.spans.length === 0) return [block1, block2];
+  const lastLineHeight = lastLine.bbox[3] - lastLine.bbox[1];
 
+  if (!firstLine.spans?.length) return [block1, block2];
   const firstSpan = firstLine.spans[0];
-  if (!firstSpan.content || firstSpan.content.length === 0) return [block1, block2];
+  if (!firstSpan.content?.length) return [block1, block2];
 
   const spanStartWithNum = /^\d/.test(firstSpan.content);
   const spanStartWithBigChar = /^[A-Z]/.test(firstSpan.content);
 
   if (
-    Math.abs(block2.bbox_fs[2] - lastLine.bbox[2]) < lh2 &&
-    !LINE_STOP_FLAG.some(f => lastSpan.content && lastSpan.content.endsWith(f)) &&
+    Math.abs(block2.bbox_fs[2] - lastLine.bbox[2]) < lastLineHeight &&
+    !LINE_STOP_FLAG.some(f => lastSpan.content?.endsWith(f)) &&
     Math.abs(block1Weight - block2Weight) < minBlockWeight &&
     !spanStartWithNum &&
     !spanStartWithBigChar
   ) {
     if (block1.page_num !== block2.page_num) {
       for (const line of block1.lines) {
-        for (const span of line.spans) {
+        for (const span of (line.spans || [])) {
           span[SplitFlag.CROSS_PAGE] = true;
         }
       }
@@ -297,9 +370,12 @@ function merge2TextBlocks(block1, block2) {
  * @param {object} block2
  * @returns {[object, object]}
  */
-function merge2ListBlocks(block1, block2) {
+function mergeListBlocks(block1, block2) {
+  if (!block1.lines?.length) return [block1, block2];
+
   if (block1.page_num !== block2.page_num) {
     for (const line of block1.lines) {
+      if (!line.spans) continue;
       for (const span of line.spans) {
         span[SplitFlag.CROSS_PAGE] = true;
       }
@@ -317,21 +393,23 @@ function merge2ListBlocks(block1, block2) {
  * @returns {boolean}
  */
 function isListGroup(textBlocksGroup) {
-  return textBlocksGroup.every(block => block.lines.length <= 3);
+  return textBlocksGroup.every(block => !block.lines || block.lines.length <= 3);
 }
 
 /**
  * Merge blocks within each page group.
- * PORTING NOTE: __para_merge_page(blocks) → paraMergePage(blocks)
  * @param {object[]} blocks
  */
 function paraMergePage(blocks) {
+  if (!blocks || !blocks.length) return;
+
   const pageTextBlocksGroups = processBlocks(blocks);
 
   for (const group of pageTextBlocksGroups) {
     const blocksInGroup = group.blocks;
+    if (!blocksInGroup?.length) continue;
 
-    if (blocksInGroup.length > 0 && group.group_type === "text") {
+    if (group.group_type === "text") {
       for (const block of blocksInGroup) {
         block.type = isListOrIndexBlock(block);
       }
@@ -342,16 +420,16 @@ function paraMergePage(blocks) {
 
       for (let i = blocksInGroup.length - 1; i >= 0; i--) {
         const currentBlock = blocksInGroup[i];
-        if (i - 1 >= 0) {
-          const prevBlock = blocksInGroup[i - 1];
-          if (currentBlock.type === "text" && prevBlock.type === "text" && !isListGrp) {
-            merge2TextBlocks(currentBlock, prevBlock);
-          } else if (
-            (currentBlock.type === BlockType.LIST && prevBlock.type === BlockType.LIST) ||
-            (currentBlock.type === BlockType.INDEX && prevBlock.type === BlockType.INDEX)
-          ) {
-            merge2ListBlocks(currentBlock, prevBlock);
-          }
+        if (i - 1 < 0) continue;
+
+        const prevBlock = blocksInGroup[i - 1];
+        if (currentBlock.type === "text" && prevBlock.type === "text" && !isListGrp) {
+          mergeTextBlocks(currentBlock, prevBlock);
+        } else if (
+          (currentBlock.type === BlockType.LIST && prevBlock.type === BlockType.LIST) ||
+          (currentBlock.type === BlockType.INDEX && prevBlock.type === BlockType.INDEX)
+        ) {
+          mergeListBlocks(currentBlock, prevBlock);
         }
       }
     }
@@ -364,14 +442,15 @@ function paraMergePage(blocks) {
 
 /**
  * Split page info list into paragraphs.
- * PORTING NOTE: para_split(page_info_list) → paraSplit(pageInfoList)
  * @param {object[]} pageInfoList
  */
 export function paraSplit(pageInfoList) {
+  if (!pageInfoList || !pageInfoList.length) return;
+
   const allBlocks = [];
 
   for (const pageInfo of pageInfoList) {
-    const blocks = JSON.parse(JSON.stringify(pageInfo.preproc_blocks || [])); // deep copy
+    const blocks = JSON.parse(JSON.stringify(pageInfo.preproc_blocks || []));
     for (const block of blocks) {
       block.page_num = pageInfo.page_idx;
       block.page_size = pageInfo.page_size;
@@ -392,6 +471,3 @@ export function paraSplit(pageInfoList) {
     }
   }
 }
-
-// Alias para_split → paraSplit (snake_case compat)
-export { paraSplit as para_split };

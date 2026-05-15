@@ -1,29 +1,13 @@
 // Copyright (c) Opendatalab. All rights reserved.
 /**
- * PORTING NOTE: pdf_image_tools.py → pdf_image_tools.js
+ * PDF image extraction and manipulation utilities.
  *
- * WORKAROUND: ProcessPoolExecutor / multiprocessing
- * REASON: Browser is single-threaded; Web Workers not yet wired in this porting context
- * SOLUTION: Always use single-threaded loadImagesFromPdfCore path.
- *
- * WORKAROUND: PIL.Image.crop(scaled_bbox) → OffscreenCanvas.drawImage with clipping
- * REASON: PIL not in browser
- * SOLUTION: OffscreenCanvas-based cropping via drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh).
- *
- * WORKAROUND: pdfium_c.FPDF_PAGEOBJ_IMAGE + image.get_bitmap().to_pil()
- * REASON: pypdfium2 not in browser
- * SOLUTION: getOriImage uses pdfjs-dist getOperatorList to find image positions;
- *   rendered via page.objs.get() when available. For broad compatibility, returns empty list
- *   and logs a warning (no robust cross-PDF image-object extraction in pdfjs).
- *
- * WORKAROUND: FileBasedDataWriter (filesystem writes)
- * REASON: Browser has no filesystem
- * SOLUTION: imageWriter parameter accepted but writes via imageWriter.write(path, bytes) contract.
- *   ImageWriter must be provided by caller (e.g., an IndexedDB or in-memory writer).
- *
- * WORKAROUND: images_bytes_to_pdf_bytes using PIL → PDF
- * REASON: PIL not in browser
- * SOLUTION: Use pdf-lib (if available) to embed image as page; throw otherwise.
+ * Browser workarounds:
+ * - ProcessPoolExecutor → single-threaded (no Web Workers wired yet)
+ * - PIL.Image.crop → OffscreenCanvas.drawImage with clipping
+ * - pypdfium2 image extraction → pdfjs-dist getOperatorList
+ * - FileBasedDataWriter → imageWriter.write(path, bytes) contract
+ * - images_bytes_to_pdf_bytes → pdf-lib embedding
  */
 
 import { pageToImage, imageToBytes, imageToB64str } from './pdf_reader.js';
@@ -32,10 +16,10 @@ import { strSha256 } from './hash_utils.js';
 import { getEndPageId } from './pdf_page_id.js';
 import { calculateIou } from './boxbase.js';
 import { getPdfjsLib } from './pdfjs_loader.js';
+import { deleteMat } from './resource_utils.js';
 
 /**
  * Convert a pdfjs page to an image dict.
- * PORTING NOTE: pdf_page_to_image(page, dpi, image_type) → pdfPageToImage(page, dpi, imageType)
  *
  * @param {import('pdfjs-dist').PDFPageProxy} page
  * @param {number} [dpi=200]
@@ -43,10 +27,13 @@ import { getPdfjsLib } from './pdfjs_loader.js';
  * @returns {Promise<object>} { canvas?, img_base64?, scale }
  */
 export async function pdfPageToImage(page, dpi = 200, imageType = ImageType.PIL) {
+  if (!page) return null;
+
   const { canvas, scale } = await pageToImage(page, dpi);
   if (imageType === ImageType.BASE64) {
     const b64 = await imageToB64str(canvas);
-    canvas.width = 0; canvas.height = 0;
+    canvas.width = 0;
+    canvas.height = 0;
     return { img_base64: b64, scale };
   }
   return { img_pil: canvas, scale };
@@ -54,8 +41,6 @@ export async function pdfPageToImage(page, dpi = 200, imageType = ImageType.PIL)
 
 /**
  * Load all pages of a PDF as images (single-threaded).
- * PORTING NOTE: load_images_from_pdf(...) → loadImagesFromPdf(...)
- *   ProcessPoolExecutor removed — always single-threaded.
  *
  * @param {Uint8Array} pdfBytes
  * @param {object} [opts]
@@ -71,8 +56,9 @@ export async function loadImagesFromPdf(pdfBytes, {
   endPageId = null,
   imageType = ImageType.PIL,
 } = {}) {
+  if (!pdfBytes) return [[], null];
+
   const pdfjsLib = await getPdfjsLib();
-  // Always pass a copy so PDF.js cannot detach the caller's buffer
   const _data = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes instanceof ArrayBuffer ? pdfBytes.slice(0) : pdfBytes);
   const loadingTask = pdfjsLib.getDocument({ data: _data });
   const pdfDoc = await loadingTask.promise;
@@ -85,7 +71,6 @@ export async function loadImagesFromPdf(pdfBytes, {
 
 /**
  * Core single-threaded page rendering.
- * PORTING NOTE: load_images_from_pdf_core → loadImagesFromPdfCore
  *
  * @param {Uint8Array} pdfBytes
  * @param {number} [dpi=200]
@@ -96,8 +81,9 @@ export async function loadImagesFromPdf(pdfBytes, {
  * @returns {Promise<Array<object>>}
  */
 export async function loadImagesFromPdfCore(pdfBytes, dpi = 200, startPageId = 0, endPageId = null, imageType = ImageType.PIL, existingDoc = null) {
+  if (!pdfBytes && !existingDoc) return [];
+
   const pdfjsLib = await getPdfjsLib();
-  // Always pass a copy so PDF.js cannot detach the caller's buffer
   const _data = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes instanceof ArrayBuffer ? pdfBytes.slice(0) : pdfBytes);
   const pdfDoc = existingDoc ?? await pdfjsLib.getDocument({ data: _data }).promise;
   try {
@@ -106,7 +92,7 @@ export async function loadImagesFromPdfCore(pdfBytes, dpi = 200, startPageId = 0
 
     const imagesList = [];
     for (let i = startPageId; i <= endId; i++) {
-      const page = await pdfDoc.getPage(i + 1); // pdfjs 1-indexed
+      const page = await pdfDoc.getPage(i + 1);
       const imageDict = await pdfPageToImage(page, dpi, imageType);
       imagesList.push(imageDict);
     }
@@ -122,7 +108,6 @@ export async function loadImagesFromPdfCore(pdfBytes, dpi = 200, startPageId = 0
 
 /**
  * Crop a span bbox from a page image and write to imageWriter.
- * PORTING NOTE: cut_image(span, ori_image_list, ...) → cutImage(...)
  *
  * @param {object} span
  * @param {Array<object>} oriImageList
@@ -136,13 +121,15 @@ export async function loadImagesFromPdfCore(pdfBytes, dpi = 200, startPageId = 0
  * @returns {Promise<string>}
  */
 export async function cutImage(span, oriImageList, extractOriginalImage, extractOriginalImageIouThresh, pageNum, pagePilImg, returnPath, imageWriter, scale = 2) {
+  if (!span || !pagePilImg) return '';
+
   const bbox = span.bbox;
   let cropCanvas = null;
 
   if (extractOriginalImage && span.type === ContentType.IMAGE) {
-    for (const oriImage of oriImageList) {
+    for (const oriImage of (oriImageList ?? [])) {
       if (calculateIou(bbox, oriImage.bbox) >= extractOriginalImageIouThresh) {
-        cropCanvas = oriImage.pil_image; // already an OffscreenCanvas
+        cropCanvas = oriImage.pil_image;
         break;
       }
     }
@@ -163,7 +150,6 @@ export async function cutImage(span, oriImageList, extractOriginalImage, extract
 
 /**
  * Crop a region from an OffscreenCanvas.
- * PORTING NOTE: get_crop_img(bbox, pil_img, scale) → getCropImg(bbox, canvas, scale)
  *
  * @param {number[]} bbox [x0, y0, x1, y1]
  * @param {OffscreenCanvas} canvas
@@ -171,11 +157,14 @@ export async function cutImage(span, oriImageList, extractOriginalImage, extract
  * @returns {OffscreenCanvas}
  */
 export function getCropImg(bbox, canvas, scale = 2) {
+  if (!bbox || !canvas) return new OffscreenCanvas(1, 1);
+
   let [x0, y0, x1, y1] = bbox.map(v => Math.round(v * scale));
   x0 = Math.max(0, Math.min(canvas.width, x0));
   y0 = Math.max(0, Math.min(canvas.height, y0));
   x1 = Math.max(0, Math.min(canvas.width, x1));
   y1 = Math.max(0, Math.min(canvas.height, y1));
+
   if (x1 <= x0 || y1 <= y0) {
     const out = new OffscreenCanvas(1, 1);
     const ctx = out.getContext('2d', { willReadFrequently: true });
@@ -183,6 +172,7 @@ export function getCropImg(bbox, canvas, scale = 2) {
     ctx.fillRect(0, 0, 1, 1);
     return out;
   }
+
   const w = Math.max(1, x1 - x0);
   const h = Math.max(1, y1 - y0);
   const out = new OffscreenCanvas(w, h);
@@ -193,7 +183,6 @@ export function getCropImg(bbox, canvas, scale = 2) {
 
 /**
  * Crop a region from a canvas as a cv.Mat.
- * PORTING NOTE: get_crop_np_img(bbox, input_img, scale, return_list) → getCropNpImg(bbox, canvas, scale, returnList)
  *
  * @param {number[]} bbox - [x0, y0, x1, y1]
  * @param {OffscreenCanvas|cv.Mat} canvas - Input image
@@ -202,6 +191,11 @@ export function getCropImg(bbox, canvas, scale = 2) {
  * @returns {cv.Mat|{mat: cv.Mat, usefulList: number[]}} cv.Mat or {mat, usefulList}
  */
 export function getCropNpImg(bbox, canvas, scale = 2, returnList = false) {
+  if (!bbox || !canvas) {
+    const emptyMat = new cv.Mat(0, 0, cv.CV_8UC3);
+    return returnList ? { mat: emptyMat, usefulList: [0, 0, 0, 0, 0, 0, 0, 0] } : emptyMat;
+  }
+
   let scaleBbox = [
     Math.floor(bbox[0] * scale),
     Math.floor(bbox[1] * scale),
@@ -211,21 +205,22 @@ export function getCropNpImg(bbox, canvas, scale = 2, returnList = false) {
 
   let mat;
   if (typeof cv !== 'undefined' && canvas instanceof cv.Mat) {
-    // Input is already a cv.Mat
     scaleBbox = clampBboxToSize(scaleBbox, canvas.cols, canvas.rows);
     const [cropXmin, cropYmin, cropXmax, cropYmax] = scaleBbox;
     const width = cropXmax - cropXmin;
     const height = cropYmax - cropYmin;
-    
+
     if (width <= 0 || height <= 0) {
       mat = new cv.Mat(0, 0, typeof canvas.type === 'function' ? canvas.type() : cv.CV_8UC3);
     } else {
       const roi = canvas.roi(new cv.Rect(cropXmin, cropYmin, width, height));
-      mat = roi.clone();
-      roi.delete();
+      try {
+        mat = roi.clone();
+      } finally {
+        deleteMat(roi);
+      }
     }
   } else {
-    // Input is canvas/OffscreenCanvas
     scaleBbox = clampBboxToSize(scaleBbox, canvas.width, canvas.height);
     const cropped = getCropImg(bbox, canvas, scale);
     const ctx = cropped.getContext('2d', { willReadFrequently: true });
@@ -235,9 +230,7 @@ export function getCropNpImg(bbox, canvas, scale = 2, returnList = false) {
 
   if (returnList) {
     const [cropXmin, cropYmin, cropXmax, cropYmax] = scaleBbox;
-    const cropNewHeight = mat.rows;
-    const cropNewWidth = mat.cols;
-    const usefulList = [0, 0, cropXmin, cropYmin, cropXmax, cropYmax, cropNewWidth, cropNewHeight];
+    const usefulList = [0, 0, cropXmin, cropYmin, cropXmax, cropYmax, mat.cols, mat.rows];
     return { mat, usefulList };
   }
 
@@ -255,21 +248,28 @@ function clampBboxToSize(bbox, width, height) {
 
 /**
  * Convert image bytes to a single-page PDF Uint8Array.
- * PORTING NOTE: images_bytes_to_pdf_bytes → imagesBytesToPdfBytes
- *
- * Uses pdf-lib if available; throws if not.
+ * Uses pdf-lib to embed the image as a page.
  *
  * @param {Uint8Array} imageBytes
  * @returns {Promise<Uint8Array>}
  */
 export async function imagesBytesToPdfBytes(imageBytes) {
+  if (!imageBytes || imageBytes.length === 0) {
+    throw new Error('imagesBytesToPdfBytes: empty image bytes');
+  }
+
   const { PDFDocument } = await import('pdf-lib');
   const pdfDoc = await PDFDocument.create();
-  const blob = new Blob([imageBytes]);
-  const arrayBuffer = await blob.arrayBuffer();
-  // Try PNG, then JPG
+  const arrayBuffer = imageBytes.buffer.slice(
+    imageBytes.byteOffset,
+    imageBytes.byteOffset + imageBytes.byteLength,
+  );
   let img;
-  try { img = await pdfDoc.embedPng(arrayBuffer); } catch { img = await pdfDoc.embedJpg(arrayBuffer); }
+  try {
+    img = await pdfDoc.embedPng(arrayBuffer);
+  } catch {
+    img = await pdfDoc.embedJpg(arrayBuffer);
+  }
   const page = pdfDoc.addPage([img.width, img.height]);
   page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
   return pdfDoc.save();
@@ -369,18 +369,14 @@ function imageObjectToCanvas(imageObj) {
 
 /**
  * Extract original embedded images from a PDF page.
- * PORTING NOTE: get_ori_image(page, ...) → getOriImage(page, ...)
+ * Uses pdfjs-dist getOperatorList to find image positions and resolve image objects.
  *
- * WORKAROUND: pdfium image object extraction → pdfjs-dist
- * REASON: pdfjs has limited image object extraction capabilities
- * SOLUTION: Returns empty list as conservative fallback;
- *   upstream code (span_pre_proc) handles empty list gracefully.
- *
- * @param {import('pdfjs-dist').PDFPageProxy} _page
+ * @param {import('pdfjs-dist').PDFPageProxy} page
  * @returns {Promise<Array<object>>}
  */
 export async function getOriImage(page) {
   if (!page?.getOperatorList) return [];
+
   try {
     const pdfjsLib = await getPdfjsLib();
     const OPS = pdfjsLib.OPS ?? {};
@@ -426,7 +422,6 @@ export async function getOriImage(page) {
 
 /**
  * Save images embedded in table HTML using uuid placeholders.
- * PORTING NOTE: save_table_fill_image(...) → saveTableFillImage(...)
  *
  * @param {Array<object>} layoutDets
  * @param {Array<object>} tableFillImageList
@@ -436,8 +431,8 @@ export async function getOriImage(page) {
  * @returns {Promise<void>}
  */
 export async function saveTableFillImage(layoutDets, tableFillImageList, pageImgMd5, pageNum, imageWriter) {
-  if (!tableFillImageList || !tableFillImageList.length) return;
-  if (!imageWriter) return;
+  if (!tableFillImageList?.length || !imageWriter) return;
+  if (!layoutDets) return;
 
   const returnPath = (pathType) => `${pathType}/${pageImgMd5}`;
 
@@ -447,7 +442,7 @@ export async function saveTableFillImage(layoutDets, tableFillImageList, pageImg
       for (const fillImage of tableFillImageList) {
         if (!layoutDet.html.includes(fillImage.uuid)) continue;
         const bbox = fillImage.bbox;
-        const canvas = fillImage.pil_image; // OffscreenCanvas
+        const canvas = fillImage.pil_image;
 
         const filename = `${pageNum}_${Math.round(bbox[0])}_${Math.round(bbox[1])}_${Math.round(bbox[2])}_${Math.round(bbox[3])}`;
         const imgPath = `${returnPath('images')}_${filename}`;
@@ -462,6 +457,6 @@ export async function saveTableFillImage(layoutDets, tableFillImageList, pageImg
       }
     }
   } catch (e) {
-    console.error(e);
+    console.warn('[saveTableFillImage] failed:', e?.message ?? e);
   }
 }

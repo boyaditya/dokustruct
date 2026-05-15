@@ -1,24 +1,7 @@
 // Copyright (c) Opendatalab. All rights reserved.
-/**
- * PORTING NOTE: markdown_to_html.py → markdown_to_html.js
- *
- * WORKAROUND: markdown-it-py + mdit-py-plugins + pygments
- * REASON: Python Markdown libs not available in browser
- * SOLUTION: Use `marked` (npm) for Markdown→HTML; MathJax CDN for math rendering.
- *   Code highlighting is omitted (no Pygments equivalent bundled).
- *
- * WORKAROUND: open(output_path, 'w') for writing HTML file
- * REASON: No filesystem in browser
- * SOLUTION: Return HTML string only; caller handles saving (e.g., Blob download).
- *
- * WORKAROUND: embed_images from local filesystem
- * REASON: No filesystem access
- * SOLUTION: embed_images with fetch-based base64 encoding via URL.
- */
 
 /**
  * Default CSS for the generated HTML output.
- * PORTING NOTE: DEFAULT_HTML_CSS constant → same content
  */
 const DEFAULT_HTML_CSS = `
 :root {
@@ -56,7 +39,6 @@ hr { height: 0.25em; padding: 0; margin: 24px 0; background-color: var(--border-
 
 /**
  * Convert Markdown to a full HTML document string.
- * PORTING NOTE: markdown_to_html(...) → async markdownToHtml(...)
  *
  * @param {string} markdownContent
  * @param {object} [opts]

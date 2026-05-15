@@ -1,6 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/inference_engine/base.py → base.js
-// Adds OPENVINO branch (stub) compared to formula version.
 
 /**
  * Abstract inference session base class.
@@ -16,8 +14,8 @@ export class InferSession {
 
 /**
  * Get engine class by type string.
+ * Browser only supports onnxruntime — torch and openvino are not available.
  * @param {string} engineType
- * @returns {string}
  */
 export function getEngine(engineType) {
   if (engineType === "onnxruntime") {

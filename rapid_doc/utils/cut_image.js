@@ -1,39 +1,26 @@
 /**
- * PORTING NOTE: cut_image.py → cut_image.js
+ * Image cropping utilities for document pipeline.
+ * Handles Mat-based and Canvas-based image cropping with proper resource cleanup.
  *
- * WORKAROUND: Python uses PIL.Image.crop() + filesystem writes via image_writer
- * REASON: No PIL or filesystem in the browser
- * SOLUTION:
- *   - page_pil_img is accepted as either a cv.Mat or an ImageBitmap/ImageData.
- *   - Cropping is done via Canvas 2D (OffscreenCanvas).
- *   - image_writer is expected to be a Map<string, Blob> (or any object with a
- *     .write(key, blob) method), replacing the disk-based FileBasedDataWriter.
- *   - str_sha256 → async SubtleCrypto SHA-256.
- *
- * AFFECTED METHODS:
- *   cut_image_and_table        → async cutImageAndTable(...)
- *   check_img_bbox             → checkImgBbox(bbox)
- *   cut_image (pdf_image_tools) → async cutImage(...)   [inline]
- *   get_crop_img                → syncGetCropImg(bbox, mat, scale)
- *   image_to_bytes              → async matToPngBlob(mat)
+ * Browser workaround: Python uses PIL.Image.crop() + filesystem writes via image_writer.
+ * Here we use cv.Mat ROI or OffscreenCanvas for cropping, and imageWriter.write() for storage.
  */
 
 import { getLogger } from './logger.js';
 import { strSha256 } from './hash_utils.js';
 import { calculateIou } from './boxbase.js';
+import { deleteMat } from './resource_utils.js';
 
 const logger = getLogger('cut_image');
 
-// ─── checkImgBbox ─────────────────────────────────────────────────────────────
-
 /**
  * Validate that a bounding box is non-degenerate.
- * Matches Python: check_img_bbox(bbox)
  *
  * @param {number[]} bbox - [x0, y0, x1, y1]
  * @returns {boolean}
  */
 export function checkImgBbox(bbox) {
+  if (!bbox || bbox.length < 4) return false;
   if (bbox[0] >= bbox[2] || bbox[1] >= bbox[3]) {
     logger.warning(`image_bboxes: invalid bbox, ${JSON.stringify(bbox)}`);
     return false;
@@ -41,12 +28,9 @@ export function checkImgBbox(bbox) {
   return true;
 }
 
-// ─── getCropMat ───────────────────────────────────────────────────────────────
-
 /**
  * Crop a region from a cv.Mat according to a scaled bbox.
  * Caller must .delete() the returned Mat.
- * Matches Python: get_crop_img(bbox, pil_img, scale=2)
  *
  * @param {number[]} bbox - [x0, y0, x1, y1] in original (unscaled) coordinates
  * @param {cv.Mat}  mat  - Source image Mat (BGR or RGBA)
@@ -54,6 +38,8 @@ export function checkImgBbox(bbox) {
  * @returns {cv.Mat} Cropped Mat
  */
 export function getCropMat(bbox, mat, scale = 2) {
+  if (!bbox || !mat) return null;
+
   let x0 = Math.max(0, Math.floor(bbox[0] * scale));
   let y0 = Math.max(0, Math.floor(bbox[1] * scale));
   let x1 = Math.min(mat.cols, Math.ceil(bbox[2] * scale));
@@ -67,37 +53,31 @@ export function getCropMat(bbox, mat, scale = 2) {
     if (y0 > 0) y0 = y1 - 1;
     else y1 = y0 + 1;
   }
-  
+
   // Final bounds check
   x0 = Math.max(0, Math.min(x0, mat.cols - 1));
   y0 = Math.max(0, Math.min(y0, mat.rows - 1));
   const w = Math.max(1, Math.min(x1 - x0, mat.cols - x0));
   const h = Math.max(1, Math.min(y1 - y0, mat.rows - y0));
 
-  try {
-    const rect = new cv.Rect(x0, y0, w, h);
-    return mat.roi(rect); // returns a sub-matrix view; clone if mutation needed
-  } catch (err) {
-    console.error(`[getCropMat] FAILED: ${err.message || err}`);
-    throw err;
-  }
+  const rect = new cv.Rect(x0, y0, w, h);
+  return mat.roi(rect);
 }
 
-// ─── matToPngBlob ─────────────────────────────────────────────────────────────
-
 /**
- * Encode a cv.Mat (BGR) to a PNG Blob.
- * Matches Python: image_to_bytes(crop_img, image_format="PNG")
+ * Encode a cv.Mat (BGR) to a PNG Blob via OffscreenCanvas.
  *
  * @param {cv.Mat} mat - BGR Mat
- * @returns {Promise<Blob>} PNG Blob
+ * @returns {Promise<Blob|null>} PNG Blob
  */
 export async function matToPngBlob(mat) {
-  if (!mat || mat.isDeleted()) return null;
-  // Convert BGR → RGBA for OffscreenCanvas
-  let rgba = new cv.Mat();
-  let cloned = mat.clone(); // Ensure it's not a view
+  if (!mat || mat.isDeleted?.()) return null;
+
+  let rgba = null;
+  let cloned = null;
   try {
+    cloned = mat.clone();
+    rgba = new cv.Mat();
     cv.cvtColor(cloned, rgba, cv.COLOR_BGR2RGBA);
     const imageData = new ImageData(
       new Uint8ClampedArray(rgba.data),
@@ -109,20 +89,14 @@ export async function matToPngBlob(mat) {
     ctx.putImageData(imageData, 0, 0);
     return await canvas.convertToBlob({ type: 'image/png' });
   } finally {
-    rgba.delete();
-    cloned.delete();
+    deleteMat(rgba);
+    deleteMat(cloned);
   }
 }
-
-// ─── cutImage (inline port of pdf_image_tools.cut_image) ─────────────────────
 
 /**
  * Crop a span's bbox from a page image, hash the path, store the PNG via
  * imageWriter, and return the stored key.
- *
- * Matches Python: cut_image(span, ori_image_list, extract_original_image,
- *                           extract_original_image_iou_thresh, page_num,
- *                           page_pil_img, return_path, image_writer, scale=2)
  *
  * @param {Object}      span
  * @param {Object[]}    oriImageList            - [{bbox, mat: cv.Mat}, ...]
@@ -146,14 +120,15 @@ export async function cutImage(
   imageWriter,
   scale = 2,
 ) {
+  if (!span || !pageMat) return '';
+
   const bbox = span.bbox;
-  console.info(`[cutImage] span type=${span.type} bbox=${JSON.stringify(bbox)}`);
   let cropMat = null;
   let needDeleteCrop = false;
 
   // Try to use original embedded image if conditions match
   if (extractOriginalImage && span.type === 'image') {
-    for (const oriImage of oriImageList) {
+    for (const oriImage of (oriImageList ?? [])) {
       if (calculateIou(bbox, oriImage.bbox) >= extractOriginalImageIouThresh) {
         cropMat = oriImage.mat; // borrowed — do NOT delete
         break;
@@ -171,27 +146,21 @@ export async function cutImage(
     needDeleteCrop = true;
   }
 
-  let pngBlob;
   try {
-    pngBlob = await matToPngBlob(cropMat);
+    const pngBlob = await matToPngBlob(cropMat);
+    imageWriter.write(imgHash256Path, pngBlob);
   } finally {
-    if (needDeleteCrop) cropMat.delete();
+    if (needDeleteCrop) {
+      deleteMat(cropMat);
+    }
   }
 
-  imageWriter.write(imgHash256Path, pngBlob);
   return imgHash256Path;
 }
-
-// ─── cutImageAndTable ─────────────────────────────────────────────────────────
 
 /**
  * Crop an image or table span from a page and write the PNG via imageWriter.
  * Mutates span.image_path in-place, then returns the span.
- *
- * Matches Python: cut_image_and_table(span, ori_image_list, extract_original_image,
- *                                     extract_original_image_iou_thresh,
- *                                     page_pil_img, page_img_md5, page_id,
- *                                     image_writer, scale=2)
  *
  * @param {Object}      span
  * @param {Object[]}    oriImageList
@@ -215,8 +184,9 @@ export async function cutImageAndTable(
   imageWriter,
   scale = 2,
 ) {
-  const spanType = span.type;
+  if (!span) return span;
 
+  const spanType = span.type;
   const returnPath = (pathType) => `${pathType}/${pageImgMd5}`;
 
   if (!checkImgBbox(span.bbox) || !imageWriter) {

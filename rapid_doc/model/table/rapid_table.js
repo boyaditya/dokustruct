@@ -1,7 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: table/rapid_table.py → rapid_table.js
-// RapidTableModel: complex entry point with wired/wireless model selection + TableCls
-// W1: __init__(ocrEngine, tableConfig) → static async create(ocrEngine, tableConfig)
 
 import { RapidTable } from "./rapid_table_self/main.js";
 import { TableCls } from "./rapid_table_self/table_cls/main.js";
@@ -12,6 +9,9 @@ import { getLogger } from "./rapid_table_self/utils/logger.js";
 import { getLatexDelimiterConfig } from "../../utils/config_reader.js";
 import { isIn } from "../../utils/boxbase.js";
 import { pointsToBbox, bboxToPoints } from "../../utils/ocr_utils.js";
+import { deleteMat } from "../../utils/resource_utils.js";
+import { formatPipelineError } from "../../utils/browser_utils.js";
+import { AbortException } from "../../utils/exceptions.js";
 
 const logger = getLogger("RapidTableModel");
 let warnedImg2tableUnsupported = false;
@@ -82,7 +82,6 @@ function whiteFillImageRegions(mat, fillImageRes) {
 
 /**
  * Top-level table recognition model with automatic wired/wireless classification.
- * PORTING NOTE: RapidTableModel(ocr_engine, table_config) → static async create(ocrEngine, tableConfig)
  */
 export class RapidTableModel {
   constructor() {
@@ -91,7 +90,7 @@ export class RapidTableModel {
     this._wirelessModel = null;
     this._singleModel = null;
     this._ocrEngine = null;
-    this._mode = "single"; // "single" or "dual"
+    this._mode = "single";
   }
 
   /**
@@ -111,7 +110,6 @@ export class RapidTableModel {
 
     const modelType = config.modelType ?? ModelType.UNET_SLANET_PLUS;
 
-    // UNET_SLANET_PLUS mode: dual-model (wired + wireless) with TableCls
     if (modelType === ModelType.UNET_SLANET_PLUS) {
       inst._mode = "dual";
       const wiredModelPath = getConfigValue(rawConfig, "unet.model_dir_or_path", config.modelDirOrPath ?? null);
@@ -152,18 +150,15 @@ export class RapidTableModel {
    * @param {HTMLImageElement|ImageBitmap|ImageData|Uint8Array|string} image
    * @param {object|null} [ocrResult]
    * @param {object} [opts]
-   * @param {boolean} [opts.fillImageRes=true]
-   * @param {any} [opts.mfdRes]
-   * @param {boolean} [opts.skipTextInImage=false]
-   * @param {boolean} [opts.useImg2table=false]
    * @returns {Promise<{ html: string, cellBboxes: number[][], elapse: number }>}
    */
   async predict(image, ocrResult = null, opts = {}) {
     const { fillImageRes = null, mfdRes = null, skipTextInImage = true, useImg2table = false } = opts;
     if (useImg2table && !warnedImg2tableUnsupported) {
-      console.warn("[RapidTableModel] useImg2table requested, but img2table is Python-only in the browser; using RapidTable structure model.");
+      logger.warn("useImg2table requested, but img2table is Python-only in the browser; using RapidTable structure model.");
       warnedImg2tableUnsupported = true;
     }
+
     const hasFillImages = Array.isArray(fillImageRes) && fillImageRes.length > 0;
     const inputSize = getInputSize(image);
     const mayNeedPortraitCheck = !!this._ocrEngine &&
@@ -182,7 +177,7 @@ export class RapidTableModel {
 
         const rotatedMat = await this._maybeRotatePortraitTable(tableMat);
         if (rotatedMat !== tableMat) {
-          tableMat.delete();
+          deleteMat(tableMat);
           tableMat = rotatedMat;
           tableImage = tableMat;
           if (this._ocrEngine) ocrResult = null;
@@ -199,80 +194,95 @@ export class RapidTableModel {
         if (!ocrResult) ocrResult = [[], [], []];
       }
 
-      const boxes = Array.isArray(ocrResult[0]) ? [...ocrResult[0]] : [];
-      const texts = Array.isArray(ocrResult[1]) ? [...ocrResult[1]] : [];
-      const scores = Array.isArray(ocrResult[2]) ? [...ocrResult[2]] : [];
-
-      if (Array.isArray(fillImageRes)) {
-        if (isCvMat(tableImage)) {
-          whiteFillImageRegions(tableImage, fillImageRes);
-        }
-        for (const fillImage of fillImageRes) {
-          if (!fillImage || !fillImage.ocr_bbox) continue;
-          boxes.push(fillImage.ocr_bbox);
-          texts.push(fillImage.uuid || "");
-          scores.push(1);
-
-          if (skipTextInImage) {
-            const fillBbox = pointsToBbox(fillImage.ocr_bbox);
-            const deleteIndices = [];
-            for (let i = 0; i < boxes.length - 1; i++) {
-              const box = boxes[i];
-              if (Array.isArray(box) && box.length >= 2) {
-                if (isIn(pointsToBbox(box), fillBbox)) {
-                  deleteIndices.push(i);
-                }
-              }
-            }
-            for (let i = deleteIndices.length - 1; i >= 0; i--) {
-              const idx = deleteIndices[i];
-              boxes.splice(idx, 1);
-              texts.splice(idx, 1);
-              scores.splice(idx, 1);
-            }
-          }
-        }
-      }
-
-      if (Array.isArray(mfdRes)) {
-        const delimiters = getLatexDelimiterConfig() || { inline: { left: "\\(", right: "\\)" } };
-        const inlineLeftDelimiter = delimiters.inline.left;
-        const inlineRightDelimiter = delimiters.inline.right;
-
-        for (const mfd of mfdRes) {
-          if (!mfd) continue;
-          if (mfd.latex) {
-            texts.push(`${inlineLeftDelimiter}${mfd.latex}${inlineRightDelimiter}`);
-          } else if (mfd.checkbox) {
-            texts.push(mfd.checkbox);
-          } else {
-            continue;
-          }
-          boxes.push(bboxToPoints(mfd.bbox));
-          scores.push(1);
-        }
-      }
-
-      const finalOcrResult = [boxes, texts, scores];
+      const finalOcrResult = this._buildFinalOcrResult(ocrResult, fillImageRes, mfdRes, tableImage, skipTextInImage);
 
       if (this._mode === "dual") {
         return await this._predictDual(tableImage, finalOcrResult, opts);
       }
-      
+
       const result = await this._singleModel.run([tableImage], [finalOcrResult]);
       return {
-        html: (result && result.predHtmls && result.predHtmls[0]) ? result.predHtmls[0] : "",
-        cellBboxes: (result && result.cellBboxes && result.cellBboxes[0]) ? result.cellBboxes[0] : [],
-        elapse: result ? result.elapse : 0,
+        html: result?.predHtmls?.[0] ?? "",
+        cellBboxes: result?.cellBboxes?.[0] ?? [],
+        elapse: result?.elapse ?? 0,
       };
     } catch (err) {
-      console.error("[RapidTableModel.predict] error:", err);
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: 'table',
+        module: 'RapidTableModel',
+        message: `predict failed: ${err?.message ?? err}`,
+        recoverable: true,
+      }));
       throw err;
     } finally {
-      if (tableMat && !tableMat.isDeleted()) tableMat.delete();
+      deleteMat(tableMat);
     }
   }
 
+  /**
+   * Build the final OCR result by merging fill images and formula detections.
+   * @private
+   */
+  _buildFinalOcrResult(ocrResult, fillImageRes, mfdRes, tableImage, skipTextInImage) {
+    const boxes = Array.isArray(ocrResult[0]) ? [...ocrResult[0]] : [];
+    const texts = Array.isArray(ocrResult[1]) ? [...ocrResult[1]] : [];
+    const scores = Array.isArray(ocrResult[2]) ? [...ocrResult[2]] : [];
+
+    if (Array.isArray(fillImageRes)) {
+      if (isCvMat(tableImage)) {
+        whiteFillImageRegions(tableImage, fillImageRes);
+      }
+      for (const fillImage of fillImageRes) {
+        if (!fillImage || !fillImage.ocr_bbox) continue;
+        boxes.push(fillImage.ocr_bbox);
+        texts.push(fillImage.uuid || "");
+        scores.push(1);
+
+        if (skipTextInImage) {
+          const fillBbox = pointsToBbox(fillImage.ocr_bbox);
+          const deleteIndices = [];
+          for (let i = 0; i < boxes.length - 1; i++) {
+            const box = boxes[i];
+            if (Array.isArray(box) && box.length >= 2) {
+              if (isIn(pointsToBbox(box), fillBbox)) {
+                deleteIndices.push(i);
+              }
+            }
+          }
+          for (let i = deleteIndices.length - 1; i >= 0; i--) {
+            const idx = deleteIndices[i];
+            boxes.splice(idx, 1);
+            texts.splice(idx, 1);
+            scores.splice(idx, 1);
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(mfdRes)) {
+      const delimiters = getLatexDelimiterConfig() || { inline: { left: "\\(", right: "\\)" } };
+      const inlineLeftDelimiter = delimiters.inline.left;
+      const inlineRightDelimiter = delimiters.inline.right;
+
+      for (const mfd of mfdRes) {
+        if (!mfd) continue;
+        if (mfd.latex) {
+          texts.push(`${inlineLeftDelimiter}${mfd.latex}${inlineRightDelimiter}`);
+        } else if (mfd.checkbox) {
+          texts.push(mfd.checkbox);
+        } else {
+          continue;
+        }
+        boxes.push(bboxToPoints(mfd.bbox));
+        scores.push(1);
+      }
+    }
+
+    return [boxes, texts, scores];
+  }
+
+  /** @private */
   async _maybeRotatePortraitTable(mat) {
     if (!this._ocrEngine || !mat || mat.cols <= 0 || mat.rows / mat.cols <= 1.2) {
       return mat;
@@ -299,59 +309,67 @@ export class RapidTableModel {
 
   /**
    * Dual-model prediction with TableCls for wired/wireless selection.
-   * @param {HTMLImageElement|ImageBitmap|ImageData|Uint8Array|string} image
-   * @param {object|null} ocrResult
-   * @param {object} opts
+   * @private
    */
   async _predictDual(image, ocrResult, opts) {
-    // Load image for classification
     const loader = new LoadImage();
-    let mat = await loader.run(image);
-    let tableType = "wired";
+    let mat = null;
     try {
-      const [type] = await this._tableCls.run(mat);
-      tableType = type;
-    } finally {
-      mat.delete();
-    }
+      mat = await loader.run(image);
+      const [tableType] = await this._tableCls.run(mat);
 
-    logger.info(`RapidTableModel: table type classified as '${tableType}'`);
+      logger.info(`table type classified as '${tableType}'`);
 
-    if (tableType === "wired") {
-      const wiredResult = await this._wiredModel.run([image], ocrResult ? [ocrResult] : null);
-      if (opts?.useCompareTable) {
-        const wirelessResult = await this._wirelessModel.run([image], ocrResult ? [ocrResult] : null);
-        const wiredHtml = wiredResult.predHtmls?.[0] ?? "";
-        const wirelessHtml = wirelessResult.predHtmls?.[0] ?? "";
-        const selected = selectBestTableModel(ocrResult, wiredHtml, wirelessHtml);
-        logger.info(`RapidTableModel: compare-table selected '${selected.modelType}'`);
-        return {
-          html: selected.bestHtml ?? "",
-          cellBboxes: selected.modelType === "wireless"
-            ? (wirelessResult.cellBboxes?.[0] ?? [])
-            : (wiredResult.cellBboxes?.[0] ?? []),
-          elapse: Number(wiredResult.elapse || 0) + Number(wirelessResult.elapse || 0),
-        };
+      if (tableType === "wired") {
+        return await this._predictWired(image, ocrResult, opts);
       }
+
+      const result = await this._wirelessModel.run([image], ocrResult ? [ocrResult] : null);
       return {
-        html: wiredResult.predHtmls[0] ?? "",
-        cellBboxes: wiredResult.cellBboxes[0] ?? [],
-        elapse: wiredResult.elapse,
+        html: result.predHtmls[0] ?? "",
+        cellBboxes: result.cellBboxes[0] ?? [],
+        elapse: result.elapse,
+      };
+    } finally {
+      deleteMat(mat);
+    }
+  }
+
+  /**
+   * Wired model prediction with optional compare-table fallback.
+   * @private
+   */
+  async _predictWired(image, ocrResult, opts) {
+    const wiredResult = await this._wiredModel.run([image], ocrResult ? [ocrResult] : null);
+
+    if (opts?.useCompareTable) {
+      const wirelessResult = await this._wirelessModel.run([image], ocrResult ? [ocrResult] : null);
+      const wiredHtml = wiredResult.predHtmls?.[0] ?? "";
+      const wirelessHtml = wirelessResult.predHtmls?.[0] ?? "";
+      const selected = selectBestTableModel(ocrResult, wiredHtml, wirelessHtml);
+      logger.info(`compare-table selected '${selected.modelType}'`);
+      return {
+        html: selected.bestHtml ?? "",
+        cellBboxes: selected.modelType === "wireless"
+          ? (wirelessResult.cellBboxes?.[0] ?? [])
+          : (wiredResult.cellBboxes?.[0] ?? []),
+        elapse: Number(wiredResult.elapse || 0) + Number(wirelessResult.elapse || 0),
       };
     }
 
-    const result = await this._wirelessModel.run([image], ocrResult ? [ocrResult] : null);
     return {
-      html: result.predHtmls[0] ?? "",
-      cellBboxes: result.cellBboxes[0] ?? [],
-      elapse: result.elapse,
+      html: wiredResult.predHtmls[0] ?? "",
+      cellBboxes: wiredResult.cellBboxes[0] ?? [],
+      elapse: wiredResult.elapse,
     };
   }
 
   /**
-   * Batch prediction.
+   * Batch prediction with element-level error handling.
+   * Failed individual tables are skipped with a warning; pipeline continues.
    * @param {Array<HTMLImageElement|ImageBitmap|ImageData|Uint8Array|string>} images
    * @param {object[]} [ocrResults]
+   * @param {object} [opts]
    * @returns {Promise<{ htmls: string[], cellBboxes: number[][][], elapse: number }>}
    */
   async batchPredict(images, ocrResults = [], opts = {}) {
@@ -371,7 +389,21 @@ export class RapidTableModel {
         const perImageOpts = { ...opts };
         if (Array.isArray(opts.fillImageResList)) perImageOpts.fillImageRes = opts.fillImageResList[i] ?? null;
         if (Array.isArray(opts.mfdResList)) perImageOpts.mfdRes = opts.mfdResList[i] ?? null;
-        results[i] = await this.predict(images[i], ocrResults[i] ?? null, perImageOpts);
+
+        try {
+          results[i] = await this.predict(images[i], ocrResults[i] ?? null, perImageOpts);
+        } catch (err) {
+          if (err instanceof AbortException) throw err;
+          console.warn(formatPipelineError({
+            stage: 'table',
+            module: 'RapidTableModel',
+            message: `batchPredict failed for element ${i}: ${err?.message ?? err}`,
+            pageIndex: i,
+            recoverable: true,
+          }));
+          results[i] = { html: "", cellBboxes: [], elapse: 0 };
+        }
+
         await new Promise(resolve => setTimeout(resolve, 0));
       }
     };
@@ -381,12 +413,38 @@ export class RapidTableModel {
       () => runWorker()
     );
     await Promise.all(workers);
+
     return {
       htmls: results.map(r => r.html),
       cellBboxes: results.map(r => r.cellBboxes),
       elapse: results.reduce((sum, r) => sum + r.elapse, 0),
     };
   }
-}
 
-export default RapidTableModel;
+  /**
+   * Dispose all model resources.
+   */
+  async dispose() {
+    const models = [this._singleModel, this._wiredModel, this._wirelessModel, this._tableCls];
+    for (const model of models) {
+      if (!model) continue;
+      try {
+        if (typeof model.dispose === 'function') {
+          await model.dispose();
+        }
+      } catch (err) {
+        console.warn(formatPipelineError({
+          stage: 'dispose',
+          module: 'RapidTableModel',
+          message: `Failed to dispose table sub-model: ${err?.message ?? err}`,
+          recoverable: true,
+        }));
+      }
+    }
+    this._singleModel = null;
+    this._wiredModel = null;
+    this._wirelessModel = null;
+    this._tableCls = null;
+    this._ocrEngine = null;
+  }
+}

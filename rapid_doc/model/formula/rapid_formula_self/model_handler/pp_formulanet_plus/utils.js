@@ -7,8 +7,7 @@ import {
 
 /**
  * Apply all LaTeX post-processing fixes.
- * PORTING NOTE: Match Python's fix_latex() exactly (post_process.py line 376-381)
- * Python passes fix_delimiter=False to fix_latex_left_right.
+ * Python baseline passes fix_delimiter=False to fix_latex_left_right (post_process.py).
  * @param {string} formula
  * @returns {string}
  */

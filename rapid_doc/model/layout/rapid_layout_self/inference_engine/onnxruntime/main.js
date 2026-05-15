@@ -1,42 +1,11 @@
 /**
- * PORTING NOTE: inference_engine/onnxruntime/main.py → main.js  [W1]
+ * OrtInferSession: ONNX Runtime Web inference session.
+ * Uses static async create(cfg) factory pattern for async model loading.
+ * Execution providers: ['webgpu', 'wasm'] in priority order.
  *
- * WORKAROUND: Python InferenceSession constructor is synchronous.
- * REASON:
- *   1. ort.InferenceSession.create() returns a Promise — cannot be awaited in
- *      a constructor.
- *   2. Model loading from a URL (fetch + ArrayBuffer) is also async.
- *   3. sess_options (num_threads, mem_arena) map to ort-web SessionOptions,
- *      but most threading controls are no-ops in the browser (Wasm is
- *      single-threaded unless SharedArrayBuffer + COOP/COEP headers are set).
- * SOLUTION:
- *   - static async create(cfg) factory pattern (see Directive 3 in spec).
- *   - Model loaded via IndexedDB-cached fetch() (download_file.js).
- *   - Execution providers: ['webgpu', 'wasm'] in priority order.
- *   - _init_sess_opts() maps to an ort.InferenceSession options object.
- *
- * SHAPE HANDLING CHANGE:
- *   Python numpy arrays carry their own .shape attribute; Float32Array does not.
- *   run() accepts an optional inputShape parameter [N, C, H, W].
- *   If omitted, shape is inferred from the session's first input metadata.
- *   Callers (model_handler/pp_doclayout/main.js) should pass the shape
- *   produced by PPPreProcess for correctness.
- *
- * RETURN VALUE CHANGE:
- *   Python session.run() returns a list of numpy arrays in output-name order.
- *   ort-web session.run() returns a dict { outputName: ort.Tensor }.
- *   JS run() returns an Array<ort.Tensor> in output-name order to preserve
- *   the same positional indexing used by the Python model handlers.
- *
- * AFFECTED METHODS:
- *   __init__               → static async create(cfg)
- *   __call__               → async run(inputContent, scaleFactor, inputShape)
- *   _init_sess_opts()      → static _initSessOpts(cfg) → plain options object
- *   get_input_names()      → getInputNames()
- *   get_output_names()     → getOutputNames()
- *   get_character_list()   → getCharacterList(key)
- *   have_key()             → haveKey(key)
- *   ONNXRuntimeError       → ONNXRuntimeError (extends Error)
+ * BROWSER WORKAROUND: Session loading is async (fetch + ArrayBuffer).
+ * Model loaded via IndexedDB-cached fetch() (download_file.js).
+ * Threading controls are only effective when SharedArrayBuffer is available.
  */
 
 import * as ort from 'onnxruntime-web';
@@ -73,7 +42,7 @@ export class OrtInferSession extends InferSession {
   // ── Factory ────────────────────────────────────────────────────────────────
 
   /**
-   * Async factory — mirrors Python __init__.
+   * Async factory.
    * Loads the model buffer from a URL (with IndexedDB caching), then
    * creates an ort.InferenceSession with the chosen execution providers.
    *
@@ -129,7 +98,6 @@ export class OrtInferSession extends InferSession {
 
   /**
    * Build ort SessionOptions from the engine config object.
-   * Mirrors Python: _init_sess_opts(cfg)
    *
    * Note: intra_op/inter_op thread counts are respected by ort-web only when
    * SharedArrayBuffer is available (COOP/COEP headers). Otherwise they are
@@ -141,7 +109,7 @@ export class OrtInferSession extends InferSession {
   static _initSessOpts(cfg) {
     /** @type {ort.InferenceSession.SessionOptions} */
     const opts = {
-      logSeverityLevel: 4,           // ERROR only (mirrors sess_opt.log_severity_level = 4)
+      logSeverityLevel: 4,
       graphOptimizationLevel: 'all', // ORT_ENABLE_ALL
       executionMode: 'sequential',
     };
@@ -167,7 +135,6 @@ export class OrtInferSession extends InferSession {
 
   /**
    * Run ONNX inference.
-   * Mirrors Python: __call__(input_content, scale_factor=None)
    *
    * @param {Float32Array}      inputContent  - Flat NCHW float32 tensor
    * @param {Float32Array|null} [scaleFactor] - Optional [N, 2] scale tensor
@@ -327,7 +294,6 @@ export class OrtInferSession extends InferSession {
 
   /**
    * Read a character list stored in the model's custom metadata.
-   * Mirrors Python: get_character_list(key='character')
    *
    * @param {string} [key='character']
    * @returns {string[]}
@@ -345,7 +311,6 @@ export class OrtInferSession extends InferSession {
 
   /**
    * Check whether a key exists in the model's custom metadata.
-   * Mirrors Python: have_key(key='character')
    *
    * @param {string} [key='character']
    * @returns {boolean}

@@ -1,28 +1,7 @@
 /**
- * PORTING NOTE: rapid_layout_self/main.py → main.js
- *
  * RapidLayout: the public-facing layout detection class.
- *
- * CHANGE: __init__  → static async create(cfg) factory (W1 — session loading is async).
- *
- * CHANGE: tqdm progress bar → console.log / optional callback.
- *   Instead of tqdm, callers may pass an onProgress(processed, total) callback
- *   in cfg.onProgress.
- *
- * CHANGE: argparse CLI → not ported (browser context).
- *   The parse_args() / main() functions are replaced by a brief comment.
- *
- * CHANGE: model_dir_or_path → cfg.modelUrl.
- *   When cfg.modelUrl is falsy, ModelProcessor.getModelUrl(cfg.modelType) is
- *   used to resolve the canonical URL (mirrors the Python fallback to
- *   ModelProcessor.get_model_path).
- *
- * CHANGE: __call__ → async call(imgContents, batchSize, onProgress)
- *
- * CHANGE: is_url() check for vis save path → not ported (no filesystem).
- *
- * INPUT:  imgContents — Array of (string URL | ArrayBuffer | Uint8Array | cv.Mat)
- * OUTPUT: RapidLayoutOutput[]
+ * Wraps inference engine and model handler for layout detection.
+ * Session loading is async — uses static create() factory instead of constructor.
  */
 
 import { getEngine } from './inference_engine/base.js';
@@ -55,7 +34,7 @@ function isBatchInferenceFallbackError(err) {
 export class RapidLayout {
   /** @private — use static create() */
   constructor() {
-    /** @type {import('./inference_engine/base.js').InferSession}*/
+    /** @type {import('./inference_engine/base.js').InferSession} */
     this.session      = null;
     /** @type {ModelHandler} */
     this.modelHandler = null;
@@ -63,22 +42,16 @@ export class RapidLayout {
     this.loadImg      = new LoadImage();
   }
 
-  // ── Factory ────────────────────────────────────────────────────────────────
-
   /**
    * Create and initialise a RapidLayout instance.
-   * Mirrors: __init__(cfg)
-   *
-   * @param {import('./utils/typings.js').RapidLayoutInput|null} [cfg]
+   * @param {RapidLayoutInput|null} [cfg]
    * @returns {Promise<RapidLayout>}
    */
   static async create(cfg = null) {
     const instance = new RapidLayout();
 
-    // ── Default config ──────────────────────────────────────────────────────
     const resolvedCfg = cfg instanceof RapidLayoutInput ? cfg : new RapidLayoutInput(cfg ?? {});
 
-    // ── Confidence threshold fallback ───────────────────────────────────────
     if (!resolvedCfg.conf_thresh) {
       const mt = resolvedCfg.model_type;
       if (mt === ModelType.PP_DOCLAYOUT_PLUS_L) {
@@ -94,36 +67,28 @@ export class RapidLayout {
       }
     }
 
-    // ── Resolve model URL ───────────────────────────────────────────────────
     if (!resolvedCfg.model_dir_or_path) {
       resolvedCfg.model_dir_or_path = ModelProcessor.getModelUrl(resolvedCfg.model_type);
     }
 
-    // ── Create inference session ────────────────────────────────────────────
     const engineType = resolvedCfg.engine_type ?? EngineType.ONNXRUNTIME;
     const EngineClass = await getEngine(engineType);
     instance.session = await EngineClass.create(resolvedCfg);
 
-    // ── Create model handler ────────────────────────────────────────────────
     instance.modelHandler = new ModelHandler(resolvedCfg, instance.session);
 
     logger.info('RapidLayout ready.');
     return instance;
   }
 
-  // ── call ───────────────────────────────────────────────────────────────────
-
   /**
    * Run layout detection on a list of image inputs.
-   * Mirrors: __call__(img_contents, batch_size=1, tqdm_enable=False)
-   *
    * @param {Array<string|ArrayBuffer|Uint8Array|cv.Mat>} imgContents
    * @param {number}   [batchSize=1]
    * @param {Function} [onProgress]  - (processed: number, total: number) => void
    * @returns {Promise<import('./utils/typings.js').RapidLayoutOutput[]>}
    */
   async call(imgContents, batchSize = 1, onProgress = null) {
-    // Load all images
     const imgs = [];
     for (const content of imgContents) {
       imgs.push(await this.loadImg.call(content));

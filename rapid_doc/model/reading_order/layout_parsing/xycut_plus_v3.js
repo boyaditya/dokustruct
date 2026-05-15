@@ -31,6 +31,7 @@ export {
 // ─────────────────────────────────────────────────────────────
 
 function sortLayoutParsingBlocks(layoutParsingPage) {
+  if (!layoutParsingPage || Object.keys(layoutParsingPage.block_map || {}).length === 0) return [];
   const layoutParsingRegions = xycut_enhanced(layoutParsingPage);
   const parsingResList = [];
   for (const region of layoutParsingRegions) {
@@ -60,6 +61,15 @@ function standardizedData(
   overallOcrRes,
   textRecScoreThresh = null
 ) {
+  if (!overallOcrRes) {
+    overallOcrRes = { rec_boxes: [], rec_texts: [], rec_scores: [], rec_polys: [], dt_polys: [], rec_labels: [] };
+  }
+  if (!regionDetRes || !regionDetRes.boxes) {
+    regionDetRes = { boxes: [] };
+  }
+  if (!layoutDetRes || !layoutDetRes.boxes) {
+    layoutDetRes = { boxes: [] };
+  }
   const matchedOcrDict = {};
   const regionToBlockMap = {};
   const blockToOcrMap = {};
@@ -361,6 +371,10 @@ function getLayoutParsingObjects(
   layoutDetRes,
   textRecScoreThresh = null
 ) {
+  if (!layoutDetRes || !layoutDetRes.boxes || layoutDetRes.boxes.length === 0) {
+    return new LayoutRegion([0, 0, 0, 0], []);
+  }
+
   const layoutParsingBlocks = [];
 
   for (let boxIdx = 0; boxIdx < layoutDetRes.boxes.length; boxIdx++) {
@@ -439,8 +453,13 @@ function getLayoutParsingObjects(
  * @returns {LayoutBlock[]}
  */
 function getLayoutParsingRes(image, regionDetRes, layoutDetRes, overallOcrRes) {
+  if (!image || !layoutDetRes || !overallOcrRes) return [];
+
+  const safeRegionDetRes = regionDetRes ?? { boxes: [] };
+  const safeLayoutDetRes = layoutDetRes.boxes ? layoutDetRes : { boxes: [] };
+
   const [regionBlockOcrIdxMap, newRegionDetRes, newLayoutDetRes] =
-    standardizedData(image, regionDetRes, layoutDetRes, overallOcrRes, 0);
+    standardizedData(image, safeRegionDetRes, safeLayoutDetRes, overallOcrRes, 0);
 
   const layoutParsingPage = getLayoutParsingObjects(
     image,

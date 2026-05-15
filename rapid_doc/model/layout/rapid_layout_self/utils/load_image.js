@@ -1,19 +1,8 @@
 /**
- * PORTING NOTE: load_image.py → load_image.js
- *
- * WORKAROUND: Python uses PIL.Image + cv2 for multi-format image loading
- * REASON: No filesystem access in the browser; PIL is not available
- * SOLUTION: Accept ArrayBuffer (from fetch/File API), Blob, ImageData, cv.Mat,
- *           or HTMLImageElement. All paths decode into a BGR cv.Mat via
- *           cv.imdecode / Canvas API. Caller is responsible for deleting
- *           the returned cv.Mat when no longer needed.
- *
- * AFFECTED METHODS:
- *   LoadImage.__call__ → async LoadImage.call(img)
- *   LoadImage.load_img → async LoadImage.loadImg(img)
- *   LoadImage.convert_img → LoadImage.convertImg(mat)
- *   static cvt_two_to_three → static cvtTwoToThree(mat)
- *   static cvt_four_to_three → static cvtFourToThree(mat)
+ * LoadImage: multi-format image loader for browser context.
+ * Accepts ArrayBuffer, Blob, ImageData, cv.Mat, HTMLImageElement, OffscreenCanvas,
+ * or ImageBitmap. All paths decode into a BGR cv.Mat.
+ * Caller is responsible for deleting the returned Mat.
  */
 
 import { isUrl } from './utils.js';
@@ -154,9 +143,6 @@ export class LoadImage {
   /**
    * Ensure the Mat is BGR (3-channel, 8-bit) regardless of the source colour space.
    * Creates and returns a new Mat; the caller should delete the old one if it differs.
-   *
-   * Python equivalent: convert_img() — handles ndim==2 (gray), channel 1/2/3/4.
-   *
    * @param {cv.Mat} mat
    * @returns {cv.Mat} BGR Mat
    */
@@ -194,8 +180,6 @@ export class LoadImage {
 
   /**
    * Convert a 2-channel (gray + alpha) Mat to BGR.
-   * Mirrors Python: cvt_two_to_three()
-   *
    * @param {cv.Mat} img - 2-channel Mat
    * @returns {cv.Mat} BGR Mat
    */
@@ -229,9 +213,7 @@ export class LoadImage {
 
   /**
    * Convert a 4-channel RGBA Mat to BGR.
-   * Mirrors Python: cvt_four_to_three() — blends alpha onto white or inverts
-   * based on mean brightness.
-   *
+   * Blends alpha onto white or inverts based on mean brightness.
    * @param {cv.Mat} img - RGBA Mat
    * @returns {cv.Mat} BGR Mat
    */

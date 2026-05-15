@@ -3,11 +3,11 @@
  *
  * Barrel export for the RapidDoc browser port.
  *
- * Ported from rapid_doc/__init__.py (originally empty; public API is defined
- * here to give consumers a single, stable import surface).
+ * Public API surface — consumers import from this file for a single, stable
+ * entry point. This file MUST only contain import/export declarations.
  *
  * Usage:
- *   import { docAnalyze, MakeMode, PdfReader } from './rapid_doc/index.js';
+ *   import { docAnalyze, MakeMode, ModelSingleton } from './rapid_doc/index.js';
  */
 
 // ---------------------------------------------------------------------------

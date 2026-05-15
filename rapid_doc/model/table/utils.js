@@ -1,6 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: table/utils.py → utils.js
-// Ported 1:1 from Python baseline (rapid_doc/model/table/utils.py) 2026-05-11.
 
 /**
  * Count physical <td>/<th> elements in an HTML string.

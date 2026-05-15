@@ -1,13 +1,10 @@
-// Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_formula_model.py → rapid_formula_model.js
-// W1 pattern: sync __init__(formulaConfig) → static async create(formulaConfig=null)
-
 import { RapidFormula } from "./rapid_formula_self/main.js";
-import { RapidFormulaInput } from "./rapid_formula_self/utils/typings.js";
+import { AbortException } from "../../utils/exceptions.js";
+import { formatPipelineError } from "../../utils/browser_utils.js";
 
 /**
- * Top-level entry point for formula recognition.
- * PORTING NOTE: RapidFormulaModel(formulaConfig) → static async create(formulaConfig)
+ * Top-level entry point for formula recognition (PP-FormulaNet).
+ * Implements the standard model wrapper interface: create, predict, batchPredict, dispose.
  */
 export class RapidFormulaModel {
   constructor() {
@@ -17,7 +14,7 @@ export class RapidFormulaModel {
 
   /**
    * Create and initialize the formula model.
-   * @param {RapidFormulaInput|object|null} [formulaConfig]
+   * @param {object|null} [formulaConfig]
    * @returns {Promise<RapidFormulaModel>}
    */
   static async create(formulaConfig = null) {
@@ -32,11 +29,24 @@ export class RapidFormulaModel {
    * @returns {Promise<{ recFormula: string, elapse: number }>}
    */
   async predict(image) {
-    const result = await this._model.run([image], 1);
-    return {
-      recFormula: result.recFormulas[0] ?? "",
-      elapse: result.elapse,
-    };
+    if (!image) return { recFormula: "", elapse: 0 };
+
+    try {
+      const result = await this._model.run([image], 1);
+      return {
+        recFormula: result.recFormulas[0] ?? "",
+        elapse: result.elapse,
+      };
+    } catch (err) {
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: "formula",
+        module: "RapidFormulaModel",
+        message: `predict failed: ${err?.message ?? err}`,
+        recoverable: true,
+      }));
+      return { recFormula: "", elapse: 0 };
+    }
   }
 
   /**
@@ -46,8 +56,31 @@ export class RapidFormulaModel {
    * @returns {Promise<{ recFormulas: string[], elapse: number }>}
    */
   async batchPredict(images, batchSize = 1) {
-    return this._model.run(images, batchSize);
+    if (!images || images.length === 0) return { recFormulas: [], elapse: 0 };
+
+    try {
+      return await this._model.run(images, batchSize);
+    } catch (err) {
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: "formula",
+        module: "RapidFormulaModel",
+        message: `batchPredict failed: ${err?.message ?? err}`,
+        recoverable: true,
+      }));
+      return { recFormulas: [], elapse: 0 };
+    }
+  }
+
+  /**
+   * Dispose the underlying model session.
+   */
+  async dispose() {
+    if (this._model) {
+      if (typeof this._model.dispose === "function") {
+        await this._model.dispose();
+      }
+      this._model = null;
+    }
   }
 }
-
-export default RapidFormulaModel;

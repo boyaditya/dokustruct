@@ -1,8 +1,6 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/main.py → main.js
-// RapidTable: batched table recognition (structure + OCR matching)
 
-import { RapidTableInput, RapidTableOutput, ModelType, EngineType } from "./utils/typings.js";
+import { RapidTableInput, RapidTableOutput, ModelType } from "./utils/typings.js";
 import { LoadImage } from "./utils/load_image.js";
 import { formatOcrResults } from "./utils/utils.js";
 import { PPTableStructurer } from "./table_structure/pp_structure/main.js";
@@ -11,12 +9,11 @@ import { UniTableStructure } from "./table_structure/unitable/main.js";
 import { TableMatch } from "./table_matcher/main.js";
 import { wrapWithHtmlStruct } from "./table_structure/utils.js";
 import { getLogger } from "./utils/logger.js";
+import { deleteMat, deleteMatList } from "../../../utils/resource_utils.js";
+import { formatPipelineError } from "../../../utils/browser_utils.js";
+import { AbortException } from "../../../utils/exceptions.js";
 
 const logger = getLogger("RapidTable");
-
-function isTableDebugEnabled() {
-  return typeof globalThis !== "undefined" && globalThis.__RAPIDDOC_DEBUG_TABLE__ === true;
-}
 
 export class RapidTable {
   constructor() {
@@ -46,104 +43,115 @@ export class RapidTable {
     return inst;
   }
 
+  /**
+   * Run table structure recognition on a batch of images.
+   * Element-level errors are caught and skipped; AbortException always propagates.
+   * @param {Array} oriImgs
+   * @param {Array|null} [ocrResults]
+   * @returns {Promise<RapidTableOutput>}
+   */
   async run(oriImgs, ocrResults = null) {
     const t0 = performance.now();
-    if (isTableDebugEnabled()) {
-      logger.info(`[RapidTable.run] Input:`, {
-        imgCount: oriImgs.length,
-        hasOcrResults: !!ocrResults,
-        ocrResultsLen: ocrResults?.length,
-        ocrResultsSample: ocrResults?.[0] ? {
-          boxes: ocrResults[0][0]?.length,
-          texts: ocrResults[0][1]?.length,
-          scores: ocrResults[0][2]?.length,
-        } : null,
-      });
-    }
     const mats = await Promise.all(oriImgs.map(img => this._loadImage.run(img)));
-    let allPredHtmls = [];
-    let allCellBboxes = [];
-    let allLogicPoints = [];
 
     try {
-      if (this._modelType === ModelType.UNET || this._modelType === ModelType.UNET_SLANET_PLUS) {
-        // Use UnetTableRecognition (full pipeline)
-        const result = await this._structurer.run(mats, ocrResults || []);
-        allPredHtmls = result.predHtmls;
-        allCellBboxes = result.cellBboxes;
-        allLogicPoints = result.logicPointsList;
-      } else {
-        // Generic flow (SLANET/PP-Structure)
-        const { structures, cellBboxes } = await this._structurer.run(mats);
-        for (let i = 0; i < structures.length; i++) {
-          const structureTokens = structures[i];
-          const cells = cellBboxes[i] ?? [];
-          let html;
-          
-          if (isTableDebugEnabled()) {
-            logger.info(`[RapidTable] Processing table ${i}:`, {
-              hasOcrResults: !!ocrResults,
-              ocrResultsLen: ocrResults?.length,
-              hasOcrForThisImage: !!(ocrResults && ocrResults[i]),
-              ocrResultType: ocrResults?.[i] ? typeof ocrResults[i] : 'undefined',
-              ocrResultIsArray: Array.isArray(ocrResults?.[i]),
-              ocrResultLength: ocrResults?.[i]?.length,
-              structLen: structureTokens.length,
-              cellsLen: cells.length,
-            });
-          }
-          
-          if (ocrResults && ocrResults[i] && ocrResults[i].length >= 3) {
-            if (isTableDebugEnabled()) {
-              logger.info(`[RapidTable] OCR result structure for image ${i}:`, {
-                boxes: ocrResults[i][0]?.length,
-                texts: ocrResults[i][1]?.length,
-                scores: ocrResults[i][2]?.length,
-                boxesSample: ocrResults[i][0]?.slice(0, 2),
-                textsSample: ocrResults[i][1]?.slice(0, 5),
-              });
-            }
-            
-            const { dtBoxes, recRes } = formatOcrResults(
-              ocrResults[i][0].map((box, idx) => ({
-                bbox: box, text: ocrResults[i][1]?.[idx] || "", score: ocrResults[i][2]?.[idx] || 1.0
-              })),
-              mats[i].rows, mats[i].cols
-            );
-            
-            if (isTableDebugEnabled()) {
-              logger.info(`[RapidTable] After formatOcrResults:`, {
-                dtBoxesLen: dtBoxes.length,
-                recResLen: recRes.length,
-                dtBoxSample: dtBoxes.slice(0, 2),
-                recResSample: recRes.slice(0, 3),
-              });
-            }
-            
-            const htmlList = this._matcher.run([structureTokens], [cells], dtBoxes, recRes);
-            if (isTableDebugEnabled()) {
-              logger.info(`[RapidTable] Matcher output:`, {
-                htmlLen: htmlList[0]?.length,
-                htmlSample: htmlList[0]?.substring(0, 200),
-              });
-            }
-            
-            html = wrapWithHtmlStruct([htmlList[0] ?? ""]);
-          } else {
-            logger.warn(`[RapidTable] NO OCR RESULTS for image ${i} - cells will be empty!`);
-            html = wrapWithHtmlStruct(structureTokens);
-          }
-          allPredHtmls.push(html);
-          allCellBboxes.push(cells);
-          allLogicPoints.push([]);
-        }
-      }
+      const { predHtmls, cellBboxes, logicPointsList } = await this._runStructurer(mats, ocrResults);
+      const elapse = (performance.now() - t0) / 1000;
+      return new RapidTableOutput({
+        imgs: oriImgs,
+        predHtmls,
+        cellBboxes,
+        logicPoints: logicPointsList,
+        elapse,
+      });
     } finally {
-      for (const mat of mats) if (mat && !mat.isDeleted()) mat.delete();
+      deleteMatList(mats);
     }
-    const elapse = (performance.now() - t0) / 1000;
-    return new RapidTableOutput({ imgs: oriImgs, predHtmls: allPredHtmls, cellBboxes: allCellBboxes, logicPoints: allLogicPoints, elapse });
+  }
+
+  /**
+   * Dispatch to the appropriate structurer based on model type.
+   * @private
+   */
+  async _runStructurer(mats, ocrResults) {
+    if (this._modelType === ModelType.UNET || this._modelType === ModelType.UNET_SLANET_PLUS) {
+      const result = await this._structurer.run(mats, ocrResults || []);
+      return {
+        predHtmls: result.predHtmls,
+        cellBboxes: result.cellBboxes,
+        logicPointsList: result.logicPointsList,
+      };
+    }
+
+    const { structures, cellBboxes } = await this._structurer.run(mats);
+    const predHtmls = [];
+    const allCellBboxes = [];
+    const logicPointsList = [];
+
+    for (let i = 0; i < structures.length; i++) {
+      try {
+        const html = this._processGenericTable(structures[i], cellBboxes[i] ?? [], ocrResults, mats[i], i);
+        predHtmls.push(html);
+        allCellBboxes.push(cellBboxes[i] ?? []);
+        logicPointsList.push([]);
+      } catch (err) {
+        if (err instanceof AbortException) throw err;
+        console.warn(formatPipelineError({
+          stage: 'table',
+          module: 'RapidTable',
+          message: `Failed to process table ${i}: ${err?.message ?? err}`,
+          pageIndex: i,
+          recoverable: true,
+        }));
+        predHtmls.push("");
+        allCellBboxes.push([]);
+        logicPointsList.push([]);
+      }
+    }
+
+    return { predHtmls, cellBboxes: allCellBboxes, logicPointsList };
+  }
+
+  /**
+   * Process a single table with generic (SLANET/PP-Structure) flow.
+   * @private
+   */
+  _processGenericTable(structureTokens, cells, ocrResults, mat, index) {
+    if (ocrResults && ocrResults[index] && ocrResults[index].length >= 3) {
+      const { dtBoxes, recRes } = formatOcrResults(
+        ocrResults[index][0].map((box, idx) => ({
+          bbox: box,
+          text: ocrResults[index][1]?.[idx] || "",
+          score: ocrResults[index][2]?.[idx] || 1.0,
+        })),
+        mat.rows,
+        mat.cols
+      );
+
+      const htmlList = this._matcher.run([structureTokens], [cells], dtBoxes, recRes);
+      return wrapWithHtmlStruct([htmlList[0] ?? ""]);
+    }
+
+    logger.warn(`[RapidTable] No OCR results for image ${index} - cells will be empty`);
+    return wrapWithHtmlStruct(structureTokens);
+  }
+
+  /**
+   * Dispose the underlying structurer and release resources.
+   */
+  async dispose() {
+    if (this._structurer && typeof this._structurer.dispose === 'function') {
+      try {
+        await this._structurer.dispose();
+      } catch (err) {
+        console.warn(formatPipelineError({
+          stage: 'dispose',
+          module: 'RapidTable',
+          message: `Failed to dispose structurer: ${err?.message ?? err}`,
+          recoverable: true,
+        }));
+      }
+    }
+    this._structurer = null;
   }
 }
-
-export default RapidTable;

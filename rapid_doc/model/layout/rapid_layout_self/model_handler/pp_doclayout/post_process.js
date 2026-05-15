@@ -1,19 +1,10 @@
 /**
- * PORTING NOTE: pp_doclayout/post_process.py → post_process.js
+ * PPPostProcess: post-processing for PP-DocLayout detection results.
+ * Applies confidence filtering, NMS, containment merging, polygon extraction, and unclipping.
  *
- * WORKAROUND: Python uses NumPy array operations + Shapely (polygon geometry) + cv2
- * REASON: NumPy and Shapely are not available in the browser
- * SOLUTION:
- *   - NumPy array ops → plain JS / typed-array equivalents
- *   - Shapely Polygon.intersection / .union → Sutherland-Hodgman polygon
- *     clipping algorithm (pure JS) for calculate_polygon_overlap_ratio()
- *   - cv2.findContours / approxPolyDP / minAreaRect / boxPoints → OpenCV.js
- *   - np.linalg.norm / np.arccos / np.dot → Math.sqrt, Math.acos, dot product
- *
- * AFFECTED METHODS:
- *   PPPostProcess.__init__     → constructor(...)
- *   PPPostProcess.__call__     → call(boxes, imgSize, masks, layoutShapeMode)
- *   All standalone functions   → camelCase equivalents exported below
+ * BROWSER WORKAROUND: NumPy/Shapely not available; uses typed-array equivalents
+ * and Sutherland-Hodgman polygon clipping (pure JS) for overlap calculations.
+ * cv2 operations → OpenCV.js equivalents.
  */
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -31,20 +22,20 @@ export class PPPostProcess {
    * @param {string[]} labels
    * @param {number|Object} [confThres=0.5]
    * @param {number} [iouThres=0.5]
-   * @param {boolean} [layoutNms=true]
-   * @param {string|Object|null} [layoutMergeBboxesMode=null]
-   * @param {number|number[]|Object|null} [layoutUnclipRatio=null]
-   * @param {number[]|null} [scaleSize=null]
+   * @param {Object} [options={}]
+   * @param {boolean} [options.layoutNms=true]
+   * @param {string|Object|null} [options.layoutMergeBboxesMode=null]
+   * @param {number|number[]|Object|null} [options.layoutUnclipRatio=null]
+   * @param {number[]|null} [options.scaleSize=null]
    */
-  constructor(
-    labels,
-    confThres = 0.5,
-    iouThres = 0.5,
-    layoutNms = true,
-    layoutMergeBboxesMode = null,
-    layoutUnclipRatio = null,
-    scaleSize = null,
-  ) {
+  constructor(labels, confThres = 0.5, iouThres = 0.5, options = {}) {
+    const {
+      layoutNms = true,
+      layoutMergeBboxesMode = null,
+      layoutUnclipRatio = null,
+      scaleSize = null,
+    } = options;
+
     this.labels = labels;
     this.strides = [8, 16, 32, 64];
     this.confThres = confThres;

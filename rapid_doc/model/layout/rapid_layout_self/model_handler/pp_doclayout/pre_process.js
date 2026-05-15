@@ -1,25 +1,10 @@
 /**
- * PORTING NOTE: pp_doclayout/pre_process.py → pre_process.js
+ * PPPreProcess: image preprocessing for PP-DocLayout models.
+ * Resizes, normalizes, and transposes BGR cv.Mat to NCHW Float32Array for ONNX inference.
  *
- * WORKAROUND: Python uses cv2.resize + NumPy array operations
- * REASON: NumPy is not available in the browser; cv2 → OpenCV.js
- * SOLUTION:
- *   - cv2.resize → cv.resize with cv.INTER_CUBIC (interpolation=2)
- *   - NumPy NCHW transpose + normalize → manual Float32Array loop
- *   - np.expand_dims(img, axis=0) → the NCHW flat array is a single-image batch
- *     by convention; the batch dimension is handled by the caller constructing
- *     the ort.Tensor with shape [1, 3, H, W].
- *
+ * BROWSER WORKAROUND: NumPy is not available; cv2 → OpenCV.js, array ops → Float32Array loops.
  * Memory management: every cv.Mat created inside this class is freed in a
- * try/finally block before returning. The returned Float32Array is independent
- * of any Mat memory.
- *
- * AFFECTED METHODS:
- *   __init__   → constructor(imgSize, modelType)
- *   __call__   → call(img)               [sync]
- *   resize     → resize(mat)             [sync, returns new Mat]
- *   normalize  → normalize(mat)          [sync, returns Float32Array HWC]
- *   permute    → permute(hwcData, h, w)  [sync, returns Float32Array CHW]
+ * try/finally block before returning.
  */
 
 import { ModelType } from '../utils.js';

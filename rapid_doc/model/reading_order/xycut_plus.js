@@ -7,13 +7,12 @@
 /**
  * Generate a 1-D projection histogram from bounding boxes along one axis.
  * @param {number[][]} boxes  [[x1,y1,x2,y2], ...]
- * @param {0|1} axis  0 = x-axis  (columns), 1 = y-axis (rows)
+ * @param {0|1} axis  0 = x-axis (columns), 1 = y-axis (rows)
  * @returns {Int32Array}
  */
 export function projectionByBboxes(boxes, axis) {
-  if (!boxes.length) return new Int32Array(0);
+  if (!boxes || !boxes.length) return new Int32Array(0);
 
-  // Axis columns: boxes[:, axis::2] → col values at positions axis and axis+2
   let minVal = Infinity;
   let maxVal = -Infinity;
   for (const box of boxes) {

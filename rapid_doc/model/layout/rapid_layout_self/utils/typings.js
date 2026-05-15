@@ -1,16 +1,10 @@
 /**
- * rapid_doc/model/layout/rapid_layout_self/utils/typings.js
- * PORTING NOTE: rapid_layout_self/utils/typings.py → typings.js
- *
- * Contains model type enumerations and the RapidLayoutInput configuration class.
+ * Model type enumerations and the RapidLayoutInput configuration class.
  */
 
 // ─── ModelType ────────────────────────────────────────────────────────────────
 
-/**
- * Supported layout model variants.
- * PORTING NOTE: class ModelType(Enum) → Object.freeze constant
- */
+/** Supported layout model variants. */
 export const ModelType = Object.freeze({
   PP_DOCLAYOUT_PLUS_L:                  'pp_doclayout_plus_l',
   PP_DOCLAYOUTV2:                       'pp_doclayoutv2',
@@ -27,7 +21,6 @@ export const ModelType = Object.freeze({
 
 /**
  * Supported inference engine types.
- * PORTING NOTE: class EngineType(Enum) → Object.freeze constant
  */
 export const EngineType = Object.freeze({
   ONNXRUNTIME: 'onnxruntime',
@@ -38,7 +31,6 @@ export const EngineType = Object.freeze({
 
 /**
  * Configuration for the RapidLayout model.
- * PORTING NOTE: @dataclass RapidLayoutInput → plain JS class with defaults
  */
 export class RapidLayoutInput {
   /**
@@ -64,7 +56,7 @@ export class RapidLayoutInput {
   }
 }
 
-// ─── Per-model confidence thresholds (ported from typings.py) ────────────────
+// ─── Per-model confidence thresholds ─────────────────────────────────────────
 
 export const PP_DOCLAYOUT_PLUS_L_Threshold = Object.freeze({
   0: 0.3,  1: 0.5,  2: 0.4,  3: 0.5,  4: 0.5,  5: 0.5,  6: 0.5,  7: 0.3,
@@ -84,7 +76,7 @@ export const PP_DOCLAYOUT_L_Threshold = Object.freeze({
   16: 0.45, 17: 0.5, 18: 0.5, 19: 0.5, 20: 0.5, 21: 0.5, 22: 0.5,
 });
 
-// ─── Per-model bbox merge modes (ported from typings.py) ─────────────────────
+// ─── Per-model bbox merge modes ──────────────────────────────────────────────
 
 export const PP_DOCLAYOUT_PLUS_L_layout_merge_bboxes_mode = Object.freeze({
   0:  'large', // paragraph_title

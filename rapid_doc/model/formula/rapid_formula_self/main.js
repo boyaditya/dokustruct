@@ -1,24 +1,24 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_formula_self/main.py → main.js
-// W1: sync __init__ → static async create(); __call__ → async run()
 
-import { RapidFormulaInput, RapidFormulaOutput, ModelType, EngineType } from "./utils/typings.js";
+import { RapidFormulaInput, EngineType } from "./utils/typings.js";
 import { OrtInferSession } from "./inference_engine/onnxruntime/main.js";
 import { ModelHandler } from "./model_handler/main.js";
 import { ModelProcessor } from "./model_handler/utils.js";
 import { LoadImage } from "./utils/load_image.js";
 import { Logger } from "./utils/logger.js";
+import { deleteMatList } from "../../../utils/resource_utils.js";
 
 const logger = new Logger("RapidFormula").getLog();
 
 /**
- * Main formula recognition class.
- * PORTING NOTE: RapidFormula(cfg) → static async create(cfg)
- *               RapidFormula.__call__(imgContents, batchSize) → async run(imgContents, batchSize)
+ * Main formula recognition class (PP-FormulaNet).
+ * Implements the standard model wrapper interface: create, run, dispose.
  */
 export class RapidFormula {
   constructor() {
+    /** @type {OrtInferSession|null} */
     this._session = null;
+    /** @type {ModelHandler|null} */
     this._modelHandler = null;
     this._loadImage = new LoadImage();
   }
@@ -56,6 +56,17 @@ export class RapidFormula {
   }
 
   /**
+   * Dispose the underlying ONNX session and release resources.
+   */
+  async dispose() {
+    if (this._session?.session) {
+      await this._session.session.release();
+      this._session = null;
+    }
+    this._modelHandler = null;
+  }
+
+  /**
    * Recognize formulas in a list of images.
    * @param {Array<HTMLImageElement|ImageBitmap|ImageData|Uint8Array|string>} imgContents
    * @param {number} [batchSize=1]
@@ -79,9 +90,7 @@ export class RapidFormula {
           allFormulas.push(out.recFormula);
         }
       } finally {
-        for (const mat of mats) {
-          if (mat && !mat.isDeleted()) mat.delete();
-        }
+        deleteMatList(mats);
       }
     }
 

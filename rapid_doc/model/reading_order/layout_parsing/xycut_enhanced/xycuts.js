@@ -34,6 +34,7 @@ export { xycut_enhanced };
 // ─────────────────────────────────────────────────────────────
 
 function sortByXycut(blockBboxes, direction = "vertical", minGap = 1) {
+  if (!blockBboxes || blockBboxes.length === 0) return [];
   const intBoxes = blockBboxes.map((b) => b.map(Math.round));
   const res = [];
   const indices = Array.from({ length: intBoxes.length }, (_, i) => i);
@@ -92,6 +93,8 @@ function updateRegionLabel(block, region) {
 // ─────────────────────────────────────────────────────────────
 
 function preProcess(region) {
+  if (!region || !region.block_map) return [];
+
   const maskLabels = [
     "header",
     "unordered",
@@ -273,6 +276,8 @@ function preProcess(region) {
 // ─────────────────────────────────────────────────────────────
 
 function getLayoutStructure(blocks, regionDirection, regionSecondaryDirection) {
+  if (!blocks || blocks.length === 0) return;
+
   blocks.sort((a, b) => {
     if (a.bbox[0] !== b.bbox[0]) return a.bbox[0] - b.bbox[0];
     return a.width - b.width;
@@ -356,6 +361,9 @@ function getLayoutStructure(blocks, regionDirection, regionSecondaryDirection) {
 // ─────────────────────────────────────────────────────────────
 
 function matchUnsortedBlocks(sortedBlocks, unsortedBlocks, region) {
+  if (!unsortedBlocks || unsortedBlocks.length === 0) return sortedBlocks;
+  if (!sortedBlocks) sortedBlocks = [];
+
   const distanceTypeMap = {
     cross_layout: weightedDistanceInsert,
     paragraph_title: weightedDistanceInsert,
@@ -390,7 +398,7 @@ function matchUnsortedBlocks(sortedBlocks, unsortedBlocks, region) {
 // ─────────────────────────────────────────────────────────────
 
 function xycut_enhanced(region) {
-  if (Object.keys(region.block_map).length === 0) return [];
+  if (!region || Object.keys(region.block_map || {}).length === 0) return [];
 
   const preCutList = preProcess(region);
   const finalOrderResList = [];

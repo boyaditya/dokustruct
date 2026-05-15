@@ -1,21 +1,4 @@
 // Copyright (c) RapidAI. All rights reserved.
-/**
- * PORTING NOTE: model_init.py → model_init.js
- *
- * WORKAROUND: Python __new__ singleton with synchronous model init
- * REASON: JS constructors cannot be async; model loading requires await
- * SOLUTION: W6 singleton pattern — static #instance, async getAtomModel()
- *
- * AFFECTED METHODS:
- *   AtomModelSingleton.__new__ → getInstance()
- *   AtomModelSingleton.get_atom_model → async getAtomModel()
- *   MineruPipelineModel.__init__ → static async create()
- *   atom_model_init → async atomModelInit()
- *   table_model_init → async tableModelInit()
- *   formula_model_init → async formulaModelInit()
- *   layout_model_init → async layoutModelInit()
- *   ocr_model_init → async ocrModelInit()
- */
 
 import { AtomicModel } from "./model_list.js";
 import { RapidLayoutModel } from "../../model/layout/rapid_layout.js";
@@ -25,6 +8,8 @@ import { RapidOcrModel } from "../../model/ocr/rapid_ocr.js";
 import { RapidTableModel } from "../../model/table/rapid_table.js";
 import { RapidOrientationModel } from "../../model/orientation/rapid_orientation_model.js";
 import { makeHashable } from "../../utils/hash_utils.js";
+import { formatPipelineError } from "../../utils/browser_utils.js";
+import { AbortException } from "../../utils/exceptions.js";
 
 const DISPOSED_MARK = Symbol.for("rapiddoc.disposed");
 const DISPOSABLE_KEYS = [
@@ -53,7 +38,8 @@ const DISPOSABLE_KEYS = [
 
 /**
  * Best-effort cleanup for model wrappers and ORT sessions.
- * Keeps traversal narrow so large runtime data structures are not walked.
+ * Traverses known disposable keys to release resources.
+ * Uses a seen-set to prevent circular reference loops.
  * @param {any} resource
  * @param {WeakSet<object>} [seen]
  */
@@ -63,7 +49,7 @@ export async function disposeModelResource(resource, seen = new WeakSet()) {
   seen.add(resource);
 
   if (resource[DISPOSED_MARK]) return;
-  try { resource[DISPOSED_MARK] = true; } catch { /* ignore non-extensible objects */ }
+  try { resource[DISPOSED_MARK] = true; } catch { /* non-extensible objects */ }
 
   for (const key of DISPOSABLE_KEYS) {
     if (resource[key] && resource[key] !== resource) {
@@ -76,14 +62,19 @@ export async function disposeModelResource(resource, seen = new WeakSet()) {
       try {
         await resource[method]();
       } catch (err) {
-        console.warn(`[disposeModelResource] ${method} failed:`, err?.message ?? err);
+        console.warn(formatPipelineError({
+          stage: "dispose",
+          module: "disposeModelResource",
+          message: `${method}() failed: ${err?.message ?? err}`,
+          recoverable: true,
+        }));
       }
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Individual model init functions
+// Execution provider normalization helpers
 // ---------------------------------------------------------------------------
 
 function normalizeExecutionProvider(config = null) {
@@ -109,9 +100,12 @@ function withEngineProviderConfig(config = null) {
   return cfg;
 }
 
+// ---------------------------------------------------------------------------
+// Individual model init functions
+// ---------------------------------------------------------------------------
+
 /**
  * Initialize a table recognition model.
- * PORTING NOTE: table_model_init(lang, ocr_config, table_config) → async
  * @param {string|null} lang
  * @param {object|null} ocrConfig
  * @param {object|null} tableConfig
@@ -141,29 +135,29 @@ export async function tableModelInit(lang = null, ocrConfig = null, tableConfig 
  * @returns {Promise<RapidFormulaModel|LatexOCRModel>}
  */
 export async function formulaModelInit(formulaConfig = null) {
-  const modelType = formulaConfig?.modelType || 'pp_formulanet_plus_s';
-  
-  // Check if LaTeX-OCR is selected
-  if (modelType === 'latex_ocr') {
-    console.info('[formulaModelInit] Loading LaTeX-OCR (WebGPU-compatible)...');
+  const modelType = formulaConfig?.modelType || "pp_formulanet_plus_s";
+
+  if (modelType === "latex_ocr") {
     try {
       const useWebGpu = formulaConfig?.execution_provider !== "wasm";
       const latexConfig = { useWebGpu };
       if (formulaConfig?.maxLen != null) latexConfig.maxLen = formulaConfig.maxLen;
       return await LatexOCRModel.create(latexConfig);
     } catch (err) {
-      console.error('[formulaModelInit] LaTeX-OCR failed to load after provider retries:', err.message);
-      console.warn('[formulaModelInit] Falling back to PP-FormulaNet Plus S...');
-      // Fallback to PP-FormulaNet
+      if (err instanceof AbortException) throw err;
+      console.warn(formatPipelineError({
+        stage: "model-load",
+        module: "formulaModelInit",
+        message: `LaTeX-OCR failed: ${err.message}. Falling back to PP-FormulaNet.`,
+        recoverable: true,
+      }));
       return RapidFormulaModel.create({
         ...formulaConfig,
-        modelType: 'pp_formulanet_plus_s',
+        modelType: "pp_formulanet_plus_s",
       });
     }
   }
-  
-  // Default: PP-FormulaNet
-  console.info(`[formulaModelInit] Loading PP-FormulaNet (${modelType})...`);
+
   return RapidFormulaModel.create(formulaConfig);
 }
 
@@ -218,6 +212,11 @@ export async function ocrModelInit(
   });
 }
 
+/**
+ * Initialize an orientation classification model.
+ * @param {object|null} orientationConfig
+ * @returns {Promise<RapidOrientationModel>}
+ */
 export async function orientationModelInit(orientationConfig = null) {
   return RapidOrientationModel.create({
     ...(orientationConfig ?? {}),
@@ -227,81 +226,65 @@ export async function orientationModelInit(orientationConfig = null) {
 
 /**
  * Dispatch atom model init by name.
- * PORTING NOTE: atom_model_init(model_name, **kwargs) → async atomModelInit(modelName, kwargs)
  * @param {string} modelName
  * @param {object} kwargs
  * @returns {Promise<any>}
  */
 export async function atomModelInit(modelName, kwargs = {}) {
-  let atomModel = null;
-
   if (modelName === AtomicModel.Layout) {
-    atomModel = await layoutModelInit(kwargs.layout_config ?? null);
+    return layoutModelInit(kwargs.layout_config ?? null);
+  }
 
-  } else if (modelName === AtomicModel.FORMULA) {
-    const custom = (kwargs.formula_config ?? {}). custom_model;
-    if (custom && typeof custom.predict === "function") {
-      atomModel = custom;
-    } else {
-      atomModel = await formulaModelInit(kwargs.formula_config ?? null);
-    }
+  if (modelName === AtomicModel.FORMULA) {
+    const custom = (kwargs.formula_config ?? {}).custom_model;
+    if (custom && typeof custom.predict === "function") return custom;
+    return formulaModelInit(kwargs.formula_config ?? null);
+  }
 
-  } else if (modelName === AtomicModel.OCR) {
+  if (modelName === AtomicModel.OCR) {
     const custom = (kwargs.ocr_config ?? {}).custom_model;
-    if (custom && typeof custom.predict === "function") {
-      atomModel = custom;
-    } else {
-      atomModel = await ocrModelInit(
-        kwargs.det_db_box_thresh ?? 0.3,
-        kwargs.lang ?? null,
-        kwargs.ocr_config ?? null,
-        kwargs.det_db_unclip_ratio ?? 1.8,
-        kwargs.enable_merge_det_boxes ?? true,
-        kwargs.is_seal ?? false,
-        kwargs.det_db_thresh ?? null
-      );
-    }
+    if (custom && typeof custom.predict === "function") return custom;
+    return ocrModelInit(
+      kwargs.det_db_box_thresh ?? 0.3,
+      kwargs.lang ?? null,
+      kwargs.ocr_config ?? null,
+      kwargs.det_db_unclip_ratio ?? 1.8,
+      kwargs.enable_merge_det_boxes ?? true,
+      kwargs.is_seal ?? false,
+      kwargs.det_db_thresh ?? null
+    );
+  }
 
-  } else if (modelName === AtomicModel.Table) {
+  if (modelName === AtomicModel.Table) {
     const custom = (kwargs.table_config ?? {}).custom_model;
-    if (custom && typeof custom.predict === "function") {
-      atomModel = custom;
-    } else {
-      atomModel = await tableModelInit(
-        kwargs.lang ?? null,
-        kwargs.ocr_config ?? null,
-        kwargs.table_config ?? null
-      );
-    }
-
-  } else if (modelName === AtomicModel.ImgOrientationCls) {
-    atomModel = await orientationModelInit(kwargs.orientation_config ?? null);
-
-  } else {
-    throw new Error(`[atomModelInit] model name not allowed: ${modelName}`);
+    if (custom && typeof custom.predict === "function") return custom;
+    return tableModelInit(
+      kwargs.lang ?? null,
+      kwargs.ocr_config ?? null,
+      kwargs.table_config ?? null
+    );
   }
 
-  if (atomModel === null) {
-    throw new Error(`[atomModelInit] model init failed for: ${modelName}`);
+  if (modelName === AtomicModel.ImgOrientationCls) {
+    return orientationModelInit(kwargs.orientation_config ?? null);
   }
-  return atomModel;
+
+  throw new Error(`[atomModelInit] model name not allowed: ${modelName}`);
 }
 
 // ---------------------------------------------------------------------------
-// AtomModelSingleton — W6 pattern
+// AtomModelSingleton — W6 singleton pattern
 // ---------------------------------------------------------------------------
 
 /**
  * Singleton manager for all atomic models.
- * PORTING NOTE: AtomModelSingleton.__new__ (Python singleton) → JS static #instance W6 pattern.
+ * Caches model instances by a deterministic key derived from model name + config.
  */
 export class AtomModelSingleton {
   static #instance = null;
   #models = new Map();
 
-  /**
-   * @returns {AtomModelSingleton}
-   */
+  /** @returns {AtomModelSingleton} */
   static getInstance() {
     if (!AtomModelSingleton.#instance) {
       AtomModelSingleton.#instance = new AtomModelSingleton();
@@ -311,7 +294,6 @@ export class AtomModelSingleton {
 
   /**
    * Get or lazily initialize an atom model by name + config key.
-   * PORTING NOTE: get_atom_model(atom_model_name, **kwargs) → async getAtomModel(name, kwargs)
    * @param {string} atomModelName
    * @param {object} [kwargs]
    * @returns {Promise<any>}
@@ -326,24 +308,33 @@ export class AtomModelSingleton {
     return await this.#models.get(key);
   }
 
+  /**
+   * Build a deterministic cache key for a model name + config combination.
+   * @param {string} atomModelName
+   * @param {object} kwargs
+   * @returns {string}
+   */
   static buildKey(atomModelName, kwargs = {}) {
     if (atomModelName === AtomicModel.Layout) {
       return JSON.stringify([atomModelName, makeHashable(kwargs.layout_config ?? null)]);
-    } else if (atomModelName === AtomicModel.OCR) {
-      const ocrLang = kwargs.lang ?? 'ch';
+    }
+
+    if (atomModelName === AtomicModel.OCR) {
       return JSON.stringify([
         atomModelName,
         makeHashable(kwargs.ocr_config ?? null),
         kwargs.det_db_thresh ?? 0.3,
         kwargs.det_db_box_thresh ?? 0.3,
-        ocrLang,
+        kwargs.lang ?? "ch",
         kwargs.det_db_unclip_ratio ?? 1.8,
         kwargs.enable_merge_det_boxes ?? true,
         kwargs.is_seal ?? false,
       ]);
-    } else if (atomModelName === AtomicModel.Table) {
+    }
+
+    if (atomModelName === AtomicModel.Table) {
       let ocrConfigClean = null;
-      if (kwargs.ocr_config !== null && kwargs.ocr_config !== undefined) {
+      if (kwargs.ocr_config != null) {
         ocrConfigClean = { ...kwargs.ocr_config };
         delete ocrConfigClean.custom_model;
       }
@@ -353,32 +344,39 @@ export class AtomModelSingleton {
         kwargs.lang ?? null,
         makeHashable(ocrConfigClean),
       ]);
-    } else if (atomModelName === AtomicModel.FORMULA) {
+    }
+
+    if (atomModelName === AtomicModel.FORMULA) {
       return JSON.stringify([atomModelName, makeHashable(kwargs.formula_config ?? null)]);
-    } else if (atomModelName === AtomicModel.ImgOrientationCls) {
+    }
+
+    if (atomModelName === AtomicModel.ImgOrientationCls) {
       return JSON.stringify([atomModelName, makeHashable(kwargs.orientation_config ?? null)]);
     }
+
     return atomModelName;
   }
 
   /**
    * Dispose and remove cached atomic models.
-   * @param {string|null} [keepKey]
+   * @param {string|null} [keepKey] - Optional key to retain (not disposed)
    */
   async clear(keepKey = null) {
+    const seen = new WeakSet();
     for (const [key, value] of this.#models.entries()) {
       if (keepKey !== null && key === keepKey) continue;
       this.#models.delete(key);
       try {
-        await disposeModelResource(await value);
+        await disposeModelResource(await value, seen);
       } catch (err) {
-        console.warn("[AtomModelSingleton] failed to dispose model:", err?.message ?? err);
+        console.warn(formatPipelineError({
+          stage: "dispose",
+          module: "AtomModelSingleton",
+          message: `Failed to dispose model [${key}]: ${err?.message ?? err}`,
+          recoverable: true,
+        }));
       }
     }
-  }
-
-  async clearByConfig(keepKey = null) {
-    await this.clear(keepKey);
   }
 
   /**
@@ -386,17 +384,24 @@ export class AtomModelSingleton {
    * @param {Set<string>} keepKeys
    */
   async retainKeys(keepKeys) {
+    const seen = new WeakSet();
     for (const [key, value] of this.#models.entries()) {
       if (keepKeys.has(key)) continue;
       this.#models.delete(key);
       try {
-        await disposeModelResource(await value);
+        await disposeModelResource(await value, seen);
       } catch (err) {
-        console.warn("[AtomModelSingleton] failed to dispose stale model:", err?.message ?? err);
+        console.warn(formatPipelineError({
+          stage: "dispose",
+          module: "AtomModelSingleton",
+          message: `Failed to dispose stale model [${key}]: ${err?.message ?? err}`,
+          recoverable: true,
+        }));
       }
     }
   }
 
+  /** Dispose all cached models. */
   async dispose() {
     await this.clear();
   }
@@ -408,7 +413,7 @@ export class AtomModelSingleton {
 
 /**
  * Combined pipeline model holding layout, OCR, formula and table models.
- * PORTING NOTE: MineruPipelineModel.__init__(**kwargs) → static async create(kwargs)
+ * Manages the full set of models needed for one pipeline run.
  */
 export class MineruPipelineModel {
   constructor() {
@@ -438,8 +443,6 @@ export class MineruPipelineModel {
     inst.lang = kwargs.lang ?? null;
     inst.device = kwargs.device ?? "cpu";
 
-    console.info("[MineruPipelineModel] init started…");
-
     const atomModelManager = AtomModelSingleton.getInstance();
 
     inst.layoutModel = await atomModelManager.getAtomModel(AtomicModel.Layout, {
@@ -454,7 +457,13 @@ export class MineruPipelineModel {
           formula_config: inst.formulaConfig,
         });
       } catch (err) {
-        console.warn('[MineruPipelineModel] Formula model failed to load — formula recognition disabled.', err.message);
+        if (err instanceof AbortException) throw err;
+        console.warn(formatPipelineError({
+          stage: "model-load",
+          module: "MineruPipelineModel",
+          message: `Formula model failed to load — formula recognition disabled. ${err.message}`,
+          recoverable: true,
+        }));
         inst.applyFormula = false;
       }
     }
@@ -474,15 +483,25 @@ export class MineruPipelineModel {
           table_config: inst.tableConfig,
         });
       } catch (err) {
-        console.warn('[MineruPipelineModel] Table model failed to load — table recognition disabled.', err.message);
+        if (err instanceof AbortException) throw err;
+        console.warn(formatPipelineError({
+          stage: "model-load",
+          module: "MineruPipelineModel",
+          message: `Table model failed to load — table recognition disabled. ${err.message}`,
+          recoverable: true,
+        }));
         inst.applyTable = false;
       }
     }
 
-    console.info("[MineruPipelineModel] init done!");
     return inst;
   }
 
+  /**
+   * Release references held by this pipeline model.
+   * Does NOT deeply dispose the underlying model instances — those are owned
+   * by AtomModelSingleton and disposed via retainKeys()/clear().
+   */
   async dispose() {
     this.layoutModel = null;
     this.formulaModel = null;

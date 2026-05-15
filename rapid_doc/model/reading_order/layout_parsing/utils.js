@@ -13,7 +13,7 @@ import { REGION_SETTINGS } from "./setting.js";
  * @returns {Array<[number,number,number,number]>}
  */
 export function convertPointsToBoxes(dtPolys) {
-  if (dtPolys.length === 0) return [];
+  if (!dtPolys || dtPolys.length === 0) return [];
   return dtPolys.map((poly) => {
     const xs = poly.map((p) => p[0]);
     const ys = poly.map((p) => p[1]);
@@ -29,7 +29,7 @@ export function convertPointsToBoxes(dtPolys) {
  */
 export function getOverlapBoxesIdx(srcBoxes, refBoxes) {
   const matchIdxList = [];
-  if (srcBoxes.length === 0 || refBoxes.length === 0) return matchIdxList;
+  if (!srcBoxes || !refBoxes || srcBoxes.length === 0 || refBoxes.length === 0) return matchIdxList;
   for (const refBox of refBoxes) {
     for (let i = 0; i < srcBoxes.length; i++) {
       const src = srcBoxes[i];
@@ -63,7 +63,15 @@ export function getSubRegionsOcrRes(
     rec_scores: [],
     rec_boxes: [],
   };
+  if (!overallOcrRes || !objectBoxes) {
+    return returnMatchIdx ? [result, []] : result;
+  }
+
   const overallTextBoxes = overallOcrRes.rec_boxes || [];
+  if (overallTextBoxes.length === 0) {
+    return returnMatchIdx ? [result, []] : result;
+  }
+
   let matchIdxList = getOverlapBoxesIdx(overallTextBoxes, objectBoxes);
   matchIdxList = [...new Set(matchIdxList)];
 
@@ -95,6 +103,8 @@ export function calculateProjectionOverlapRatio(
   direction = "horizontal",
   mode = "union"
 ) {
+  if (!bbox1 || !bbox2 || bbox1.length < 4 || bbox2.length < 4) return 0;
+
   let startIdx, endIdx;
   if (direction === "horizontal") {
     startIdx = 0;
@@ -118,7 +128,7 @@ export function calculateProjectionOverlapRatio(
   } else if (mode === "large") {
     refWidth = Math.max(a2 - a1, b2 - b1);
   } else {
-    throw new Error(`Invalid mode ${mode}`);
+    throw new Error(`[LayoutParsingUtils] Invalid projection overlap mode: "${mode}".`);
   }
   return refWidth > 0 ? overlap / refWidth : 0;
 }
@@ -131,6 +141,8 @@ export function calculateProjectionOverlapRatio(
  * @returns {number}
  */
 export function calculateOverlapRatio(bbox1, bbox2, mode = "union") {
+  if (!bbox1 || !bbox2 || bbox1.length < 4 || bbox2.length < 4) return 0;
+
   const xMinInter = Math.max(bbox1[0], bbox2[0]);
   const yMinInter = Math.max(bbox1[1], bbox2[1]);
   const xMaxInter = Math.min(bbox1[2], bbox2[2]);
@@ -150,7 +162,7 @@ export function calculateOverlapRatio(bbox1, bbox2, mode = "union") {
   } else if (mode === "large") {
     refArea = Math.max(area1, area2);
   } else {
-    throw new Error(`Invalid mode ${mode}`);
+    throw new Error(`[LayoutParsingUtils] Invalid overlap mode: "${mode}". Expected "union", "small", or "large".`);
   }
   if (refArea === 0) return 0;
   return interArea / refArea;
@@ -162,8 +174,9 @@ export function calculateOverlapRatio(bbox1, bbox2, mode = "union") {
  * @returns {number[]} [x1,y1,x2,y2]
  */
 export function calculateMinimumEnclosingBbox(bboxes) {
-  if (!bboxes || bboxes.length === 0)
-    throw new Error("The list of bounding boxes is empty.");
+  if (!bboxes || bboxes.length === 0) {
+    throw new Error("[LayoutParsingUtils] calculateMinimumEnclosingBbox called with empty bboxes array.");
+  }
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const b of bboxes) {
     if (b[0] < minX) minX = b[0];
@@ -196,12 +209,14 @@ export function isNonBreakingPunctuation(char) {
  * @returns {1|2|null}
  */
 export function _getMinboxIfOverlapByRatio(bbox1, bbox2, ratio, smaller = true) {
+  if (!bbox1 || !bbox2) return null;
+
   const area1 = caculateBboxArea(bbox1);
   const area2 = caculateBboxArea(bbox2);
   const overlapRatio = calculateOverlapRatio(bbox1, bbox2, "small");
   if (overlapRatio > ratio) {
     if ((area1 <= area2 && smaller) || (area1 >= area2 && !smaller)) return 1;
-    else return 2;
+    return 2;
   }
   return null;
 }
@@ -215,6 +230,10 @@ export function _getMinboxIfOverlapByRatio(bbox1, bbox2, ratio, smaller = true) 
  * @returns {{boxes: Array}}
  */
 export function removeOverlapBlocks(blocks, threshold = 0.65, smaller = true) {
+  if (!blocks || !blocks.boxes || blocks.boxes.length === 0) {
+    return { ...blocks, boxes: [] };
+  }
+
   const result = { ...blocks, boxes: blocks.boxes.map((b) => ({ ...b })) };
   const droppedIndexes = new Set();
 
@@ -284,12 +303,19 @@ export function getBboxIntersection(bbox1, bbox2, returnFormat = "bbox") {
       [xMin, yMax],
     ];
   } else {
-    throw new Error("returnFormat must be 'bbox' or 'poly'.");
+    throw new Error(`[LayoutParsingUtils] getBboxIntersection: returnFormat must be "bbox" or "poly", got "${returnFormat}".`);
   }
 }
 
 /**
  * Shrink supplement region bbox to best fit remaining blocks.
+ * @param {number[]} supplementRegionBbox
+ * @param {number[]} refRegionBbox
+ * @param {number} imageWidth
+ * @param {number} imageHeight
+ * @param {Set<number>} blockIdxesSet
+ * @param {number[][]} blockBboxes
+ * @returns {[number[], number[]]}
  */
 export function shrinkSupplementRegionBbox(
   supplementRegionBbox,
@@ -299,6 +325,8 @@ export function shrinkSupplementRegionBbox(
   blockIdxesSet,
   blockBboxes
 ) {
+  if (!blockIdxesSet || blockIdxesSet.size === 0) return [supplementRegionBbox, []];
+
   let [x1, y1, x2, y2] = supplementRegionBbox;
   const [x1p, y1p, x2p, y2p] = refRegionBbox;
   const indexConversionMap = { 0: 2, 1: 3, 2: 0, 3: 1 };
@@ -313,9 +341,6 @@ export function shrinkSupplementRegionBbox(
   let minDistance = Math.min(...edgeDistanceList);
   let srcIndex = indexConversionMap[edgeDistanceList.indexOf(minDistance)];
 
-  const blockIdxArray = [...blockIdxesSet];
-  if (blockIdxArray.length === 0) return [supplementRegionBbox, []];
-
   let inerBlockIdxes = [];
   for (let attempt = 0; attempt < 3; attempt++) {
     const dstIndex = indexConversionMap[srcIndex];
@@ -325,16 +350,15 @@ export function shrinkSupplementRegionBbox(
     inerBlockIdxes = [];
     const splitBlockIdxes = [];
 
+    const matchThresh = REGION_SETTINGS.match_block_overlap_ratio_threshold ?? 0.8;
+    const splitThresh = REGION_SETTINGS.split_block_overlap_ratio_threshold ?? 0.4;
+
     for (const blockIdx of blockIdxesSet) {
       const overlapRatio = calculateOverlapRatio(
         tmpRegionBbox,
         blockBboxes[blockIdx],
         "small"
       );
-      const matchThresh =
-        REGION_SETTINGS.match_block_overlap_ratio_threshold ?? 0.8;
-      const splitThresh =
-        REGION_SETTINGS.split_block_overlap_ratio_threshold ?? 0.4;
       if (overlapRatio > matchThresh) {
         inerBlockIdxes.push(blockIdx);
       } else if (overlapRatio > splitThresh) {
@@ -358,7 +382,7 @@ export function shrinkSupplementRegionBbox(
           const srcIdx2 = ed.indexOf(maxDist);
           const dstIdx2 = indexConversionMap[srcIdx2];
           tmpRegionBbox[dstIdx2] = splitBlockBbox[srcIdx2];
-          const [newBbox, inerIdxes] = shrinkSupplementRegionBbox(
+          shrinkSupplementRegionBbox(
             tmpRegionBbox,
             refRegionBbox,
             imageWidth,
@@ -366,7 +390,6 @@ export function shrinkSupplementRegionBbox(
             new Set(inerBlockIdxes),
             blockBboxes
           );
-          if (inerIdxes.length === 0) continue;
         }
       }
       const matchedBboxes = inerBlockIdxes.map((idx) => blockBboxes[idx]);
@@ -377,8 +400,7 @@ export function shrinkSupplementRegionBbox(
       edgeDistanceTmp.splice(idx, 1);
       if (edgeDistanceTmp.length === 0) break;
       minDistance = Math.min(...edgeDistanceTmp);
-      srcIndex =
-        indexConversionMap[edgeDistanceList.indexOf(minDistance)];
+      srcIndex = indexConversionMap[edgeDistanceList.indexOf(minDistance)];
     }
   }
   return [supplementRegionBbox, inerBlockIdxes];
@@ -407,6 +429,7 @@ export function updateRegionBox(bbox, regionBox) {
  * @returns {number}
  */
 export function caculateBboxArea(bbox) {
+  if (!bbox || bbox.length < 4) return 0;
   const [x1, y1, x2, y2] = bbox.map(Number);
   return Math.abs((x2 - x1) * (y2 - y1));
 }

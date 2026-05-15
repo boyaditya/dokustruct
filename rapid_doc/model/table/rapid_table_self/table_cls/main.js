@@ -1,8 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/table_cls/main.py → main.js
-// TableCls → dispatches to PaddleCls or QanythingCls based on model_type
-// W1: __init__(cfg) → static async create(cfg)
-// W2: cv.Mat cleanup in try/finally
 
 import * as ort from "onnxruntime-web";
 import { OrtInferSession } from "../inference_engine/onnxruntime/main.js";
@@ -18,16 +14,14 @@ const IMAGENET_STD = [0.229, 0.224, 0.225];
 
 /**
  * Resize image so shortest side = targetSize, then center-crop to (cropSize x cropSize).
- * PORTING NOTE: PaddleCls preprocessing (resize_short=256, crop=224)
- * W2: all cv.Mat objects freed in try/finally
+ * Returns CHW float32 normalized array [3, cropSize, cropSize].
  * @param {cv.Mat} img - BGR uint8
  * @param {number} resizeShort
  * @param {number} cropSize
- * @returns {Float32Array} CHW float32 normalized array [3, cropSize, cropSize]
+ * @returns {Float32Array}
  */
 function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
   const h = img.rows, w = img.cols;
-  // Step 1: resize so shortest side = resizeShort
   let scale, newH, newW;
   if (h < w) { scale = resizeShort / h; newH = resizeShort; newW = Math.round(w * scale); }
   else { scale = resizeShort / w; newW = resizeShort; newH = Math.round(h * scale); }
@@ -36,7 +30,6 @@ function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
   let cropped = null;
   try {
     cv.resize(img, resized, new cv.Size(newW, newH), 0, 0, cv.INTER_LANCZOS4);
-    // Step 2: center crop to (cropSize x cropSize)
     const y0 = Math.floor((newH - cropSize) / 2);
     const x0 = Math.floor((newW - cropSize) / 2);
     const roi = resized.roi(new cv.Rect(x0, y0, cropSize, cropSize));
@@ -46,7 +39,6 @@ function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
     resized.delete();
   }
 
-  // Step 3: BGR → RGB, normalize to CHW float32
   let rgb = new cv.Mat();
   let float32 = new cv.Mat();
   try {
@@ -55,7 +47,6 @@ function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
 
     const data = new Float32Array(3 * cropSize * cropSize);
     const src = float32.data32F;
-    // Convert HWC → CHW and apply ImageNet normalization
     for (let c = 0; c < 3; c++) {
       const mean = IMAGENET_MEAN[c], std = IMAGENET_STD[c];
       const offset = c * cropSize * cropSize;
@@ -73,10 +64,10 @@ function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
 
 /**
  * Qanything table classifier preprocessing.
- * Mirrors Python: BGR -> RGB -> grayscale -> 3-channel -> resize 224x224.
+ * BGR -> RGB -> grayscale -> 3-channel -> resize 224x224 -> normalize.
  * @param {cv.Mat} img - BGR uint8
  * @param {number} cropSize
- * @returns {Float32Array} CHW float32 normalized array [3, cropSize, cropSize]
+ * @returns {Float32Array}
  */
 function qanythingClsPreprocess(img, cropSize = 224) {
   const rgb = new cv.Mat();
@@ -116,8 +107,19 @@ function resolveModelPath(modelDirOrPath, modelType) {
 }
 
 /**
+ * Numerically stable softmax.
+ * @param {number[]} x
+ * @returns {number[]}
+ */
+function _softmax(x) {
+  const max = Math.max(...x);
+  const exp = x.map(v => Math.exp(v - max));
+  const sum = exp.reduce((a, b) => a + b, 0);
+  return exp.map(v => v / sum);
+}
+
+/**
  * PaddleCls-style ONNX classifier.
- * PORTING NOTE: PaddleCls(cfg) → static async create(cfg)
  */
 export class PaddleCls {
   constructor() {
@@ -154,11 +156,17 @@ export class PaddleCls {
     const labels = ["wired", "wireless"];
     return [labels[maxIdx] ?? String(maxIdx), softmax[maxIdx]];
   }
+
+  async dispose() {
+    if (this.session && typeof this.session.dispose === 'function') {
+      await this.session.dispose();
+    }
+    this.session = null;
+  }
 }
 
 /**
  * QanythingCls-style ONNX classifier.
- * PORTING NOTE: QanythingCls(cfg) → similar to PaddleCls with different preprocessing.
  */
 export class QanythingCls {
   constructor() {
@@ -195,11 +203,18 @@ export class QanythingCls {
     const labels = ["wired", "wireless"];
     return [labels[maxIdx] ?? String(maxIdx), softmax[maxIdx]];
   }
+
+  async dispose() {
+    if (this.session && typeof this.session.dispose === 'function') {
+      await this.session.dispose();
+    }
+    this.session = null;
+  }
 }
 
 /**
- * Python PADDLE_Q_CLS parity: run Paddle and Qanything classifiers; if they
- * disagree, treat the table as wireless.
+ * Combined Paddle + Qanything classifier.
+ * If both classifiers disagree, treats the table as wireless (Python parity).
  */
 export class PaddleQCls {
   constructor() {
@@ -230,11 +245,17 @@ export class PaddleQCls {
     }
     return ["wireless", Math.min(paddleScore, qanythingScore)];
   }
+
+  async dispose() {
+    if (this.paddleCls) await this.paddleCls.dispose();
+    if (this.qanythingCls) await this.qanythingCls.dispose();
+    this.paddleCls = null;
+    this.qanythingCls = null;
+  }
 }
 
 /**
  * Table type classifier dispatcher.
- * PORTING NOTE: TableCls(cfg) → static async create(cfg)
  * Dispatches to Paddle, Qanything, or combined Paddle+Qanything based on model_type.
  */
 export class TableCls {
@@ -270,18 +291,13 @@ export class TableCls {
   async run(img) {
     return this._cls.run(img);
   }
-}
 
-/**
- * Numerically stable softmax.
- * @param {number[]} x
- * @returns {number[]}
- */
-function _softmax(x) {
-  const max = Math.max(...x);
-  const exp = x.map(v => Math.exp(v - max));
-  const sum = exp.reduce((a, b) => a + b, 0);
-  return exp.map(v => v / sum);
+  async dispose() {
+    if (this._cls && typeof this._cls.dispose === 'function') {
+      await this._cls.dispose();
+    }
+    this._cls = null;
+  }
 }
 
 export default TableCls;

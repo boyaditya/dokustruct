@@ -1,24 +1,6 @@
 /**
- * PORTING NOTE: model_handler/pp_doclayout/main.py → main.js
- *
  * PPDocLayoutModelHandler: pipeline for PaddlePaddle-family layout detection models
  * (PP-DocLayout, PP-DocLayoutV2, PP-DocLayoutV3, RT-DETR).
- *
- * CHANGE: Constructor is synchronous; session passed in is already created.
- *
- * CHANGE: __call__  → async call(oriImgList)
- *         preprocessing now returns { data, shape } objects instead of numpy arrays;
- *         np.concatenate(img_inputs, axis=0) becomes manual batch concat in JS.
- *
- * CHANGE: time.perf_counter() → performance.now() / 1000
- *
- * CHANGE: zip(*[(…) for d in datas])  → mapped arrays
- *
- * CHANGE: session(img_inputs, scale_factor_inputs) → session.run(data, scaleFactorF32, shape)
- *         The session receives a flat Float32Array; shape is passed explicitly.
- *
- * PORTING NOTE: _format_output handles 3 or 4 element ONNX output lists.
- *   numpy operations replaced by ort.Tensor data accessors + Float32Array slicing.
  */
 
 import { BaseModelHandler } from '../base/index.js';
@@ -116,8 +98,6 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
 
   /**
    * Run the full pipeline on a batch of images.
-   * Mirrors: __call__(ori_img_list)
-   *
    * @param {cv.Mat[]} oriImgList
    * @returns {Promise<import('../../utils/typings.js').RapidLayoutOutput[]>}
    */
@@ -219,8 +199,6 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
 
   /**
    * Convert raw ONNX output tensors to per-image dicts.
-   * Mirrors: _format_output(pred)
-   *
    * @param {import('onnxruntime-web').Tensor[]} pred
    * @returns {Array<{boxes?: Float32Array, masks?: any, class_id?: any}>}
    */

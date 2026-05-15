@@ -1,12 +1,9 @@
 /**
- * PORTING NOTE: download_file.py → download_file.js
+ * download_file.js — File download with IndexedDB caching and progress tracking.
  *
- * WORKAROUND: Python uses urllib/requests to write files to disk
- * REASON: No filesystem write access in the browser
- * SOLUTION: fetch() with progress tracking; IndexedDB for persistent caching
- *           of model files so they are not re-downloaded on every page load.
- *
- * AFFECTED METHODS: DownloadFile.__call__ → async downloadFile(); disk cache → IndexedDB
+ * Browser workaround: Python uses urllib/requests to write files to disk.
+ * Here we use fetch() with progress tracking and IndexedDB for persistent
+ * caching of model files so they are not re-downloaded on every page load.
  */
 
 import { getLogger } from './logger.js';
@@ -73,7 +70,7 @@ async function saveToCache(key, buffer) {
   }
 }
 
-// ─── DownloadFileInput (mirrors Python @dataclass) ───────────────────────────
+// ─── DownloadFileInput ────────────────────────────────────────────────────────
 
 /**
  * @typedef {Object} DownloadFileInputData
@@ -119,12 +116,11 @@ function concatUint8Arrays(chunks) {
   return result;
 }
 
-// ─── DownloadFile (mirrors Python class) ─────────────────────────────────────
+// ─── DownloadFile ─────────────────────────────────────────────────────────────
 
 export class DownloadFile {
   /**
    * Download a file from a URL, with IndexedDB caching and progress reporting.
-   * Mirrors Python: DownloadFile()(cfg)
    *
    * @param {DownloadFileInput} cfg
    * @returns {Promise<ArrayBuffer>}
@@ -199,7 +195,6 @@ export async function downloadFile(url, onProgress = null) {
   return downloader.call(new DownloadFileInput({ url, onProgress }));
 }
 
-// CPU-only model list (mirrors Python CPU_MODEL constant)
 export const CPU_MODEL = Object.freeze([
   'pp_doclayoutv2.onnx',
   'pp_formulanet_plus_m.onnx',

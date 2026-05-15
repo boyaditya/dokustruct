@@ -1,14 +1,13 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/table_matcher/main.py → main.js
-// 1:1 port of Python baseline (2026-05-11).
-// Matches match_result / filter_ocr_result / get_pred_html semantics exactly.
+
+import { AbortException } from "../../../../utils/exceptions.js";
+import { formatPipelineError } from "../../../../utils/browser_utils.js";
 
 const TABLE_MATCH_CHUNK_SIZE = 256;
 
 /**
  * Normalise cell bboxes to 4-point rectangles [x0, y0, x1, y1].
  * Accepts 4-value rectangle, 8-value polygon, or nested [[x,y],...] polygon.
- * PORTING NOTE: _normalize_cell_bboxes → normalizeCellBboxes
  * @param {Array|null} cellBboxes
  * @returns {number[][]}
  */
@@ -17,7 +16,6 @@ function normalizeCellBboxes(cellBboxes) {
   const out = [];
   for (const bbox of cellBboxes) {
     if (!bbox) continue;
-    // Flatten nested [[x,y],...]
     let flat;
     if (Array.isArray(bbox[0])) {
       flat = [];
@@ -79,11 +77,7 @@ function normalizeDtBoxes(dtBoxes) {
 
 /**
  * Pairwise IoU + custom distance metric between OCR boxes and cell boxes.
- * PORTING NOTE: _pairwise_iou_and_distance → pairwiseIouAndDistance.
- * Preserves Python's old coordinate-axis confusion (note: Python code uses
- * y-coords at index 1/3 as 'left/right' and x-coords at index 0/2 as 'top/bottom';
- * we replicate the same for behavioural parity).
- *
+ * Preserves Python's coordinate-axis convention for behavioural parity.
  * @param {number[][]} dt - (N,4) OCR rects
  * @param {number[][]} cells - (M,4) cell rects
  * @returns {{ iou: number[][], distance: number[][] }}
@@ -103,8 +97,6 @@ function pairwiseIouAndDistance(dt, cells) {
       const cellArea = (c2 - c0) * (c3 - c1);
       const sumArea = dtArea + cellArea;
 
-      // NB: Python labels are misleading ("left_line" uses y, "top_line" uses x).
-      // Keep computation identical to preserve baseline behaviour.
       const leftLine = Math.max(d1, c1);
       const rightLine = Math.min(d3, c3);
       const topLine = Math.max(d0, c0);
@@ -130,7 +122,6 @@ function pairwiseIouAndDistance(dt, cells) {
 
 /**
  * Select the best cell index for each OCR box by (1-IoU, distance) tie-break.
- * PORTING NOTE: _select_best_cell_indices → selectBestCellIndices.
  * @param {number[][]} iou
  * @param {number[][]} distance
  * @returns {number[]}
@@ -140,12 +131,10 @@ function selectBestCellIndices(iou, distance) {
   for (let r = 0; r < iou.length; r++) {
     const row = iou[r];
     const distRow = distance[r];
-    // Find min inverseIou = 1 - iou, i.e. max iou.
     let maxIou = -Infinity;
     for (let j = 0; j < row.length; j++) {
       if (row[j] > maxIou) maxIou = row[j];
     }
-    // Candidates with that max iou; tie-break by min distance.
     let bestIdx = -1;
     let bestDist = Infinity;
     for (let j = 0; j < row.length; j++) {
@@ -162,7 +151,6 @@ function selectBestCellIndices(iou, distance) {
 
 /**
  * Filter OCR boxes that lie entirely above the table top.
- * PORTING NOTE: filter_ocr_result → filterOcrResult
  * @param {number[][]} cellBboxes normalised (Nc,4)
  * @param {number[][]} dtBoxes normalised (Ndt,4)
  * @param {any[]} recRes
@@ -172,7 +160,6 @@ function filterOcrResult(cellBboxes, dtBoxes, recRes) {
   if (cellBboxes.length === 0 || dtBoxes.length === 0) {
     return { dtBoxes, recRes };
   }
-  // Python: cell_bboxes[:, 1::2].min() → min of y0,y1 across all cells.
   let y1 = Infinity;
   for (const c of cellBboxes) {
     if (c[1] < y1) y1 = c[1];
@@ -182,7 +169,6 @@ function filterOcrResult(cellBboxes, dtBoxes, recRes) {
   const newRec = [];
   for (let i = 0; i < dtBoxes.length; i++) {
     const box = dtBoxes[i];
-    // Python: np.max(box[1::2]) < y1 → skip
     const maxY = Math.max(box[1], box[3]);
     if (maxY < y1) continue;
     newDt.push(box);
@@ -193,7 +179,6 @@ function filterOcrResult(cellBboxes, dtBoxes, recRes) {
 
 /**
  * Chunked, greedy assignment of OCR boxes to cells.
- * PORTING NOTE: match_result → matchResult
  * @param {number[][]} cellBboxes normalised (Nc,4)
  * @param {number[][]} dtBoxes normalised (Ndt,4)
  * @param {number} [minIou=1e-8]
@@ -211,7 +196,7 @@ function matchResult(cellBboxes, dtBoxes, minIou = Math.pow(0.1, 8)) {
       const bestCell = best[offset];
       if (bestCell < 0) continue;
       const bestInverseIou = 1.0 - iou[offset][bestCell];
-      if (bestInverseIou >= 1 - minIou) continue; // threshold: skip if IoU too low
+      if (bestInverseIou >= 1 - minIou) continue;
       const ocrIdx = start + offset;
       if (!matched[bestCell]) matched[bestCell] = [];
       matched[bestCell].push(ocrIdx);
@@ -222,7 +207,6 @@ function matchResult(cellBboxes, dtBoxes, minIou = Math.pow(0.1, 8)) {
 
 /**
  * Build the final HTML string with OCR text injected into matched cells.
- * 1:1 port of Python get_pred_html including <b> wrapping and content stripping.
  * @param {string[]} predStructures
  * @param {Object<number, number[]>} matchedIndex
  * @param {Array<[string, number]>} ocrContents
@@ -279,7 +263,7 @@ function buildPredHtml(predStructures, matchedIndex, ocrContents) {
 }
 
 /**
- * Process a single table.
+ * Process a single table: normalize, filter, match, and build HTML.
  * @param {string[]} predStruct
  * @param {Array} cellBboxes
  * @param {Array} dtBoxes
@@ -295,29 +279,39 @@ function processOne(predStruct, cellBboxes, dtBoxes, recRes) {
   return buildPredHtml(predStruct, matchedIndex, filtered.recRes);
 }
 
+/**
+ * Table matcher: assigns OCR text to table cells based on spatial overlap.
+ */
 export class TableMatch {
   constructor() {}
 
   /**
-   * Batch run.
-   * @param {Array<string[]>} predStructuresArr  - per-table structure tokens (array-of-arrays, [[...tokens]]).
-   * @param {Array<Array>} cellBboxesArr        - per-table cell bboxes
-   * @param {Array} dtBoxes                     - OCR det boxes (shared across tables) or per-table array
-   * @param {Array} recRes                      - OCR rec results ([text, score], ...)
+   * Batch run with element-level error handling.
+   * Failed individual tables are skipped; AbortException always propagates.
+   * @param {Array<string[]>} predStructuresArr
+   * @param {Array<Array>} cellBboxesArr
+   * @param {Array} dtBoxes
+   * @param {Array} recRes
    * @returns {Array<string|null>}
    */
   run(predStructuresArr, cellBboxesArr, dtBoxes, recRes) {
     const results = [];
     for (let i = 0; i < predStructuresArr.length; i++) {
       try {
-        // Python receives pred_struct[0] (inner list); JS callers already pass inner list.
         const struct = Array.isArray(predStructuresArr[i][0]) && typeof predStructuresArr[i][0][0] === 'string'
           ? predStructuresArr[i][0]
           : predStructuresArr[i];
         const html = processOne(struct, cellBboxesArr[i] ?? [], dtBoxes, recRes);
         results.push(html);
-      } catch (e) {
-        console.warn('TableMatch.run: error processing table', e);
+      } catch (err) {
+        if (err instanceof AbortException) throw err;
+        console.warn(formatPipelineError({
+          stage: 'table',
+          module: 'TableMatch',
+          message: `Error matching table ${i}: ${err?.message ?? err}`,
+          pageIndex: i,
+          recoverable: true,
+        }));
         results.push(null);
       }
     }

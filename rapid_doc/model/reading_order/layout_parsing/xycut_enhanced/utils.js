@@ -304,16 +304,13 @@ function weightedDistanceInsert(block, sortedBlocks, region) {
   let nearestIdx = 0;
   let sortedDistance, blockDistance;
 
-  // toleranceLenCopy is mutable per loop
-  let tol = toleranceLen;
-
   for (let si = 0; si < sortedBlocks.length; si++) {
     const sb = sortedBlocks[si];
     const [x1p, y1p, x2p, y2p] = sb.bbox;
 
     const weight = _getWeights(block.order_label, block.direction);
     let edgeDist = getNearestEdgeDistance(block.bbox, sb.bbox, weight);
-    let tolEffective = tol;
+    let tolEffective = toleranceLen;
 
     if (BLOCK_LABEL_MAP.doc_title_labels.includes(block.label)) {
       const disperse = Math.max(1, region.text_line_width);

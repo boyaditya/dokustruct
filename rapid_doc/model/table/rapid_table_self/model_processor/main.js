@@ -1,6 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/model_processor/main.py → main.js
-// ModelProcessor downloads single or multiple model files (UNITABLE needs multiple files).
 
 import { DownloadFile, DownloadFileInput } from "../utils/download_file.js";
 import { ModelType, normalizeTableModelType } from "../utils/typings.js";
@@ -46,7 +44,7 @@ const MODEL_URLS = {
 
 /**
  * Model downloader and path resolver for table models.
- * PORTING NOTE: ModelProcessor.get_model_path(model_type) → returns Uint8Array or Uint8Array[]
+ * Returns Uint8Array for single-file models, or Uint8Array[] for multi-file models.
  */
 export class ModelProcessor {
   /**

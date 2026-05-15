@@ -1,45 +1,18 @@
 // Copyright (c) Opendatalab. All rights reserved.
-/**
- * PORTING NOTE: model_utils.py → model_utils.js
- *
- * WORKAROUND: torch.cuda / torch_npu / gc.collect()
- * REASON: No PyTorch, CUDA, or GC control in browser
- * SOLUTION: cleanMemory/cleanVram are no-ops; getVram returns null.
- *
- * WORKAROUND: PIL.Image.fromarray / numpy slicing
- * REASON: No PIL/NumPy in browser
- * SOLUTION: cropImg uses cv.Mat; getResList uses ImageData.
- *
- * WORKAROUND: importlib.import_module
- * REASON: Dynamic imports are async in JS
- * SOLUTION: importPackage() always returns null (not used for feature detection).
- */
-
-/**
- * Try to import a package by name.
- * PORTING NOTE: importlib.import_module → always null in browser
- * @param {string} _name
- * @returns {null}
- */
-export function importPackage(_name) {
-  return null;
-}
 
 /**
  * Convert any page image representation to a BGR cv.Mat.
  * Handles OffscreenCanvas, ImageBitmap, and pass-through for existing cv.Mat.
  *
- * PORTING NOTE: In Python the images are PIL/numpy arrays (RGB/BGR).
- *   In the browser, PDF.js renders pages to OffscreenCanvas (RGBA).
- *   This function normalises them all to CV_8UC3 BGR mats that the rest
- *   of the pipeline (cropImg, OCR, table, formula crops) expects.
+ * In the browser, PDF.js renders pages to OffscreenCanvas (RGBA).
+ * This function normalises them all to CV_8UC3 BGR mats that the rest
+ * of the pipeline (cropImg, OCR, table, formula crops) expects.
  *
  * @param {cv.Mat|OffscreenCanvas|ImageBitmap} img
  * @returns {{ mat: cv.Mat, owned: boolean }}
  *   owned=true means the caller MUST call mat.delete() when finished.
  */
 export function toMatBgr(img) {
-  // Already a cv.Mat — caller owns it, we don't add a new reference
   if (typeof cv !== 'undefined' && img instanceof cv.Mat) {
     return { mat: img, owned: false };
   }
@@ -58,7 +31,6 @@ export function toMatBgr(img) {
     throw new Error(`toMatBgr: unsupported image type: ${img?.constructor?.name ?? typeof img}`);
   }
 
-  // matFromImageData produces a CV_8UC4 RGBA mat
   const rgba = cv.matFromImageData(imageData);
   const bgr  = new cv.Mat();
   try {
@@ -70,17 +42,7 @@ export function toMatBgr(img) {
 }
 
 /**
- * Check OpenVINO availability.
- * PORTING NOTE: openvino.runtime.Core → always false in browser
- * @returns {boolean}
- */
-export function checkOpenvino() {
-  return false;
-}
-
-/**
  * Crop an image region using polygon/bbox, placing it on a white background.
- * PORTING NOTE: numpy slicing + cv2.fillPoly → cv.mat operations
  *
  * @param {object} inputRes - layout detection result with poly, optional polygon_points
  * @param {cv.Mat} inputImg - source image (cv.Mat BGR)
@@ -89,7 +51,6 @@ export function checkOpenvino() {
  * @param {object} [opts]
  * @param {string} [opts.layoutShapeMode='auto']
  * @returns {{ newImage: cv.Mat, usefulList: number[] }}
- *   PORTING NOTE: return_image (np.array) → cv.Mat; return_list unchanged
  */
 export function cropImg(inputRes, inputImg, cropPasteX = 0, cropPasteY = 0, opts = {}) {
   const layoutShapeMode = opts.layoutShapeMode ?? 'auto';
@@ -133,7 +94,6 @@ export function cropImg(inputRes, inputImg, cropPasteX = 0, cropPasteY = 0, opts
   const srcWidth = srcXmax - srcXmin;
   const srcHeight = srcYmax - srcYmin;
 
-  // Create white background
   const returnImage = new cv.Mat(cropNewHeight, cropNewWidth, inputImg.type());
   returnImage.setTo(new cv.Scalar(255, 255, 255, 255));
 
@@ -142,13 +102,11 @@ export function cropImg(inputRes, inputImg, cropPasteX = 0, cropPasteY = 0, opts
     return { newImage: returnImage, usefulList };
   }
 
-  // Crop region
   const roi = inputImg.roi(new cv.Rect(srcXmin, srcYmin, srcWidth, srcHeight));
   const destX = cropPasteX + (srcXmin - cropXmin);
   const destY = cropPasteY + (srcYmin - cropYmin);
 
   if (layoutShapeMode !== 'rect' && inputRes.polygon_points) {
-    // Apply polygon mask
     const polygon = inputRes.polygon_points;
     const pts = cv.matFromArray(polygon.length / 2, 1, cv.CV_32SC2,
       polygon.map((v, i) => i % 2 === 0 ? v - cropXmin : v - cropYmin)
@@ -162,7 +120,6 @@ export function cropImg(inputRes, inputImg, cropPasteX = 0, cropPasteY = 0, opts
     for (let r = 0; r < maskedRoi.rows; r++) {
       for (let c = 0; c < maskedRoi.cols; c++) {
         if (!mask.ucharAt(r, c)) {
-          // Set to white
           maskedRoi.ucharPtr(r, c)[0] = 255;
           maskedRoi.ucharPtr(r, c)[1] = 255;
           maskedRoi.ucharPtr(r, c)[2] = 255;
@@ -228,8 +185,6 @@ export function isInside(smallBox, bigBox, overlapThreshold = 0.8) {
 
 /**
  * Extract OCR, table, and formula regions from layout results.
- * PORTING NOTE: get_res_list_from_layout_res → getResListFromLayoutRes
- * PIL.Image.fromarray → createImageBitmap from cv.Mat
  *
  * @param {object[]} layoutRes
  * @param {cv.Mat} npImg
@@ -262,7 +217,6 @@ export function getResListFromLayoutRes(layoutRes, npImg, overlapThreshold = 0.8
     }
   }
 
-  // Find images inside tables
   for (const imgBox of imageResList) {
     for (const tblBox of tableResList) {
       if (isInside(getCoordsAndArea(imgBox), getCoordsAndArea(tblBox), overlapThreshold)) {
@@ -271,7 +225,7 @@ export function getResListFromLayoutRes(layoutRes, npImg, overlapThreshold = 0.8
         tblBox.layout_image_list.push({
           uuid: crypto.randomUUID(),
           poly: imgBox.poly,
-          pil_image: croppedMat, // cv.Mat used instead of PIL.Image
+          pil_image: croppedMat,
         });
       }
     }
@@ -282,11 +236,9 @@ export function getResListFromLayoutRes(layoutRes, npImg, overlapThreshold = 0.8
 
 /**
  * Clean GPU/device memory.
- * PORTING NOTE: torch.cuda.empty_cache() → minimal browser cleanup
  * @param {string} [_device='wasm']
  */
 export function cleanMemory(_device = 'wasm') {
-  // Hint GC if available (non-standard but supported in some runtimes)
   if (typeof globalThis.gc === 'function') {
     try { globalThis.gc(); } catch { /* ignore */ }
   }
@@ -294,7 +246,6 @@ export function cleanMemory(_device = 'wasm') {
 
 /**
  * Clean VRAM if below threshold.
- * PORTING NOTE: torch VRAM detection → triggers cleanMemory when VRAM is limited
  * @param {string} _device
  * @param {number} [_vramThreshold=8]
  */
@@ -305,13 +256,12 @@ export function cleanVram(_device, _vramThreshold = 8) {
   }
 }
 
-// Cached VRAM value (WebGPU adapter query is async, cache after first call)
-let _cachedVram = undefined; // undefined = not queried, null = unavailable, number = GB
+// Cached VRAM value (undefined = not queried, null = unavailable, number = GB)
+let _cachedVram = undefined;
 
 /**
  * Get VRAM size in GB (cached).
  * Returns cached value synchronously. Call initVramDetection() at startup to populate.
- * PORTING NOTE: torch.cuda.get_device_properties → WebGPU adapter maxBufferSize estimation
  * @param {string} [_device]
  * @returns {number|null}
  */
@@ -339,13 +289,10 @@ export async function initVramDetection() {
     if (typeof navigator !== 'undefined' && navigator.gpu) {
       const adapter = await navigator.gpu.requestAdapter();
       if (adapter) {
-        // maxBufferSize gives a rough estimate of available GPU memory
         const maxBuffer = adapter.limits?.maxBufferSize ?? 0;
         if (maxBuffer > 0) {
           _cachedVram = Math.round((maxBuffer / (1024 ** 3)) * 100) / 100;
         }
-        // Some adapters expose adapterInfo with architecture hints
-        // but maxBufferSize is the most reliable cross-browser metric
       }
     }
   } catch {
@@ -355,15 +302,12 @@ export async function initVramDetection() {
 }
 
 /**
- * Compute batch ratio based on available VRAM (mirrors Python logic).
- * Python: >=16GB→16, >=12GB→8, >=8GB→4, >=6GB→2, else→1
- * Browser: more conservative (WebGPU overhead), halved thresholds.
+ * Compute batch ratio based on available VRAM.
  * @returns {number} batch ratio (1, 2, 4, 8, or 16)
  */
 export function getBatchRatio() {
   const vram = getVramCached();
   if (vram === null) return 1;
-  // Browser WebGPU has more overhead than native CUDA, use conservative ratios
   if (vram >= 16) return 8;
   if (vram >= 12) return 4;
   if (vram >= 8) return 2;

@@ -1,31 +1,15 @@
 /**
- * PORTING NOTE: model_handler/utils.py → utils.js
- *
- * CHANGE: No filesystem operations.
- *   - Python reads default_models.yaml from the installed package path and
- *     downloads models to RAPID_MODELS_DIR env variable.
- *   - JS embeds the URL map directly (mirrors the YAML content).
- *   - get_model_path() / get_single_model_path() become `getModelUrl()` which
- *     returns the remote URL; callers pass it as cfg.modelUrl.
- *   - mkdir() / DownloadFile.run() are not needed here; actual download
- *     happens in OrtInferSession.create() via download_file.js (IndexedDB cache).
- *
- * AFFECTED CLASSES: ModelProcessor
- * AFFECTS: model_handler/main.js (ModelProcessor.getModelUrl replaces
- *           ModelProcessor.get_model_path)
+ * ModelProcessor: resolves model URLs from embedded model map.
+ * Models are served as static assets and cached in IndexedDB by OrtInferSession.create().
  */
 
 import { getLogger } from '../utils/logger.js';
 
-// Re-export ModelType so pp_doclayout/pre_process.js can import from '../utils.js'
 export { ModelType } from '../utils/typings.js';
 
 const logger = getLogger('ModelProcessor');
 
-// ─── Embedded default_models.yaml ─────────────────────────────────────────────
-// Source: rapid_layout_self/configs/default_models.yaml
 // Models are served locally from public/models/ (Vite static assets).
-// Run `python scripts/copy-models-to-public.py` to populate public/models/.
 
 /** @type {Record<string, {url: string, sha256: string|null}>} */
 export const DEFAULT_MODEL_MAP = Object.freeze({
@@ -67,17 +51,9 @@ export const DEFAULT_MODEL_MAP = Object.freeze({
   },
 });
 
-// ─── ModelProcessor ────────────────────────────────────────────────────────────
-
 export class ModelProcessor {
   /**
    * Return the canonical model URL for a ModelType value.
-   * Mirrors: get_model_path(model_type) / get_single_model_path(model_type)
-   *
-   * CHANGE: Python downloads the file and returns the local path.
-   *         JS simply returns the remote URL; the callers (OrtInferSession.create)
-   *         fetch + cache the model in IndexedDB via download_file.js.
-   *
    * @param {string|import('../utils/typings.js').ModelType} modelType
    * @returns {string} Remote ONNX model URL
    */

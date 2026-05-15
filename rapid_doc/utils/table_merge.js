@@ -1,15 +1,17 @@
 // Copyright (c) Opendatalab. All rights reserved.
 /**
- * PORTING NOTE: table_merge.py → table_merge.js (0.9.4 refactor)
+ * Cross-page table merge utilities.
  *
  * WORKAROUND: BeautifulSoup → DOMParser / DOM APIs
- * REASON: BeautifulSoup is Python-only
- * SOLUTION: Use browser-native DOMParser and DOM traversal.
+ * REASON: BeautifulSoup is Python-only; browser-native DOMParser used instead.
  */
 
 import { BlockType, SplitFlag } from './enum_class.js';
-import { mergeParaWithText } from '../backend/pipeline/pipeline_middle_json_mkcontent.js';
-import { fullToHalf } from './char_utils.js';
+import { extractBlockPlainText, fullToHalf } from './char_utils.js';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 export const CONTINUATION_END_MARKERS = [
   "(续)",
@@ -17,7 +19,7 @@ export const CONTINUATION_END_MARKERS = [
   "(续上表)",
   "(continued)",
   "(cont.)",
-  "(cont’d)",
+  "(cont'd)",
   "(…continued)",
   "续表",
 ];
@@ -27,6 +29,9 @@ export const CONTINUATION_INLINE_MARKERS = [
 ];
 
 export const MAX_HEADER_ROWS = 5;
+
+/** Minimum width ratio difference to reject merge (10%) */
+const WIDTH_RATIO_THRESHOLD = 0.1;
 
 // ---------------------------------------------------------------------------
 // DOM helpers
@@ -41,86 +46,109 @@ function tableToString(doc) {
 }
 
 // ---------------------------------------------------------------------------
-// Row metrics / signatures
+// Cell text helpers
 // ---------------------------------------------------------------------------
 
 function normalizeCellText(cell) {
+  if (!cell) return '';
   return fullToHalf(cell.textContent ?? '').replace(/\s+/g, '');
 }
 
 function displayCellText(cell) {
+  if (!cell) return '';
   return fullToHalf((cell.textContent ?? '').trim());
 }
 
-function scanRows(rows, initialOccupied = null, startRowIdx = 0) {
+// ---------------------------------------------------------------------------
+// Row scanning — builds occupied grid and metrics
+// ---------------------------------------------------------------------------
+
+/**
+ * Initializes the occupied map from a pre-existing tail_occupied structure.
+ */
+function initOccupiedFromTail(initialOccupied) {
   const occupied = new Map();
   let maxCols = 0;
+  if (!initialOccupied) return { occupied, maxCols };
 
-  if (initialOccupied) {
-    for (const [rowOffsetStr, cols] of Object.entries(initialOccupied)) {
-      const rowOffset = Number(rowOffsetStr);
-      const set = cols instanceof Set ? new Set(cols) : new Set(cols || []);
-      if (!set.size) continue;
-      occupied.set(rowOffset, set);
-      for (const c of set) {
-        if (c + 1 > maxCols) maxCols = c + 1;
-      }
+  for (const [rowOffsetStr, cols] of Object.entries(initialOccupied)) {
+    const rowOffset = Number(rowOffsetStr);
+    const set = cols instanceof Set ? new Set(cols) : new Set(cols || []);
+    if (!set.size) continue;
+    occupied.set(rowOffset, set);
+    for (const c of set) {
+      if (c + 1 > maxCols) maxCols = c + 1;
     }
   }
+  return { occupied, maxCols };
+}
 
-  const rowEffectiveCols = [];
-  const rowMetrics = [];
-  let lastNonemptyRowMetrics = null;
-
+/**
+ * Processes a single row to compute its effective columns and update the occupied grid.
+ */
+function processRowOccupancy(row, localIdx, occupied, maxCols) {
   const getOccupiedRow = (idx) => {
     if (!occupied.has(idx)) occupied.set(idx, new Set());
     return occupied.get(idx);
   };
 
+  const occupiedRow = getOccupiedRow(localIdx);
+  let colIdx = 0;
+  const cells = Array.from(row.querySelectorAll('td, th'));
+  let actualCols = 0;
+
+  for (const cell of cells) {
+    while (occupiedRow.has(colIdx)) colIdx += 1;
+    const colspan = parseInt(cell.getAttribute('colspan') ?? '1', 10);
+    const rowspan = parseInt(cell.getAttribute('rowspan') ?? '1', 10);
+    actualCols += colspan;
+
+    for (let rowOffset = 0; rowOffset < rowspan; rowOffset++) {
+      const targetIdx = localIdx + rowOffset;
+      const occ = getOccupiedRow(targetIdx);
+      for (let c = colIdx; c < colIdx + colspan; c++) occ.add(c);
+    }
+    colIdx += colspan;
+    if (colIdx > maxCols) maxCols = colIdx;
+  }
+
+  let effectiveCols = 0;
+  if (occupiedRow.size) {
+    let maxOccupied = -1;
+    for (const c of occupiedRow) {
+      if (c > maxOccupied) maxOccupied = c;
+    }
+    effectiveCols = maxOccupied + 1;
+    if (effectiveCols > maxCols) maxCols = effectiveCols;
+  }
+
+  return { effectiveCols, actualCols, cellCount: cells.length, maxCols };
+}
+
+function scanRows(rows, initialOccupied = null, startRowIdx = 0) {
+  if (!rows || !rows.length) {
+    return { row_effective_cols: [], row_metrics: [], total_cols: 0, last_nonempty_row_metrics: null, tail_occupied: {} };
+  }
+
+  const { occupied, maxCols: initialMaxCols } = initOccupiedFromTail(initialOccupied);
+  let maxCols = initialMaxCols;
+  const rowEffectiveCols = [];
+  const rowMetrics = [];
+  let lastNonemptyRowMetrics = null;
+
   for (let localIdx = 0; localIdx < rows.length; localIdx++) {
-    const row = rows[localIdx];
-    const occupiedRow = getOccupiedRow(localIdx);
-    let colIdx = 0;
-    const cells = Array.from(row.querySelectorAll('td, th'));
-    let actualCols = 0;
-
-    for (const cell of cells) {
-      while (occupiedRow.has(colIdx)) colIdx += 1;
-
-      const colspan = parseInt(cell.getAttribute('colspan') ?? '1', 10);
-      const rowspan = parseInt(cell.getAttribute('rowspan') ?? '1', 10);
-      actualCols += colspan;
-
-      for (let rowOffset = 0; rowOffset < rowspan; rowOffset++) {
-        const targetIdx = localIdx + rowOffset;
-        const occ = getOccupiedRow(targetIdx);
-        for (let c = colIdx; c < colIdx + colspan; c++) occ.add(c);
-      }
-
-      colIdx += colspan;
-      if (colIdx > maxCols) maxCols = colIdx;
-    }
-
-    let effectiveCols = 0;
-    if (occupiedRow.size) {
-      let maxOccupied = -1;
-      for (const c of occupiedRow) {
-        if (c > maxOccupied) maxOccupied = c;
-      }
-      effectiveCols = maxOccupied + 1;
-      if (effectiveCols > maxCols) maxCols = effectiveCols;
-    }
-
-    rowEffectiveCols.push(effectiveCols);
+    const result = processRowOccupancy(rows[localIdx], localIdx, occupied, maxCols);
+    maxCols = result.maxCols;
+    rowEffectiveCols.push(result.effectiveCols);
 
     const metrics = {
       row_idx: startRowIdx + localIdx,
-      effective_cols: effectiveCols,
-      actual_cols: actualCols,
-      visual_cols: cells.length,
+      effective_cols: result.effectiveCols,
+      actual_cols: result.actualCols,
+      visual_cols: result.cellCount,
     };
     rowMetrics.push(metrics);
-    if (cells.length) lastNonemptyRowMetrics = metrics;
+    if (result.cellCount) lastNonemptyRowMetrics = metrics;
   }
 
   const tailOccupied = {};
@@ -130,33 +158,28 @@ function scanRows(rows, initialOccupied = null, startRowIdx = 0) {
     }
   }
 
-  return {
-    row_effective_cols: rowEffectiveCols,
-    row_metrics: rowMetrics,
-    total_cols: maxCols,
-    last_nonempty_row_metrics: lastNonemptyRowMetrics,
-    tail_occupied: tailOccupied,
-  };
+  return { row_effective_cols: rowEffectiveCols, row_metrics: rowMetrics, total_cols: maxCols, last_nonempty_row_metrics: lastNonemptyRowMetrics, tail_occupied: tailOccupied };
 }
 
-function buildRowSignature(row, effectiveCols) {
-  const cells = Array.from(row.querySelectorAll('td, th'));
-  const colspans = cells.map(cell => parseInt(cell.getAttribute('colspan') ?? '1', 10));
-  const rowspans = cells.map(cell => parseInt(cell.getAttribute('rowspan') ?? '1', 10));
-  const normalizedTexts = cells.map(cell => normalizeCellText(cell));
-  const displayTexts = cells.map(cell => displayCellText(cell));
+// ---------------------------------------------------------------------------
+// Row signature building
+// ---------------------------------------------------------------------------
 
+function buildRowSignature(row, effectiveCols) {
+  if (!row) return { effective_cols: 0, colspans: [], rowspans: [], normalized_texts: [], display_texts: [], cell_count: 0 };
+  const cells = Array.from(row.querySelectorAll('td, th'));
   return {
     effective_cols: effectiveCols,
-    colspans,
-    rowspans,
-    normalized_texts: normalizedTexts,
-    display_texts: displayTexts,
-    cell_count: colspans.length,
+    colspans: cells.map(cell => parseInt(cell.getAttribute('colspan') ?? '1', 10)),
+    rowspans: cells.map(cell => parseInt(cell.getAttribute('rowspan') ?? '1', 10)),
+    normalized_texts: cells.map(cell => normalizeCellText(cell)),
+    display_texts: cells.map(cell => displayCellText(cell)),
+    cell_count: cells.length,
   };
 }
 
 function buildFrontCache(rows, maxHeaderRows = MAX_HEADER_ROWS) {
+  if (!rows || !rows.length) return [[], {}];
   const frontLimit = Math.min(rows.length, maxHeaderRows + 1);
   const frontRows = rows.slice(0, frontLimit);
   const frontScan = scanRows(frontRows);
@@ -167,10 +190,7 @@ function buildFrontCache(rows, maxHeaderRows = MAX_HEADER_ROWS) {
   }
 
   const frontFirstDataRowMetrics = {};
-  frontScan.row_metrics.forEach((metrics, idx) => {
-    frontFirstDataRowMetrics[idx] = metrics;
-  });
-
+  frontScan.row_metrics.forEach((metrics, idx) => { frontFirstDataRowMetrics[idx] = metrics; });
   return [frontHeaderInfo, frontFirstDataRowMetrics];
 }
 
@@ -179,7 +199,8 @@ function buildFrontCache(rows, maxHeaderRows = MAX_HEADER_ROWS) {
 // ---------------------------------------------------------------------------
 
 function findTableBodyBlock(tableBlock) {
-  for (const block of tableBlock.blocks ?? []) {
+  if (!tableBlock?.blocks) return null;
+  for (const block of tableBlock.blocks) {
     if (block.type === BlockType.TABLE_BODY) return block;
   }
   return null;
@@ -187,13 +208,12 @@ function findTableBodyBlock(tableBlock) {
 
 function findTableBodySpan(tableBlock) {
   const bodyBlock = findTableBodyBlock(tableBlock);
-  const firstLine = bodyBlock?.lines?.[0];
-  const firstSpan = firstLine?.spans?.[0];
-  return firstSpan ?? null;
+  return bodyBlock?.lines?.[0]?.spans?.[0] ?? null;
 }
 
 function isContinuationCaption(captionBlock) {
-  const captionText = fullToHalf(mergeParaWithText(captionBlock).trim()).toLowerCase();
+  if (!captionBlock) return false;
+  const captionText = fullToHalf(extractBlockPlainText(captionBlock).trim()).toLowerCase();
   return (
     CONTINUATION_END_MARKERS.some(marker => captionText.endsWith(marker.toLowerCase())) ||
     CONTINUATION_INLINE_MARKERS.some(marker => captionText.includes(marker.toLowerCase()))
@@ -202,19 +222,17 @@ function isContinuationCaption(captionBlock) {
 
 function isPostTableNonContinuationCaption(tableBlock, captionBlock) {
   if (isContinuationCaption(captionBlock)) return false;
-
   const bodyBlock = findTableBodyBlock(tableBlock);
   if (!bodyBlock) return false;
-
   const bodyBbox = bodyBlock.bbox;
-  const captionBbox = captionBlock.bbox;
+  const captionBbox = captionBlock?.bbox;
   if (!bodyBbox || !captionBbox) return false;
-
   return captionBbox[1] >= bodyBbox[3];
 }
 
 function getPostTableCaptionBlocks(tableBlock) {
-  return (tableBlock.blocks ?? []).filter(block =>
+  if (!tableBlock?.blocks) return [];
+  return tableBlock.blocks.filter(block =>
     block.type === BlockType.TABLE_CAPTION &&
     isPostTableNonContinuationCaption(tableBlock, block)
   );
@@ -222,8 +240,9 @@ function getPostTableCaptionBlocks(tableBlock) {
 
 function restorePostTableCaptionsAsText(pageInfo, tableBlock, captionBlocks) {
   if (!captionBlocks?.length) return;
+  const paraBlocks = pageInfo?.para_blocks;
+  if (!Array.isArray(paraBlocks)) return;
 
-  const paraBlocks = pageInfo?.para_blocks ?? [];
   const insertIdx = paraBlocks.indexOf(tableBlock);
   if (insertIdx === -1) return;
 
@@ -232,7 +251,6 @@ function restorePostTableCaptionsAsText(pageInfo, tableBlock, captionBlocks) {
     textBlock.type = BlockType.TEXT;
     return textBlock;
   });
-
   paraBlocks.splice(insertIdx + 1, 0, ...restoredBlocks);
 
   const captionSet = new Set(captionBlocks);
@@ -240,6 +258,7 @@ function restorePostTableCaptionsAsText(pageInfo, tableBlock, captionBlocks) {
 }
 
 function refreshTableStateMetrics(state) {
+  if (!state?.rows) return;
   const scan = scanRows(state.rows);
   state.row_effective_cols = scan.row_effective_cols;
   state.total_cols = scan.total_cols;
@@ -250,9 +269,12 @@ function refreshTableStateMetrics(state) {
   state.front_first_data_row_metrics = firstDataMetrics;
 }
 
+// ---------------------------------------------------------------------------
+// Table state construction
+// ---------------------------------------------------------------------------
+
 export function buildTableStateFromHtml(html, maxHeaderRows = MAX_HEADER_ROWS) {
   if (!html) return null;
-
   const soup = parseTable(html);
   const tbody = soup.querySelector('tbody') ?? soup.querySelector('table');
   const rows = Array.from(soup.querySelectorAll('tr'));
@@ -262,11 +284,7 @@ export function buildTableStateFromHtml(html, maxHeaderRows = MAX_HEADER_ROWS) {
   const [frontHeaderInfo, frontFirstDataRowMetrics] = buildFrontCache(rows, maxHeaderRows);
 
   return {
-    owner_block: {},
-    body_span: {},
-    soup,
-    tbody,
-    rows,
+    owner_block: {}, body_span: {}, soup, tbody, rows,
     total_cols: scan.total_cols,
     front_header_info: frontHeaderInfo,
     front_first_data_row_metrics: frontFirstDataRowMetrics,
@@ -280,22 +298,19 @@ export function buildTableStateFromHtml(html, maxHeaderRows = MAX_HEADER_ROWS) {
 function buildTableState(tableBlock, maxHeaderRows = MAX_HEADER_ROWS) {
   const bodySpan = findTableBodySpan(tableBlock);
   if (!bodySpan) return null;
-
   const html = bodySpan.html ?? '';
   if (!html) return null;
 
   const soup = parseTable(html);
   const tbody = soup.querySelector('tbody') ?? soup.querySelector('table');
   const rows = Array.from(soup.querySelectorAll('tr'));
+  if (!rows.length) return null;
+
   const scan = scanRows(rows);
   const [frontHeaderInfo, frontFirstDataRowMetrics] = buildFrontCache(rows, maxHeaderRows);
 
   return {
-    owner_block: tableBlock,
-    body_span: bodySpan,
-    soup,
-    tbody,
-    rows,
+    owner_block: tableBlock, body_span: bodySpan, soup, tbody, rows,
     total_cols: scan.total_cols,
     front_header_info: frontHeaderInfo,
     front_first_data_row_metrics: frontFirstDataRowMetrics,
@@ -314,6 +329,7 @@ function getOrCreateTableState(tableBlock, stateCache, maxHeaderRows = MAX_HEADE
 }
 
 function serializeTableStateHtml(state) {
+  if (!state?.body_span) return;
   state.body_span.html = tableToString(state.soup);
   state.dirty = false;
 }
@@ -323,32 +339,27 @@ function serializeTableStateHtml(state) {
 // ---------------------------------------------------------------------------
 
 export function calculateTableTotalColumns(doc) {
+  if (!doc) return 0;
   const rows = Array.from(doc.querySelectorAll('tr'));
   return rows.length ? scanRows(rows).total_cols : 0;
 }
 
-function buildTableOccupiedMatrix(doc) {
-  const rows = Array.from(doc.querySelectorAll('tr'));
-  if (!rows.length) return {};
-  const scan = scanRows(rows);
-  const matrix = {};
-  scan.row_effective_cols.forEach((cols, idx) => {
-    matrix[idx] = cols;
-  });
-  return matrix;
-}
-
 export function calculateRowEffectiveColumns(doc, rowIdx) {
-  const matrix = buildTableOccupiedMatrix(doc);
-  return matrix[rowIdx] ?? 0;
+  if (!doc) return 0;
+  const rows = Array.from(doc.querySelectorAll('tr'));
+  if (!rows.length) return 0;
+  const scan = scanRows(rows);
+  return scan.row_effective_cols[rowIdx] ?? 0;
 }
 
 export function calculateRowColumns(row) {
+  if (!row) return 0;
   return Array.from(row.querySelectorAll('td, th'))
     .reduce((sum, cell) => sum + parseInt(cell.getAttribute('colspan') ?? '1', 10), 0);
 }
 
 export function calculateVisualColumns(row) {
+  if (!row) return 0;
   return row.querySelectorAll('td, th').length;
 }
 
@@ -359,7 +370,6 @@ function scanRowVisualSources(rows, targetRowIndex) {
 
   const occupied = new Map();
   let totalCols = 0;
-
   const getOccupiedRow = (rowIdx) => {
     if (!occupied.has(rowIdx)) occupied.set(rowIdx, new Map());
     return occupied.get(rowIdx);
@@ -376,15 +386,13 @@ function scanRowVisualSources(rows, targetRowIndex) {
       const rowspan = parseInt(cell.getAttribute('rowspan') ?? '1', 10);
       const marker = [rIdx, cellIdx];
       for (let ro = 0; ro < rowspan; ro++) {
-        const targetIdx = rIdx + ro;
-        const occ = getOccupiedRow(targetIdx);
+        const occ = getOccupiedRow(rIdx + ro);
         for (let c = colIdx; c < colIdx + colspan; c++) occ.set(c, marker);
       }
       colIdx += colspan;
       if (colIdx > totalCols) totalCols = colIdx;
     }
   }
-
   return [occupied.get(idx) ?? new Map(), totalCols];
 }
 
@@ -401,32 +409,26 @@ function buildVisualColMapping(rows, targetRowIndex) {
   for (const cell of targetCells) {
     while (targetOccupied.has(colIdx) && targetOccupied.get(colIdx)[0] < idx) colIdx += 1;
     mapping.push(colIdx);
-    const colspan = parseInt(cell.getAttribute('colspan') ?? '1', 10);
-    colIdx += colspan;
+    colIdx += parseInt(cell.getAttribute('colspan') ?? '1', 10);
   }
-
   return mapping;
 }
 
 function calculateRowRenderedSegments(rows, targetRowIndex) {
+  if (!rows || !rows.length) return 0;
   const [targetOccupied, totalCols] = scanRowVisualSources(rows, targetRowIndex);
   if (!totalCols) return 0;
 
   let segmentCount = 0;
   let previousMarker = null;
-
   for (let colIdx = 0; colIdx < totalCols; colIdx++) {
     const marker = targetOccupied.get(colIdx) ?? null;
-    if (!marker) {
-      previousMarker = null;
-      continue;
-    }
+    if (!marker) { previousMarker = null; continue; }
     if (!previousMarker || marker[0] !== previousMarker[0] || marker[1] !== previousMarker[1]) {
       segmentCount += 1;
       previousMarker = marker;
     }
   }
-
   return segmentCount;
 }
 
@@ -435,6 +437,7 @@ function calculateRowRenderedSegments(rows, targetRowIndex) {
 // ---------------------------------------------------------------------------
 
 export function detectTableHeaders(state1, state2, maxHeaderRows = MAX_HEADER_ROWS) {
+  if (!state1?.front_header_info || !state2?.front_header_info) return [0, false, []];
   const frontRows1 = state1.front_header_info.slice(0, maxHeaderRows);
   const frontRows2 = state2.front_header_info.slice(0, maxHeaderRows);
   const minRows = Math.min(frontRows1.length, frontRows2.length, maxHeaderRows);
@@ -453,7 +456,6 @@ export function detectTableHeaders(state1, state2, maxHeaderRows = MAX_HEADER_RO
       arrayEqual(row1.rowspans, row2.rowspans) &&
       arrayEqual(row1.normalized_texts, row2.normalized_texts)
     );
-
     if (structureMatch) {
       headerRows += 1;
       headerTexts.push([...row1.display_texts]);
@@ -469,7 +471,6 @@ export function detectTableHeaders(state1, state2, maxHeaderRows = MAX_HEADER_RO
     headersMatch = visual[1];
     headerTexts.push(...visual[2]);
   }
-
   return [headerRows, headersMatch, headerTexts];
 }
 
@@ -485,10 +486,7 @@ function detectTableHeadersVisual(state1, state2, maxHeaderRows = MAX_HEADER_ROW
   for (let rowIdx = 0; rowIdx < minRows; rowIdx++) {
     const row1 = frontRows1[rowIdx];
     const row2 = frontRows2[rowIdx];
-    if (
-      row1.effective_cols === row2.effective_cols &&
-      arrayEqual(row1.normalized_texts, row2.normalized_texts)
-    ) {
+    if (row1.effective_cols === row2.effective_cols && arrayEqual(row1.normalized_texts, row2.normalized_texts)) {
       headerRows += 1;
       headerTexts.push([...row1.display_texts]);
     } else {
@@ -496,20 +494,17 @@ function detectTableHeadersVisual(state1, state2, maxHeaderRows = MAX_HEADER_ROW
       break;
     }
   }
-
   if (headerRows === 0) headersMatch = false;
   return [headerRows, headersMatch, headerTexts];
 }
 
 function expandHeaderCountByRowspan(rows, headerCount) {
-  if (headerCount <= 0 || !rows.length) return headerCount;
-
+  if (headerCount <= 0 || !rows?.length) return headerCount;
   let expandedHeaderCount = Math.min(headerCount, rows.length);
   let rowIdx = 0;
 
   while (rowIdx < expandedHeaderCount) {
-    const row = rows[rowIdx];
-    for (const cell of row.querySelectorAll('td, th')) {
+    for (const cell of rows[rowIdx].querySelectorAll('td, th')) {
       const rowspan = parseInt(cell.getAttribute('rowspan') ?? '1', 10);
       if (rowspan > 1) {
         expandedHeaderCount = Math.max(expandedHeaderCount, rowIdx + rowspan);
@@ -518,21 +513,22 @@ function expandHeaderCountByRowspan(rows, headerCount) {
     }
     rowIdx += 1;
   }
-
   return expandedHeaderCount;
 }
 
-export function canMergeByStructure(currentState, previousState, currentBbox = null, previousBbox = null) {
-  if (currentBbox && previousBbox) {
-    const [x0t1,,x1t1] = currentBbox;
-    const [x0t2,,x1t2] = previousBbox;
-    const table1Width = x1t1 - x0t1;
-    const table2Width = x1t2 - x0t2;
-    if (table1Width > 0 && table2Width > 0) {
-      if (Math.abs(table1Width - table2Width) / Math.min(table1Width, table2Width) >= 0.1) return false;
-    }
-  }
+/** Checks if two tables have compatible widths for merging. */
+function areTableWidthsCompatible(bbox1, bbox2) {
+  if (!bbox1 || !bbox2) return true;
+  const [x0t1, , x1t1] = bbox1;
+  const [x0t2, , x1t2] = bbox2;
+  const width1 = x1t1 - x0t1;
+  const width2 = x1t2 - x0t2;
+  if (width1 <= 0 || width2 <= 0) return true;
+  return Math.abs(width1 - width2) / Math.min(width1, width2) < WIDTH_RATIO_THRESHOLD;
+}
 
+export function canMergeByStructure(currentState, previousState, currentBbox = null, previousBbox = null) {
+  if (!areTableWidthsCompatible(currentBbox, previousBbox)) return false;
   if (previousState.total_cols === currentState.total_cols) return true;
   return checkRowsMatch(previousState, currentState);
 }
@@ -560,13 +556,7 @@ export function canMergeTables(currentState, previousState) {
     return false;
   }
 
-  const [x0t1,,x1t1] = currentTableBlock.bbox;
-  const [x0t2,,x1t2] = previousTableBlock.bbox;
-  const table1Width = x1t1 - x0t1;
-  const table2Width = x1t2 - x0t2;
-
-  if (Math.abs(table1Width - table2Width) / Math.min(table1Width, table2Width) >= 0.1) return false;
-
+  if (!areTableWidthsCompatible(currentTableBlock.bbox, previousTableBlock.bbox)) return false;
   if (previousState.total_cols === currentState.total_cols) return true;
   return checkRowsMatch(previousState, currentState);
 }
@@ -590,71 +580,74 @@ export function checkRowsMatch(previousState, currentState) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Colspan adjustment helpers
+// ---------------------------------------------------------------------------
+
 function checkRowColumnsMatch(row1, row2) {
+  if (!row1 || !row2) return false;
   const cells1 = Array.from(row1.querySelectorAll('td, th'));
   const cells2 = Array.from(row2.querySelectorAll('td, th'));
   if (cells1.length !== cells2.length) return false;
   for (let i = 0; i < cells1.length; i++) {
-    const cs1 = parseInt(cells1[i].getAttribute('colspan') ?? '1', 10);
-    const cs2 = parseInt(cells2[i].getAttribute('colspan') ?? '1', 10);
-    if (cs1 !== cs2) return false;
+    if (parseInt(cells1[i].getAttribute('colspan') ?? '1', 10) !== parseInt(cells2[i].getAttribute('colspan') ?? '1', 10)) return false;
   }
   return true;
 }
 
-function adjustTableRowsColspan(
-  rows,
-  startIdx,
-  endIdx,
-  rowEffectiveCols,
-  referenceStructure,
-  referenceVisualCols,
-  targetCols,
-  matchReferenceRow,
-) {
-  for (let rowIdx = startIdx; rowIdx < endIdx; rowIdx++) {
-    const row = rows[rowIdx];
-    const cells = Array.from(row.querySelectorAll('td, th'));
-    if (!cells.length) continue;
+/** Applies reference colspan structure to a single row if it matches the reference visual layout. */
+function applyColspanToRow(row, effectiveCols, referenceStructure, referenceVisualCols, targetCols, matchReferenceRow) {
+  const cells = Array.from(row.querySelectorAll('td, th'));
+  if (!cells.length) return;
 
-    const currentRowEffectiveCols = rowEffectiveCols[rowIdx] ?? 0;
-    const currentRowCols = calculateRowColumns(row);
+  const currentRowCols = calculateRowColumns(row);
+  if ((effectiveCols ?? 0) >= targetCols || currentRowCols >= targetCols) return;
 
-    if (currentRowEffectiveCols >= targetCols || currentRowCols >= targetCols) continue;
-
-    if (calculateVisualColumns(row) === referenceVisualCols) {
-      if (cells.length === referenceStructure.length && checkRowColumnsMatch(row, matchReferenceRow)) {
-        for (let cellIdx = 0; cellIdx < cells.length; cellIdx++) {
-          const referenceColspan = referenceStructure[cellIdx];
-          if (referenceColspan > 1) {
-            cells[cellIdx].setAttribute('colspan', String(referenceColspan));
-          } else {
-            cells[cellIdx].removeAttribute('colspan');
-          }
+  if (calculateVisualColumns(row) === referenceVisualCols) {
+    if (cells.length === referenceStructure.length && checkRowColumnsMatch(row, matchReferenceRow)) {
+      for (let cellIdx = 0; cellIdx < cells.length; cellIdx++) {
+        const refColspan = referenceStructure[cellIdx];
+        if (refColspan > 1) {
+          cells[cellIdx].setAttribute('colspan', String(refColspan));
+        } else {
+          cells[cellIdx].removeAttribute('colspan');
         }
       }
-    } else {
-      const colsDiff = targetCols - currentRowEffectiveCols;
-      if (colsDiff > 0) {
-        const lastCell = cells[cells.length - 1];
-        const currentSpan = parseInt(lastCell.getAttribute('colspan') ?? '1', 10);
-        lastCell.setAttribute('colspan', String(currentSpan + colsDiff));
-      }
+    }
+  } else {
+    const colsDiff = targetCols - (effectiveCols ?? 0);
+    if (colsDiff > 0) {
+      const lastCell = cells[cells.length - 1];
+      const currentSpan = parseInt(lastCell.getAttribute('colspan') ?? '1', 10);
+      lastCell.setAttribute('colspan', String(currentSpan + colsDiff));
     }
   }
 }
 
+function adjustTableRowsColspan(rows, startIdx, endIdx, rowEffectiveCols, referenceStructure, referenceVisualCols, targetCols, matchReferenceRow) {
+  for (let rowIdx = startIdx; rowIdx < endIdx; rowIdx++) {
+    applyColspanToRow(rows[rowIdx], rowEffectiveCols[rowIdx], referenceStructure, referenceVisualCols, targetCols, matchReferenceRow);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cell merge helpers
+// ---------------------------------------------------------------------------
+
 function cellHasSemanticContent(cell) {
+  if (!cell) return false;
   if ((cell.textContent ?? '').trim()) return true;
   return !!cell.querySelector('img, svg, math, eq, table, figure, object, embed, canvas');
 }
 
 function rowHasSemanticContent(row) {
+  if (!row) return false;
   return Array.from(row.querySelectorAll('td, th')).some(cell => cellHasSemanticContent(cell));
 }
 
 function insertCellBeforeVisualColumn(rows, targetRowIndex, startVcol, cell) {
   const targetRow = rows[targetRowIndex];
+  if (!targetRow) return;
   const targetCells = Array.from(targetRow.querySelectorAll('td, th'));
   const targetVcolMap = buildVisualColMapping(rows, targetRowIndex);
 
@@ -664,7 +657,6 @@ function insertCellBeforeVisualColumn(rows, targetRowIndex, startVcol, cell) {
       return;
     }
   }
-
   targetRow.appendChild(cell);
 }
 
@@ -672,14 +664,12 @@ function carryRowspanStructureToNextRow(rows, rowIdx) {
   const nextRowIdx = rowIdx + 1;
   if (nextRowIdx >= rows.length) return;
 
-  const currentRow = rows[rowIdx];
-  const currentCells = Array.from(currentRow.querySelectorAll('td, th'));
+  const currentCells = Array.from(rows[rowIdx].querySelectorAll('td, th'));
   const currentVcolMap = buildVisualColMapping(rows, rowIdx);
   const carriedCells = [];
 
   for (let i = 0; i < currentCells.length; i++) {
     const cell = currentCells[i];
-    const startVcol = currentVcolMap[i];
     const rowspan = parseInt(cell.getAttribute('rowspan') ?? '1', 10);
     if (rowspan <= 1 || cellHasSemanticContent(cell)) continue;
 
@@ -690,7 +680,7 @@ function carryRowspanStructureToNextRow(rows, rowIdx) {
     } else {
       carriedCell.removeAttribute('rowspan');
     }
-    carriedCells.push([startVcol, carriedCell]);
+    carriedCells.push([currentVcolMap[i], carriedCell]);
   }
 
   carriedCells.sort((a, b) => b[0] - a[0]);
@@ -699,38 +689,19 @@ function carryRowspanStructureToNextRow(rows, rowIdx) {
   }
 }
 
-function applyCellMerge(previousState, currentState, headerCount) {
-  const cellMerge = currentState.owner_block?.cell_merge;
-  if (!cellMerge) return;
-
-  const rows2 = currentState.rows;
-  if (headerCount >= rows2.length) return;
-  if (!previousState.rows.length) return;
-
-  const firstDataRow = rows2[headerCount];
-  const lastRow = previousState.rows[previousState.rows.length - 1];
-
-  const cells1 = Array.from(lastRow.querySelectorAll('td, th'));
-  const cells2 = Array.from(firstDataRow.querySelectorAll('td, th'));
-
-  const lastRowIdx = previousState.rows.length - 1;
-  const vcolMap1 = buildVisualColMapping(previousState.rows, lastRowIdx);
-  const vcolMap2 = buildVisualColMapping(rows2, headerCount);
-
-  const vcolToCell1 = new Map();
-  for (let ci = 0; ci < vcolMap1.length; ci++) {
-    const startVcol = vcolMap1[ci];
-    const colspan = parseInt(cells1[ci].getAttribute('colspan') ?? '1', 10);
-    for (let c = startVcol; c < startVcol + colspan; c++) vcolToCell1.set(c, ci);
+/** Builds a visual-column-to-cell-index mapping for a row's cells. */
+function buildVcolToCellMap(cells, vcolMap) {
+  const map = new Map();
+  for (let ci = 0; ci < vcolMap.length; ci++) {
+    const startVcol = vcolMap[ci];
+    const colspan = parseInt(cells[ci].getAttribute('colspan') ?? '1', 10);
+    for (let c = startVcol; c < startVcol + colspan; c++) map.set(c, ci);
   }
+  return map;
+}
 
-  const vcolToCell2 = new Map();
-  for (let ci = 0; ci < vcolMap2.length; ci++) {
-    const startVcol = vcolMap2[ci];
-    const colspan = parseInt(cells2[ci].getAttribute('colspan') ?? '1', 10);
-    for (let c = startVcol; c < startVcol + colspan; c++) vcolToCell2.set(c, ci);
-  }
-
+/** Transfers cell content from source cells to destination cells based on cell_merge flags. */
+function transferCellContent(cells1, cells2, vcolToCell1, vcolToCell2, cellMerge) {
   const transferredPairs = new Set();
   for (let vi = 0; vi < cellMerge.length; vi++) {
     if (cellMerge[vi] !== 1) continue;
@@ -739,14 +710,14 @@ function applyCellMerge(previousState, currentState, headerCount) {
     if (ci1 == null || ci2 == null) continue;
     const pairKey = `${ci1},${ci2}`;
     if (transferredPairs.has(pairKey)) continue;
-
-    const srcCell = cells2[ci2];
-    const dstCell = cells1[ci1];
-    const children = Array.from(srcCell.childNodes);
-    for (const child of children) dstCell.appendChild(child);
+    const children = Array.from(cells2[ci2].childNodes);
+    for (const child of children) cells1[ci1].appendChild(child);
     transferredPairs.add(pairKey);
   }
+}
 
+/** Clears content from source cells that were merged. */
+function clearMergedSourceCells(cells2, vcolToCell2, cellMerge) {
   const clearedCi2 = new Set();
   for (let vi = 0; vi < cellMerge.length; vi++) {
     if (cellMerge[vi] !== 1) continue;
@@ -756,6 +727,27 @@ function applyCellMerge(previousState, currentState, headerCount) {
     while (cell.firstChild) cell.removeChild(cell.firstChild);
     clearedCi2.add(ci2);
   }
+}
+
+function applyCellMerge(previousState, currentState, headerCount) {
+  const cellMerge = currentState.owner_block?.cell_merge;
+  if (!cellMerge) return;
+  const rows2 = currentState.rows;
+  if (headerCount >= rows2.length || !previousState.rows?.length) return;
+
+  const firstDataRow = rows2[headerCount];
+  const lastRow = previousState.rows[previousState.rows.length - 1];
+  const cells1 = Array.from(lastRow.querySelectorAll('td, th'));
+  const cells2 = Array.from(firstDataRow.querySelectorAll('td, th'));
+
+  const lastRowIdx = previousState.rows.length - 1;
+  const vcolMap1 = buildVisualColMapping(previousState.rows, lastRowIdx);
+  const vcolMap2 = buildVisualColMapping(rows2, headerCount);
+  const vcolToCell1 = buildVcolToCellMap(cells1, vcolMap1);
+  const vcolToCell2 = buildVcolToCellMap(cells2, vcolMap2);
+
+  transferCellContent(cells1, cells2, vcolToCell1, vcolToCell2, cellMerge);
+  clearMergedSourceCells(cells2, vcolToCell2, cellMerge);
 
   if (!rowHasSemanticContent(firstDataRow)) {
     carryRowspanStructureToNextRow(rows2, headerCount);
@@ -769,58 +761,33 @@ function applyCellMerge(previousState, currentState, headerCount) {
 // Merge execution
 // ---------------------------------------------------------------------------
 
-export function performTableMerge(previousState, currentState, previousTableBlock, waitMergeTableFootnotes) {
-  let [headerCount] = detectTableHeaders(previousState, currentState);
-  headerCount = expandHeaderCountByRowspan(currentState.rows, headerCount);
-
+/** Adjusts colspan differences between two tables before merging. Returns true if previous was adjusted. */
+function adjustColspanForMerge(previousState, currentState, headerCount) {
   const rows1 = previousState.rows;
   const rows2 = currentState.rows;
+  if (!rows1.length || !rows2.length || headerCount >= rows2.length) return false;
 
-  let previousAdjusted = false;
+  const lastRow1 = rows1[rows1.length - 1];
+  const firstDataRow2 = rows2[headerCount];
+  const tableCols1 = previousState.total_cols;
+  const tableCols2 = currentState.total_cols;
 
-  if (rows1.length && rows2.length && headerCount < rows2.length) {
-    const lastRow1 = rows1[rows1.length - 1];
-    const firstDataRow2 = rows2[headerCount];
-    const tableCols1 = previousState.total_cols;
-    const tableCols2 = currentState.total_cols;
-
-    if (tableCols1 > tableCols2) {
-      const referenceStructure = Array.from(lastRow1.querySelectorAll('td, th'))
-        .map(cell => parseInt(cell.getAttribute('colspan') ?? '1', 10));
-      const referenceVisualCols = calculateVisualColumns(lastRow1);
-      adjustTableRowsColspan(
-        rows2,
-        headerCount,
-        rows2.length,
-        currentState.row_effective_cols,
-        referenceStructure,
-        referenceVisualCols,
-        tableCols1,
-        firstDataRow2,
-      );
-    } else if (tableCols2 > tableCols1) {
-      const referenceStructure = Array.from(firstDataRow2.querySelectorAll('td, th'))
-        .map(cell => parseInt(cell.getAttribute('colspan') ?? '1', 10));
-      const referenceVisualCols = calculateVisualColumns(firstDataRow2);
-      adjustTableRowsColspan(
-        rows1,
-        0,
-        rows1.length,
-        previousState.row_effective_cols,
-        referenceStructure,
-        referenceVisualCols,
-        tableCols2,
-        lastRow1,
-      );
-      previousAdjusted = true;
-    }
+  if (tableCols1 > tableCols2) {
+    const refStructure = Array.from(lastRow1.querySelectorAll('td, th')).map(c => parseInt(c.getAttribute('colspan') ?? '1', 10));
+    adjustTableRowsColspan(rows2, headerCount, rows2.length, currentState.row_effective_cols, refStructure, calculateVisualColumns(lastRow1), tableCols1, firstDataRow2);
+    return false;
   }
+  if (tableCols2 > tableCols1) {
+    const refStructure = Array.from(firstDataRow2.querySelectorAll('td, th')).map(c => parseInt(c.getAttribute('colspan') ?? '1', 10));
+    adjustTableRowsColspan(rows1, 0, rows1.length, previousState.row_effective_cols, refStructure, calculateVisualColumns(firstDataRow2), tableCols2, lastRow1);
+    return true;
+  }
+  return false;
+}
 
-  if (previousAdjusted) refreshTableStateMetrics(previousState);
-
-  applyCellMerge(previousState, currentState, headerCount);
-
-  const appendedRows = rows2.slice(headerCount);
+/** Appends data rows from the current table into the previous table's DOM. */
+function appendRowsToPreviousTable(previousState, currentState, headerCount) {
+  const appendedRows = currentState.rows.slice(headerCount);
   const appendStartIdx = previousState.rows.length;
   const mergedRows = [];
 
@@ -831,15 +798,10 @@ export function performTableMerge(previousState, currentState, previousTableBloc
       mergedRows.push(row);
     }
   }
-
   previousState.rows.push(...mergedRows);
 
   if (mergedRows.length) {
-    const appendedScan = scanRows(
-      mergedRows,
-      previousState.tail_occupied,
-      appendStartIdx,
-    );
+    const appendedScan = scanRows(mergedRows, previousState.tail_occupied, appendStartIdx);
     previousState.row_effective_cols.push(...appendedScan.row_effective_cols);
     previousState.total_cols = Math.max(previousState.total_cols, appendedScan.total_cols);
     if (appendedScan.last_nonempty_row_metrics) {
@@ -847,30 +809,42 @@ export function performTableMerge(previousState, currentState, previousTableBloc
     }
     previousState.tail_occupied = appendedScan.tail_occupied;
   }
+}
 
-  previousTableBlock.blocks = (previousTableBlock.blocks ?? [])
-    .filter(block => block.type !== BlockType.TABLE_FOOTNOTE);
+export function performTableMerge(previousState, currentState, previousTableBlock, waitMergeTableFootnotes) {
+  if (!previousState || !currentState) return;
 
-  for (const tableFootnote of waitMergeTableFootnotes) {
-    const tempFootnote = { ...tableFootnote, [SplitFlag.CROSS_PAGE]: true };
-    previousTableBlock.blocks.push(tempFootnote);
+  let [headerCount] = detectTableHeaders(previousState, currentState);
+  headerCount = expandHeaderCountByRowspan(currentState.rows, headerCount);
+
+  const previousAdjusted = adjustColspanForMerge(previousState, currentState, headerCount);
+  if (previousAdjusted) refreshTableStateMetrics(previousState);
+
+  applyCellMerge(previousState, currentState, headerCount);
+  appendRowsToPreviousTable(previousState, currentState, headerCount);
+
+  previousTableBlock.blocks = (previousTableBlock.blocks ?? []).filter(block => block.type !== BlockType.TABLE_FOOTNOTE);
+  for (const tableFootnote of (waitMergeTableFootnotes ?? [])) {
+    previousTableBlock.blocks.push({ ...tableFootnote, [SplitFlag.CROSS_PAGE]: true });
   }
-
   previousState.dirty = true;
 }
 
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
 export function mergeTable(pageInfoList) {
+  if (!Array.isArray(pageInfoList) || pageInfoList.length < 2) return;
+
   const stateCache = new Map();
   const mergedAwayBlocks = new Set();
 
-  for (let pageIdx = pageInfoList.length - 1; pageIdx >= 0; pageIdx--) {
-    if (pageIdx === 0) continue;
-
+  for (let pageIdx = pageInfoList.length - 1; pageIdx >= 1; pageIdx--) {
     const pageInfo = pageInfoList[pageIdx];
     const previousPageInfo = pageInfoList[pageIdx - 1];
 
-    if (!(pageInfo?.para_blocks?.length && pageInfo.para_blocks[0].type === BlockType.TABLE)) continue;
-    if (!(previousPageInfo?.para_blocks?.length && previousPageInfo.para_blocks[previousPageInfo.para_blocks.length - 1].type === BlockType.TABLE)) continue;
+    if (!isFirstBlockTable(pageInfo) || !isLastBlockTable(previousPageInfo)) continue;
 
     const currentTableBlock = pageInfo.para_blocks[0];
     const previousTableBlock = previousPageInfo.para_blocks[previousPageInfo.para_blocks.length - 1];
@@ -880,23 +854,12 @@ export function mergeTable(pageInfoList) {
     if (!currentState || !previousState) continue;
 
     const postTableCaptionBlocks = getPostTableCaptionBlocks(currentTableBlock);
-    const waitMergeTableFootnotes = (currentTableBlock.blocks ?? [])
-      .filter(block => block.type === BlockType.TABLE_FOOTNOTE);
+    const waitMergeTableFootnotes = (currentTableBlock.blocks ?? []).filter(block => block.type === BlockType.TABLE_FOOTNOTE);
 
     if (!canMergeTables(currentState, previousState)) continue;
 
-    performTableMerge(
-      previousState,
-      currentState,
-      previousTableBlock,
-      waitMergeTableFootnotes,
-    );
-
-    restorePostTableCaptionsAsText(
-      pageInfo,
-      currentTableBlock,
-      postTableCaptionBlocks,
-    );
+    performTableMerge(previousState, currentState, previousTableBlock, waitMergeTableFootnotes);
+    restorePostTableCaptionsAsText(pageInfo, currentTableBlock, postTableCaptionBlocks);
 
     mergedAwayBlocks.add(currentTableBlock);
     for (const block of currentTableBlock.blocks ?? []) {
@@ -913,13 +876,20 @@ export function mergeTable(pageInfoList) {
 }
 
 // ---------------------------------------------------------------------------
-// Utils
+// Helpers
 // ---------------------------------------------------------------------------
+
+function isFirstBlockTable(pageInfo) {
+  return !!(pageInfo?.para_blocks?.length && pageInfo.para_blocks[0].type === BlockType.TABLE);
+}
+
+function isLastBlockTable(pageInfo) {
+  return !!(pageInfo?.para_blocks?.length && pageInfo.para_blocks[pageInfo.para_blocks.length - 1].type === BlockType.TABLE);
+}
 
 function arrayEqual(a, b) {
   if (a === b) return true;
-  if (!a || !b) return false;
-  if (a.length !== b.length) return false;
+  if (!a || !b || a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i] !== b[i]) return false;
   }

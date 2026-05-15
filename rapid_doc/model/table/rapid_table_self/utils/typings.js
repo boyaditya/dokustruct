@@ -1,6 +1,4 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: rapid_table_self/utils/typings.py → typings.js
-// Python Enum + dataclass → JS Object.freeze + classes
 
 /** @enum {string} */
 export const EngineType = Object.freeze({
@@ -73,14 +71,6 @@ export function normalizeTableModelType(modelType) {
  * Output from RapidTable inference.
  */
 export class RapidTableOutput {
-  /**
-   * @param {object} [params]
-   * @param {ImageData[]} [params.imgs]
-   * @param {string[]} [params.predHtmls]
-   * @param {number[][]} [params.cellBboxes]
-   * @param {number[][]} [params.logicPoints]
-   * @param {number} [params.elapse]
-   */
   constructor({
     imgs = [],
     predHtmls = [],

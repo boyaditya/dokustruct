@@ -11,6 +11,7 @@ const TARGET_SIZE_MAP = {
   [ModelType.PP_FORMULANET_PLUS_M]: [384, 384],
   [ModelType.PP_FORMULANET_PLUS_S]: [384, 384],
 };
+let warnedMissingFastTokenizer = false;
 
 /**
  * Factory that creates the correct model handler given config + session.
@@ -37,10 +38,16 @@ export class ModelHandler {
     if (session.haveKey && session.haveKey("fast_tokenizer_file")) {
       tokenizerJson = metaMap["fast_tokenizer_file"];
     } else {
-      console.warn('[RapidFormula] "fast_tokenizer_file" not found in model metadata; attempting fallback.');
+      if (!warnedMissingFastTokenizer) {
+        console.warn('[RapidFormula] "fast_tokenizer_file" not found in model metadata; using fallback vocab.');
+        warnedMissingFastTokenizer = true;
+      }
       try {
         const vocabUrl = '/models/formula/formula_vocab.json';
-        tokenizerJson = await fetch(vocabUrl).then(r => r.text());
+        const response = await fetch(vocabUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        tokenizerJson = await response.text();
+        if (!tokenizerJson.trim()) throw new Error('empty tokenizer file');
       } catch (err) {
         console.error('[RapidFormula] Failed to load fallback tokenizer:', err.message);
       }

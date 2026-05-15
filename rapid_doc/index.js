@@ -98,7 +98,7 @@ export { detectLang, removeInvalidSurrogates } from './utils/language.js';
 // ---------------------------------------------------------------------------
 
 export { downloadFile, DownloadFile, DownloadFileInput, CPU_MODEL } from './utils/download_file.js';
-export { UI_MODEL_URL_MAP, downloadModel } from './utils/model_url_map.js';
+export { UI_MODEL_URL_MAP, downloadModel, getRequiredModels } from './utils/model_url_map.js';
 export { getDevice, setConfig, readConfig } from './utils/config_reader.js';
 export { makeHashable, bytesMd5, strMd5, strSha256 } from './utils/hash_utils.js';
 

@@ -67,6 +67,7 @@ export class OrtInferSession extends InferSession {
     /** @type {ort.InferenceSession|null} */
     this.session = null;
     this.logger = logger;
+    this.useWebGpu = false;
   }
 
   // ── Factory ────────────────────────────────────────────────────────────────
@@ -103,9 +104,10 @@ export class OrtInferSession extends InferSession {
     // ── Execution providers ─────────────────────────────────────────────────
     const providerCfg = new ProviderConfig(engineCfg);
     const epList = providerCfg.getEpList();
+    instance.useWebGpu = epList.some(ep => (typeof ep === 'string' ? ep : ep?.name) === 'webgpu');
 
     // ── Create session ──────────────────────────────────────────────────────
-    await configureOrtWasmRuntime({ numThreads: 4, useWebGpu: true });
+    await configureOrtWasmRuntime({ numThreads: 4, useWebGpu: instance.useWebGpu });
     try {
       instance.session = await ort.InferenceSession.create(modelBuffer, {
         ...sessOpts,
@@ -168,7 +170,7 @@ export class OrtInferSession extends InferSession {
    * Mirrors Python: __call__(input_content, scale_factor=None)
    *
    * @param {Float32Array}      inputContent  - Flat NCHW float32 tensor
-   * @param {Float32Array|null} [scaleFactor] - Optional [1, 2] scale tensor
+   * @param {Float32Array|null} [scaleFactor] - Optional [N, 2] scale tensor
    * @param {number[]|null}     [inputShape]  - [N, C, H, W] — required when
    *                                            scaleFactor is provided
    * @returns {Promise<ort.Tensor[]>} Output tensors in output-name order
@@ -181,17 +183,29 @@ export class OrtInferSession extends InferSession {
     if (scaleFactor !== null) {
       // Multi-input model (e.g. PicoDet with im_shape + scale_factor)
       const shape = inputShape ?? this._inferInputShape(inputContent, inputNames[0]);
+      const batch = Math.max(1, Number(shape?.[0]) || 1);
+      const expectedScaleLength = batch * 2;
+      if (scaleFactor.length !== expectedScaleLength) {
+        throw new ONNXRuntimeError(
+          `Invalid scale_factor length ${scaleFactor.length}; expected ${expectedScaleLength} for batch ${batch}.`,
+        );
+      }
 
       if (inputNames.includes('image')) {
         inputFeed['image'] = new ort.Tensor('float32', inputContent, shape);
       }
       if (inputNames.includes('scale_factor')) {
-        inputFeed['scale_factor'] = new ort.Tensor('float32', scaleFactor, [1, 2]);
+        inputFeed['scale_factor'] = new ort.Tensor('float32', scaleFactor, [batch, 2]);
       }
       if (inputNames.includes('im_shape')) {
         const h = shape[shape.length - 2];
         const w = shape[shape.length - 1];
-        inputFeed['im_shape'] = new ort.Tensor('float32', new Float32Array([h, w]), [1, 2]);
+        const imShape = new Float32Array(expectedScaleLength);
+        for (let i = 0; i < batch; i++) {
+          imShape[i * 2] = h;
+          imShape[i * 2 + 1] = w;
+        }
+        inputFeed['im_shape'] = new ort.Tensor('float32', imShape, [batch, 2]);
       }
     } else {
       // Single-input model (standard layout detection)
@@ -204,12 +218,12 @@ export class OrtInferSession extends InferSession {
     try {
       // GPU PIPELINE: Lock → Run → Release → Download (async overlap)
       // This pattern maximizes GPU utilization for batched layout detection
-      const releaseGpu = await acquireGlobalGpu();
+      const releaseGpu = this.useWebGpu ? await acquireGlobalGpu() : null;
       try {
         results = await this.session.run(inputFeed);
       } finally {
         // Release GPU immediately to allow next batch to start
-        releaseGpu();
+        releaseGpu?.();
       }
       
       // ── Download WebGPU Data & Build Response ───

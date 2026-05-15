@@ -38,6 +38,10 @@ function clearLayoutImageList(tableRes) {
   if (tableRes) delete tableRes.layout_image_list;
 }
 
+function isTableDebugEnabled() {
+  return typeof globalThis !== "undefined" && globalThis.__RAPIDDOC_DEBUG_TABLE__ === true;
+}
+
 async function yieldToBrowser() {
   await new Promise(resolve => setTimeout(resolve, 0));
 }
@@ -206,6 +210,7 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
     if (!langCropList.length) continue;
 
     const ocrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
+      det_db_thresh: ocrConfig?.["Det.det_db_thresh"] ?? ocrConfig?.det_db_thresh ?? 0.3,
       det_db_box_thresh: 0.3,
       lang,
       ocr_config: ocrConfig,
@@ -369,7 +374,7 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig) {
  * @returns {Promise<void>}
  */
 export async function processSingleTable(
-  tableResDict, pageDict, scale, atomModelManager, tableConfig, ocrConfig
+  tableResDict, pageDict, scale, atomModelManager, tableConfig, ocrConfig, orientationConfig = null
 ) {
   const tableForceOcr = tableConfig?.force_ocr ?? false;
   const skipTextInImage = tableConfig?.skip_text_in_image ?? true;
@@ -400,7 +405,7 @@ export async function processSingleTable(
   }
 
   const ocrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
-    det_db_thresh: 0.3,          // Lower binarization threshold (detect fainter text)
+    det_db_thresh: ocrConfigClean?.["Det.det_db_thresh"] ?? ocrConfigClean?.det_db_thresh ?? 0.3,
     det_db_box_thresh: 0.5,      // Lower box confidence threshold (detect more boxes)
     det_db_unclip_ratio: 1.6,    // Slightly tighter unclip (reduce box overlap)
     lang: _lang,
@@ -435,7 +440,10 @@ export async function processSingleTable(
   }
   if (!angles.length) {
     try {
-      const imgOrientationClsModel = await atomModelManager.getAtomModel(AtomicModel.ImgOrientationCls);
+      const imgOrientationClsModel = await atomModelManager.getAtomModel(
+        AtomicModel.ImgOrientationCls,
+        { orientation_config: orientationConfig }
+      );
       rotateLabel = await imgOrientationClsModel.predict(tableResDict.table_img, detRes);
     } catch (e) {
       // Orientation model unavailable or failed — keep rotateLabel = "0"
@@ -617,10 +625,12 @@ export async function runTableOcr(ocrModel, bgrImage, detRes, tableUseWordBox) {
 
   const ocrResListRaw = (Array.isArray(ocrResRawResult) && ocrResRawResult.length > 0) ? (ocrResRawResult[0] || []) : [];
 
-  console.log('[runTableOcr] OCR recognition result:', {
-    ocrResListRawLen: ocrResListRaw.length,
-    ocrResListRawSample: ocrResListRaw.slice(0, 2),
-  });
+  if (isTableDebugEnabled()) {
+    console.log('[runTableOcr] OCR recognition result:', {
+      ocrResListRawLen: ocrResListRaw.length,
+      ocrResListRawSample: ocrResListRaw.slice(0, 2),
+    });
+  }
 
   const ocrResult = [];
   for (let i = 0; i < recImgList.length; i++) {
@@ -649,12 +659,14 @@ export async function runTableOcr(ocrModel, bgrImage, detRes, tableUseWordBox) {
   }
   
   const finalResult = [ocrResult.map(r => r[0]), ocrResult.map(r => r[1]), ocrResult.map(r => r[2])];
-  console.log('[runTableOcr] Final result:', {
-    boxesLen: finalResult[0].length,
-    textsLen: finalResult[1].length,
-    scoresLen: finalResult[2].length,
-    textsSample: finalResult[1].slice(0, 5),
-  });
+  if (isTableDebugEnabled()) {
+    console.log('[runTableOcr] Final result:', {
+      boxesLen: finalResult[0].length,
+      textsLen: finalResult[1].length,
+      scoresLen: finalResult[2].length,
+      textsSample: finalResult[1].slice(0, 5),
+    });
+  }
   
   return finalResult;
 }

@@ -275,6 +275,98 @@ export async function imagesBytesToPdfBytes(imageBytes) {
   return pdfDoc.save();
 }
 
+function multiplyPdfMatrix(a, b) {
+  return [
+    a[0] * b[0] + a[2] * b[1],
+    a[1] * b[0] + a[3] * b[1],
+    a[0] * b[2] + a[2] * b[3],
+    a[1] * b[2] + a[3] * b[3],
+    a[0] * b[4] + a[2] * b[5] + a[4],
+    a[1] * b[4] + a[3] * b[5] + a[5],
+  ];
+}
+
+function transformPdfPoint(m, x, y) {
+  return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+}
+
+function imageBboxFromCtm(ctm, pageHeight) {
+  const points = [
+    transformPdfPoint(ctm, 0, 0),
+    transformPdfPoint(ctm, 1, 0),
+    transformPdfPoint(ctm, 1, 1),
+    transformPdfPoint(ctm, 0, 1),
+  ];
+  const xs = points.map(p => p[0]);
+  const ys = points.map(p => p[1]);
+  const x0 = Math.min(...xs);
+  const x1 = Math.max(...xs);
+  const y0 = Math.min(...ys);
+  const y1 = Math.max(...ys);
+  return [x0, pageHeight - y1, x1, pageHeight - y0].map(v => Math.round(v * 1000) / 1000);
+}
+
+async function resolvePdfjsImage(page, objId) {
+  if (!objId || !page?.objs) return null;
+  try {
+    const value = page.objs.get(objId);
+    if (value) return value;
+  } catch { /* wait via callback below */ }
+  try {
+    return await new Promise(resolve => page.objs.get(objId, resolve));
+  } catch {
+    return null;
+  }
+}
+
+function imageObjectToCanvas(imageObj) {
+  if (!imageObj) return null;
+  if (imageObj instanceof OffscreenCanvas) return imageObj;
+
+  const width = imageObj.width ?? imageObj.naturalWidth ?? imageObj.videoWidth ?? 0;
+  const height = imageObj.height ?? imageObj.naturalHeight ?? imageObj.videoHeight ?? 0;
+  if (!width || !height) return null;
+
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  if (typeof ImageBitmap !== 'undefined' && imageObj instanceof ImageBitmap) {
+    ctx.drawImage(imageObj, 0, 0);
+    return canvas;
+  }
+  if (typeof HTMLCanvasElement !== 'undefined' && imageObj instanceof HTMLCanvasElement) {
+    ctx.drawImage(imageObj, 0, 0);
+    return canvas;
+  }
+
+  const src = imageObj.data;
+  if (!src) return null;
+  const pixelCount = width * height;
+  const rgba = new Uint8ClampedArray(pixelCount * 4);
+  if (src.length >= pixelCount * 4) {
+    rgba.set(src.subarray ? src.subarray(0, pixelCount * 4) : src.slice(0, pixelCount * 4));
+  } else if (src.length >= pixelCount * 3) {
+    for (let i = 0, j = 0; i < pixelCount; i++, j += 3) {
+      rgba[i * 4] = src[j];
+      rgba[i * 4 + 1] = src[j + 1];
+      rgba[i * 4 + 2] = src[j + 2];
+      rgba[i * 4 + 3] = 255;
+    }
+  } else if (src.length >= pixelCount) {
+    for (let i = 0; i < pixelCount; i++) {
+      const v = src[i];
+      rgba[i * 4] = v;
+      rgba[i * 4 + 1] = v;
+      rgba[i * 4 + 2] = v;
+      rgba[i * 4 + 3] = 255;
+    }
+  } else {
+    return null;
+  }
+  ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
+  return canvas;
+}
+
 /**
  * Extract original embedded images from a PDF page.
  * PORTING NOTE: get_ori_image(page, ...) → getOriImage(page, ...)
@@ -287,10 +379,49 @@ export async function imagesBytesToPdfBytes(imageBytes) {
  * @param {import('pdfjs-dist').PDFPageProxy} _page
  * @returns {Promise<Array<object>>}
  */
-export async function getOriImage(_page) {
-  // pdfjs-dist does not provide low-level image bitmap extraction.
-  // See https://github.com/mozilla/pdf.js/issues/9643
-  return [];
+export async function getOriImage(page) {
+  if (!page?.getOperatorList) return [];
+  try {
+    const pdfjsLib = await getPdfjsLib();
+    const OPS = pdfjsLib.OPS ?? {};
+    const operatorList = await page.getOperatorList();
+    const viewport = page.getViewport({ scale: 1 });
+    const pageHeight = Math.ceil(viewport.height);
+    const stack = [];
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const images = [];
+    const isOp = (fn, name) => fn === OPS[name];
+
+    for (let i = 0; i < operatorList.fnArray.length; i++) {
+      const fn = operatorList.fnArray[i];
+      const args = operatorList.argsArray[i] ?? [];
+      if (isOp(fn, 'save')) {
+        stack.push(ctm.slice());
+      } else if (isOp(fn, 'restore')) {
+        ctm = stack.pop() ?? [1, 0, 0, 1, 0, 0];
+      } else if (isOp(fn, 'transform') && args.length >= 6) {
+        ctm = multiplyPdfMatrix(ctm, args.slice(0, 6).map(Number));
+      } else if (
+        isOp(fn, 'paintImageXObject') ||
+        isOp(fn, 'paintJpegXObject') ||
+        isOp(fn, 'paintInlineImageXObject')
+      ) {
+        const imageObj = isOp(fn, 'paintInlineImageXObject') ? args[0] : await resolvePdfjsImage(page, args[0]);
+        const canvas = imageObjectToCanvas(imageObj);
+        if (!canvas) continue;
+        images.push({
+          bbox: imageBboxFromCtm(ctm, pageHeight),
+          pil_image: canvas,
+          width: canvas.width,
+          height: canvas.height,
+        });
+      }
+    }
+    return images;
+  } catch (err) {
+    console.warn('[getOriImage] pdf.js image extraction failed:', err?.message ?? err);
+    return [];
+  }
 }
 
 /**

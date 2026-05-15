@@ -40,6 +40,18 @@ import { getLogger } from './utils/logger.js';
 
 const logger = getLogger('RapidLayout');
 
+function isBatchInferenceFallbackError(err) {
+  const message = String(err?.message ?? err ?? '').toLowerCase();
+  return (
+    message.includes('scale_factor') ||
+    message.includes('tensor') ||
+    message.includes('shape') ||
+    message.includes('dimension') ||
+    message.includes('data length') ||
+    message.includes('inference failed')
+  );
+}
+
 export class RapidLayout {
   /** @private — use static create() */
   constructor() {
@@ -122,7 +134,18 @@ export class RapidLayout {
 
     for (let i = 0; i < total; i += batchSize) {
       const batch = imgs.slice(i, i + batchSize);
-      const results = await this.modelHandler.call(batch);
+      let results;
+      try {
+        results = await this.modelHandler.call(batch);
+      } catch (err) {
+        if (batch.length <= 1 || !isBatchInferenceFallbackError(err)) throw err;
+        logger.warn(`Batch layout inference failed for ${batch.length} pages; retrying one page at a time: ${err.message}`);
+        results = [];
+        for (const image of batch) {
+          const singleResult = await this.modelHandler.call([image]);
+          results.push(...singleResult);
+        }
+      }
       batchResults.push(...results);
 
       if (onProgress) onProgress(Math.min(i + batchSize, total), total);

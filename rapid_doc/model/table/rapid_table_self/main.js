@@ -14,6 +14,10 @@ import { getLogger } from "./utils/logger.js";
 
 const logger = getLogger("RapidTable");
 
+function isTableDebugEnabled() {
+  return typeof globalThis !== "undefined" && globalThis.__RAPIDDOC_DEBUG_TABLE__ === true;
+}
+
 export class RapidTable {
   constructor() {
     this._structurer = null;
@@ -44,16 +48,18 @@ export class RapidTable {
 
   async run(oriImgs, ocrResults = null) {
     const t0 = performance.now();
-    logger.info(`[RapidTable.run] Input:`, {
-      imgCount: oriImgs.length,
-      hasOcrResults: !!ocrResults,
-      ocrResultsLen: ocrResults?.length,
-      ocrResultsSample: ocrResults?.[0] ? {
-        boxes: ocrResults[0][0]?.length,
-        texts: ocrResults[0][1]?.length,
-        scores: ocrResults[0][2]?.length,
-      } : null,
-    });
+    if (isTableDebugEnabled()) {
+      logger.info(`[RapidTable.run] Input:`, {
+        imgCount: oriImgs.length,
+        hasOcrResults: !!ocrResults,
+        ocrResultsLen: ocrResults?.length,
+        ocrResultsSample: ocrResults?.[0] ? {
+          boxes: ocrResults[0][0]?.length,
+          texts: ocrResults[0][1]?.length,
+          scores: ocrResults[0][2]?.length,
+        } : null,
+      });
+    }
     const mats = await Promise.all(oriImgs.map(img => this._loadImage.run(img)));
     let allPredHtmls = [];
     let allCellBboxes = [];
@@ -74,25 +80,29 @@ export class RapidTable {
           const cells = cellBboxes[i] ?? [];
           let html;
           
-          logger.info(`[RapidTable] Processing table ${i}:`, {
-            hasOcrResults: !!ocrResults,
-            ocrResultsLen: ocrResults?.length,
-            hasOcrForThisImage: !!(ocrResults && ocrResults[i]),
-            ocrResultType: ocrResults?.[i] ? typeof ocrResults[i] : 'undefined',
-            ocrResultIsArray: Array.isArray(ocrResults?.[i]),
-            ocrResultLength: ocrResults?.[i]?.length,
-            structLen: structureTokens.length,
-            cellsLen: cells.length,
-          });
+          if (isTableDebugEnabled()) {
+            logger.info(`[RapidTable] Processing table ${i}:`, {
+              hasOcrResults: !!ocrResults,
+              ocrResultsLen: ocrResults?.length,
+              hasOcrForThisImage: !!(ocrResults && ocrResults[i]),
+              ocrResultType: ocrResults?.[i] ? typeof ocrResults[i] : 'undefined',
+              ocrResultIsArray: Array.isArray(ocrResults?.[i]),
+              ocrResultLength: ocrResults?.[i]?.length,
+              structLen: structureTokens.length,
+              cellsLen: cells.length,
+            });
+          }
           
           if (ocrResults && ocrResults[i] && ocrResults[i].length >= 3) {
-            logger.info(`[RapidTable] OCR result structure for image ${i}:`, {
-              boxes: ocrResults[i][0]?.length,
-              texts: ocrResults[i][1]?.length,
-              scores: ocrResults[i][2]?.length,
-              boxesSample: ocrResults[i][0]?.slice(0, 2),
-              textsSample: ocrResults[i][1]?.slice(0, 5),
-            });
+            if (isTableDebugEnabled()) {
+              logger.info(`[RapidTable] OCR result structure for image ${i}:`, {
+                boxes: ocrResults[i][0]?.length,
+                texts: ocrResults[i][1]?.length,
+                scores: ocrResults[i][2]?.length,
+                boxesSample: ocrResults[i][0]?.slice(0, 2),
+                textsSample: ocrResults[i][1]?.slice(0, 5),
+              });
+            }
             
             const { dtBoxes, recRes } = formatOcrResults(
               ocrResults[i][0].map((box, idx) => ({
@@ -101,18 +111,22 @@ export class RapidTable {
               mats[i].rows, mats[i].cols
             );
             
-            logger.info(`[RapidTable] After formatOcrResults:`, {
-              dtBoxesLen: dtBoxes.length,
-              recResLen: recRes.length,
-              dtBoxSample: dtBoxes.slice(0, 2),
-              recResSample: recRes.slice(0, 3),
-            });
+            if (isTableDebugEnabled()) {
+              logger.info(`[RapidTable] After formatOcrResults:`, {
+                dtBoxesLen: dtBoxes.length,
+                recResLen: recRes.length,
+                dtBoxSample: dtBoxes.slice(0, 2),
+                recResSample: recRes.slice(0, 3),
+              });
+            }
             
             const htmlList = this._matcher.run([structureTokens], [cells], dtBoxes, recRes);
-            logger.info(`[RapidTable] Matcher output:`, {
-              htmlLen: htmlList[0]?.length,
-              htmlSample: htmlList[0]?.substring(0, 200),
-            });
+            if (isTableDebugEnabled()) {
+              logger.info(`[RapidTable] Matcher output:`, {
+                htmlLen: htmlList[0]?.length,
+                htmlSample: htmlList[0]?.substring(0, 200),
+              });
+            }
             
             html = wrapWithHtmlStruct([htmlList[0] ?? ""]);
           } else {

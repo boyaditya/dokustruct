@@ -42,6 +42,10 @@ function throwIfAborted(signal) {
   }
 }
 
+function isAbortError(error, signal = null) {
+  return Boolean(signal?.aborted || error?.name === 'AbortError');
+}
+
 function loadOpenCVScript(signal) {
   if (hasOpenCVRuntime()) return Promise.resolve();
   if (openCvScriptPromise) return openCvScriptPromise;
@@ -534,6 +538,9 @@ export class PipelineAdapter {
     if (isImageFile(file)) {
       this._toast('Running Full Analysis on image input.', 'info');
     }
+    if (state.get('pipelineMode') === 'ocr_only') {
+      return this._runOcrOnly(state, file, signal);
+    }
     return this._runFullAnalysis(state, file, signal);
   }
 
@@ -587,6 +594,7 @@ export class PipelineAdapter {
       }
 
       const config = this._buildConfig(state, file);
+      const engine = await getEngine();
       await this._evictStaleModelCache(engine, config);
       const lang = config.language ?? 'ch';
 
@@ -596,6 +604,7 @@ export class PipelineAdapter {
       const { AtomicModel } = await import('../../rapid_doc/backend/pipeline/model_list.js');
       const atomMgr = AtomModelSingleton.getInstance();
       const ocrModel = await atomMgr.getAtomModel(AtomicModel.OCR, {
+        det_db_thresh: config.ocr_config?.["Det.det_db_thresh"] ?? config.ocr_config?.det_db_thresh ?? 0.3,
         det_db_box_thresh: 0.3,
         lang,
         ocr_config: config.ocr_config ?? null,
@@ -784,16 +793,19 @@ export class PipelineAdapter {
           {
             lang_list:      [config.language ?? 'ch'],
             parse_method:   config.parse_method,
+            force_ocr:      config.force_ocr,
             formula_enable: config.formula_enable,
             table_enable:   config.table_enable,
             layout_config:  config.layout_config,
             ocr_config:     config.ocr_config,
             formula_config: config.formula_config,
             table_config:   config.table_config,
+            orientation_config: config.orientation_config,
             checkbox_config: config.checkbox_config,
             start_page_id:  config.start_page_id ?? 0,
             end_page_id:    config.end_page_id ?? null,
             pdf_pages_batch: config.pdf_pages_batch ?? 0,
+            on_progress:    onProgress,
           }
         );
 
@@ -977,6 +989,7 @@ export class PipelineAdapter {
       ocr: config.ocr_config,
       formula: config.formula_enable ? config.formula_config : null,
       table: config.table_enable ? config.table_config : null,
+      orientation: config.orientation_config,
       checkbox: config.checkbox_config,
       executionProvider: config.execution_provider,
     });
@@ -1087,13 +1100,17 @@ export class PipelineAdapter {
         ocr_config: config.ocr_config,
         formula_config: config.formula_config,
         table_config: config.table_config,
+        orientation_config: config.orientation_config,
       });
     }
 
     throwIfAborted(signal);
     if (config.layout_config?.use_doc_orientation_classify && engine.AtomModelSingleton && engine.AtomicModel) {
       try {
-        await engine.AtomModelSingleton.getInstance().getAtomModel(engine.AtomicModel.ImgOrientationCls);
+        await engine.AtomModelSingleton.getInstance().getAtomModel(
+          engine.AtomicModel.ImgOrientationCls,
+          { orientation_config: config.orientation_config }
+        );
       } catch (err) {
         console.warn('[pipelineAdapter] Orientation model warmup failed:', err?.message ?? err);
       }
@@ -1143,6 +1160,10 @@ export class PipelineAdapter {
         state.setModelStatus(modelId, 'not_downloaded', 0);
       }
     } catch (e) {
+      if (isAbortError(e, signal)) {
+        state.setModelStatus(modelId, 'cancelled', 0);
+        throw e;
+      }
       console.error(`[pipelineAdapter] Model download failed: ${modelId}`, e);
       state.setModelStatus(modelId, 'error', 0);
       throw e;
@@ -1163,6 +1184,7 @@ export class PipelineAdapter {
       ocr: config.ocr_config,
       formula: config.formula_enable ? config.formula_config : null,
       table: config.table_enable ? config.table_config : null,
+      orientation: config.orientation_config,
       checkbox: config.checkbox_config,
     });
     if (this._lastModelConfigKey === key) return;
@@ -1179,11 +1201,14 @@ export class PipelineAdapter {
    */
   _buildConfig(state, file) {
     const { start, end } = state.get('pageRange');
+    const executionProvider = state.get('activeExecutionProvider') ?? 'wasm';
+    const forceOcr = Boolean(state.get('forceOcr'));
+    const parseMethod = forceOcr ? 'ocr' : state.get('parseMethod');
     return {
       // Input
       file_name:           file?.name ?? '',
-      parse_method:        state.get('parseMethod'),
-      force_ocr:           state.get('forceOcr'),
+      parse_method:        parseMethod,
+      force_ocr:           forceOcr,
       language:            state.get('language'),
       start_page_id:       start,
       end_page_id:         end,
@@ -1204,6 +1229,9 @@ export class PipelineAdapter {
       // Table
       table_config:        state.tableConfig,
 
+      // Orientation
+      orientation_config:  state.orientationConfig,
+
       // Checkbox
       checkbox_config:     state.checkboxConfig,
 
@@ -1220,7 +1248,7 @@ export class PipelineAdapter {
       pdf_pages_batch:     getDefaultPdfPagesBatch(state),
 
       // Execution
-      execution_provider:  state.get('activeExecutionProvider') ?? 'wasm',
+      execution_provider:  executionProvider,
 
       // Pipeline mode
       pipeline_mode:       'full_analysis',

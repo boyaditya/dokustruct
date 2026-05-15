@@ -58,7 +58,7 @@
  */
 
 /**
- * @typedef {'not_downloaded'|'downloading'|'cached'|'error'} ModelStatusValue
+ * @typedef {'not_downloaded'|'downloading'|'cached'|'error'|'cancelled'} ModelStatusValue
  */
 
 /**
@@ -247,7 +247,7 @@ function createInitialState() {
     researchRunHistory: [],    // Array<Timings>
 
     // ── Model management ───────────────────────────────────────────────────
-    modelStatus: {},           // { [modelId]: 'not_downloaded'|'downloading'|'cached'|'error' }
+    modelStatus: {},           // { [modelId]: 'not_downloaded'|'downloading'|'cached'|'error'|'cancelled' }
     modelProgress: {},         // { [modelId]: 0-100 }
     modelSizeMb: {},           // { [modelId]: number }
     runtimeStatus: 'idle',
@@ -502,12 +502,16 @@ export class AppState {
    */
   get layoutConfig() {
     const s = this.#state;
+    const executionProvider = s.activeExecutionProvider ?? 'wasm';
     return {
-      execution_provider: s.activeExecutionProvider ?? 'wasm',
+      execution_provider: executionProvider,
+      executionProviders: executionProvider === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
+      engine_cfg: { use_webgpu: executionProvider === 'webgpu' },
       model_type: s.layoutModelType,
       conf_thresh: s.layoutConfThresh,
       layout_shape_mode: s.layoutShapeMode,
       use_doc_orientation_classify: s.useDocOrientationClassify,
+      batch_num: executionProvider === 'webgpu' ? 4 : 1,
       markdown_ignore_labels: s.markdownIgnoreLabels,
     };
   }
@@ -521,6 +525,7 @@ export class AppState {
     const executionProvider = s.activeExecutionProvider ?? 'wasm';
     return {
       execution_provider: executionProvider,
+      executionProviders: executionProvider === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
       use_det_mode: s.useDetMode,
       "Det.rec_batch_num": executionProvider === 'webgpu' ? 4 : 1,
       "Rec.rec_batch_num": executionProvider === 'webgpu' ? 24 : 6,
@@ -533,8 +538,11 @@ export class AppState {
    */
   get tableConfig() {
     const s = this.#state;
+    const executionProvider = s.activeExecutionProvider ?? 'wasm';
     return {
-      execution_provider: s.activeExecutionProvider ?? 'wasm',
+      execution_provider: executionProvider,
+      executionProviders: executionProvider === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
+      engine_cfg: { use_webgpu: executionProvider === 'webgpu' },
       model_type: s.tableModelType,
       force_ocr: s.tableForceOcr,
       use_word_box: s.tableUseWordBox,
@@ -560,10 +568,22 @@ export class AppState {
    */
   get formulaConfig() {
     const s = this.#state;
+    const executionProvider = s.activeExecutionProvider ?? 'wasm';
+    const isLatexOcr = s.formulaModelType === 'latex_ocr';
     return {
-      execution_provider: s.activeExecutionProvider ?? 'wasm',
+      execution_provider: executionProvider,
+      executionProviders: executionProvider === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
       formula_level: s.formulaLevel,
       modelType: s.formulaModelType,
+      batch_num: isLatexOcr && executionProvider === 'webgpu' ? 2 : (executionProvider === 'wasm' ? 2 : 1),
+    };
+  }
+
+  get orientationConfig() {
+    const executionProvider = this.#state.activeExecutionProvider ?? 'wasm';
+    return {
+      execution_provider: executionProvider,
+      executionProviders: executionProvider === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
     };
   }
 

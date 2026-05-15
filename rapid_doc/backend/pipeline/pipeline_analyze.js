@@ -76,6 +76,7 @@ export class ModelSingleton {
     ocr_config = null,
     formula_config = null,
     table_config = null,
+    orientation_config = null,
   } = {}) {
     const key = ModelSingleton.makeKey({
       lang,
@@ -85,12 +86,13 @@ export class ModelSingleton {
       ocr_config,
       formula_config,
       table_config,
+      orientation_config,
     });
 
     if (!this.#models.has(key)) {
       const model = await customModelInit({
         lang, formula_enable, table_enable,
-        layout_config, ocr_config, formula_config, table_config,
+        layout_config, ocr_config, formula_config, table_config, orientation_config,
       });
       this.#models.set(key, model);
     }
@@ -99,7 +101,7 @@ export class ModelSingleton {
     }
     this.#activeKey = key;
     await AtomModelSingleton.getInstance().retainKeys(ModelSingleton.makeAtomKeySet({
-      lang, formula_enable, table_enable, layout_config, ocr_config, formula_config, table_config,
+      lang, formula_enable, table_enable, layout_config, ocr_config, formula_config, table_config, orientation_config,
     }));
     return this.#models.get(key);
   }
@@ -112,6 +114,7 @@ export class ModelSingleton {
     ocr_config = null,
     formula_config = null,
     table_config = null,
+    orientation_config = null,
   } = {}) {
     return JSON.stringify([
       lang, formula_enable, table_enable,
@@ -119,6 +122,7 @@ export class ModelSingleton {
       makeHashable(ocr_config),
       makeHashable(formula_config),
       makeHashable(table_config),
+      makeHashable(orientation_config),
     ]);
   }
 
@@ -156,12 +160,15 @@ export class ModelSingleton {
     ocr_config = null,
     formula_config = null,
     table_config = null,
+    orientation_config = null,
   } = {}) {
     const finalFormulaConfig = { enable: formula_enable, ...(formula_config || {}) };
     const finalTableConfig = { enable: table_enable, ...(table_config || {}) };
+    const ocrDetDbThresh = ocr_config?.["Det.det_db_thresh"] ?? ocr_config?.det_db_thresh ?? 0.3;
     const keep = new Set();
     keep.add(AtomModelSingleton.buildKey(AtomicModel.Layout, { layout_config }));
     keep.add(AtomModelSingleton.buildKey(AtomicModel.OCR, {
+      det_db_thresh: ocrDetDbThresh,
       det_db_box_thresh: 0.3,
       lang,
       ocr_config,
@@ -178,6 +185,7 @@ export class ModelSingleton {
         table_config: finalTableConfig,
       }));
       keep.add(AtomModelSingleton.buildKey(AtomicModel.OCR, {
+        det_db_thresh: ocrConfigClean?.["Det.det_db_thresh"] ?? ocrConfigClean?.det_db_thresh ?? 0.3,
         det_db_box_thresh: 0.5,
         det_db_unclip_ratio: 1.6,
         lang,
@@ -186,7 +194,7 @@ export class ModelSingleton {
       }));
     }
     if (layout_config?.use_doc_orientation_classify ?? layout_config?.useDocOrientationClassify ?? true) {
-      keep.add(AtomModelSingleton.buildKey(AtomicModel.ImgOrientationCls, {}));
+      keep.add(AtomModelSingleton.buildKey(AtomicModel.ImgOrientationCls, { orientation_config }));
     }
     return keep;
   }
@@ -210,6 +218,7 @@ export async function customModelInit({
   ocr_config = null,
   formula_config = null,
   table_config = null,
+  orientation_config = null,
 } = {}) {
   const t0 = performance.now();
 
@@ -224,6 +233,7 @@ export async function customModelInit({
     ocr_config,
     table_config: finalTableConfig,
     formula_config: finalFormulaConfig,
+    orientation_config,
     lang,
   };
 
@@ -255,16 +265,19 @@ export async function docAnalyze(
   {
     lang_list = null,
     parse_method = 'auto',
+    force_ocr = false,
     formula_enable = true,
     table_enable = true,
     layout_config = null,
     ocr_config = null,
     formula_config = null,
     table_config = null,
+    orientation_config = null,
     checkbox_config = null,
     start_page_id = 0,
     end_page_id = null,
     pdf_pages_batch = 0,
+    on_progress = null,
   } = {}
 ) {
   const pipelineTimings = {
@@ -304,8 +317,8 @@ export async function docAnalyze(
   if (pdf_pages_batch > 0) {
     return await _docAnalyzeWindowed(normalizedPdfBytesList, {
       lang_list, parse_method, formula_enable, table_enable,
-      layout_config, ocr_config, formula_config, table_config, checkbox_config,
-      start_page_id, end_page_id, pdf_pages_batch,
+      force_ocr, layout_config, ocr_config, formula_config, table_config, orientation_config, checkbox_config,
+      start_page_id, end_page_id, pdf_pages_batch, on_progress,
     });
   }
 
@@ -340,10 +353,10 @@ export async function docAnalyze(
     const pdfBytes = pdfBytesList[pdfIdx];
 
     let _ocrEnable = false;
-    if (parse_method === 'auto') {
-      if (await classify(pdfBytes) === 'ocr') _ocrEnable = true;
-    } else if (parse_method === 'ocr') {
+    if (force_ocr || parse_method === 'ocr') {
       _ocrEnable = true;
+    } else if (parse_method === 'auto') {
+      if (await classify(pdfBytes) === 'ocr') _ocrEnable = true;
     }
     ocrEnabledList.push(_ocrEnable);
 
@@ -393,6 +406,7 @@ export async function docAnalyze(
     const batchImage = batchImages[index];
     const batchLang = batchImage[0]?.[3] ?? 'ch';
     processedCount += batchImage.length;
+    on_progress?.(processedCount, imagesWithExtraInfo.length);
     console.info(
       `[docAnalyze] Batch ${index + 1}/${batchImages.length}: ` +
       `${processedCount}/${imagesWithExtraInfo.length} pages`
@@ -400,7 +414,7 @@ export async function docAnalyze(
     const batchResults = await batchImageAnalyze(batchImage, {
       lang: batchLang,
       formula_enable, table_enable, layout_config, ocr_config,
-      formula_config, table_config, checkbox_config,
+      formula_config, table_config, orientation_config, checkbox_config,
     });
     results.push(...batchResults);
     await yieldToBrowser();
@@ -444,9 +458,10 @@ export async function docAnalyze(
  */
 async function _docAnalyzeWindowed(pdfBytesList, opts) {
   const {
-    lang_list: langListOpt, parse_method, formula_enable, table_enable,
-    layout_config, ocr_config, formula_config, table_config, checkbox_config,
+    lang_list: langListOpt, parse_method, force_ocr, formula_enable, table_enable,
+    layout_config, ocr_config, formula_config, table_config, orientation_config, checkbox_config,
     start_page_id, end_page_id, pdf_pages_batch,
+    on_progress,
   } = opts;
 
   const langList = langListOpt || new Array(pdfBytesList.length).fill('ch');
@@ -484,9 +499,10 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
       await _docAnalyzeSingleWindow(activePdfBytes, {
         lang_list: activeLangList,
         parse_method, formula_enable, table_enable,
-        layout_config, ocr_config, formula_config, table_config, checkbox_config,
+        force_ocr, layout_config, ocr_config, formula_config, table_config, orientation_config, checkbox_config,
         start_page_id: tmpStartPageId,
         end_page_id: tmpStartPageId + pdf_pages_batch - 1,
+        on_progress,
       });
 
     // Accumulate timings
@@ -533,9 +549,10 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
  */
 async function _docAnalyzeSingleWindow(pdfBytesList, opts) {
   const {
-    lang_list, parse_method, formula_enable, table_enable,
-    layout_config, ocr_config, formula_config, table_config, checkbox_config,
+    lang_list, parse_method, force_ocr, formula_enable, table_enable,
+    layout_config, ocr_config, formula_config, table_config, orientation_config, checkbox_config,
     start_page_id = 0, end_page_id = null,
+    on_progress = null,
   } = opts;
 
   const pipelineTimings = { layout: 0, formula: 0, ocr: 0, table: 0, reading_order: 0, postprocessing: 0 };
@@ -561,10 +578,10 @@ async function _docAnalyzeSingleWindow(pdfBytesList, opts) {
     const pdfBytes = slicedList[pdfIdx];
 
     let _ocrEnable = false;
-    if (parse_method === 'auto') {
-      if (await classify(pdfBytes) === 'ocr') _ocrEnable = true;
-    } else if (parse_method === 'ocr') {
+    if (force_ocr || parse_method === 'ocr') {
       _ocrEnable = true;
+    } else if (parse_method === 'auto') {
+      if (await classify(pdfBytes) === 'ocr') _ocrEnable = true;
     }
     ocrEnabledList.push(_ocrEnable);
 
@@ -603,9 +620,11 @@ async function _docAnalyzeSingleWindow(pdfBytesList, opts) {
   );
 
   const batchResults = await batchImageAnalyze(imagesWithExtraInfo, {
+    lang: imagesWithExtraInfo[0]?.[3] ?? langList[0] ?? 'ch',
     formula_enable, table_enable, layout_config, ocr_config,
-    formula_config, table_config, checkbox_config,
+    formula_config, table_config, orientation_config, checkbox_config,
   });
+  on_progress?.(imagesWithExtraInfo.length, imagesWithExtraInfo.length);
   await yieldToBrowser();
 
   const batchTimings = batchResults?._stageTimings;
@@ -648,6 +667,7 @@ export async function batchImageAnalyze(
     ocr_config = null,
     formula_config = null,
     table_config = null,
+    orientation_config = null,
     checkbox_config = null,
   } = {}
 ) {
@@ -662,7 +682,7 @@ export async function batchImageAnalyze(
   const batchModel = new BatchAnalyze(
     modelManager, batchRatio,
     formula_enable, table_enable,
-    layout_config, ocr_config, formula_config, table_config, checkbox_config
+    layout_config, ocr_config, formula_config, table_config, checkbox_config, orientation_config
   );
   batchModel.lang = lang;
 

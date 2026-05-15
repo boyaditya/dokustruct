@@ -14,6 +14,7 @@ import { isIn } from "../../utils/boxbase.js";
 import { pointsToBbox, bboxToPoints } from "../../utils/ocr_utils.js";
 
 const logger = getLogger("RapidTableModel");
+let warnedImg2tableUnsupported = false;
 
 function getConfigValue(config, key, fallback = null) {
   if (!config || typeof config !== "object") return fallback;
@@ -158,7 +159,11 @@ export class RapidTableModel {
    * @returns {Promise<{ html: string, cellBboxes: number[][], elapse: number }>}
    */
   async predict(image, ocrResult = null, opts = {}) {
-    const { fillImageRes = null, mfdRes = null, skipTextInImage = true } = opts;
+    const { fillImageRes = null, mfdRes = null, skipTextInImage = true, useImg2table = false } = opts;
+    if (useImg2table && !warnedImg2tableUnsupported) {
+      console.warn("[RapidTableModel] useImg2table requested, but img2table is Python-only in the browser; using RapidTable structure model.");
+      warnedImg2tableUnsupported = true;
+    }
     const hasFillImages = Array.isArray(fillImageRes) && fillImageRes.length > 0;
     const inputSize = getInputSize(image);
     const mayNeedPortraitCheck = !!this._ocrEngine &&

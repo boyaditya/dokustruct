@@ -64,6 +64,12 @@ export const UI_MODEL_URL_MAP = Object.freeze({
     sha256:   null,
   },
 
+  layout_pp_doclayoutv3: {
+    url:      `${MS_RAPIDDOC}/layout/PP-DocLayoutV3/pp_doclayoutv3.onnx`,
+    cacheKey: 'layout/PP-DocLayoutV3/pp_doclayoutv3.onnx',
+    sha256:   null,
+  },
+
   // ── OCR ────────────────────────────────────────────────────────────────────
   // Source: rapid_doc/model/ocr/rapid_ocr.js comments
   ocr_det: {
@@ -86,6 +92,42 @@ export const UI_MODEL_URL_MAP = Object.freeze({
     sha256:   null,
   },
 
+  formula_pp_formulanet_plus_s: {
+    url:      `${MS_RAPIDDOC}/formula/PP-FormulaNet_plus-S/pp_formulanet_plus_s.onnx`,
+    cacheKey: 'formula/PP-FormulaNet_plus-S/pp_formulanet_plus_s.onnx',
+    sha256:   null,
+  },
+
+  formula_pp_formulanet_plus_l: {
+    url:      `${MS_RAPIDDOC}/formula/PP-FormulaNet_plus-L/pp_formulanet_plus_l.onnx`,
+    cacheKey: 'formula/PP-FormulaNet_plus-L/pp_formulanet_plus_l.onnx',
+    sha256:   null,
+  },
+
+  formula_latex_ocr_resizer: {
+    url:      `${MS_RAPIDDOC}/formula/LaTeX-OCR/image_resizer.onnx`,
+    cacheKey: 'formula/LaTeX-OCR/image_resizer.onnx',
+    sha256:   null,
+  },
+
+  formula_latex_ocr_encoder: {
+    url:      `${MS_RAPIDDOC}/formula/LaTeX-OCR/encoder.onnx`,
+    cacheKey: 'formula/LaTeX-OCR/encoder.onnx',
+    sha256:   null,
+  },
+
+  formula_latex_ocr_decoder: {
+    url:      `${MS_RAPIDDOC}/formula/LaTeX-OCR/decoder.onnx`,
+    cacheKey: 'formula/LaTeX-OCR/decoder.onnx',
+    sha256:   null,
+  },
+
+  formula_latex_ocr_tokenizer: {
+    url:      `${MS_RAPIDDOC}/formula/LaTeX-OCR/tokenizer.json`,
+    cacheKey: 'formula/LaTeX-OCR/tokenizer.json',
+    sha256:   null,
+  },
+
   // ── Table ──────────────────────────────────────────────────────────────────
   // Source: rapid_doc/model/table/rapid_table_self/default_models.yaml
   table_unet_slanet: {
@@ -98,6 +140,38 @@ export const UI_MODEL_URL_MAP = Object.freeze({
   // Checkbox detection/classification uses pure OpenCV morphology — no ONNX model.
   checkbox: null,
 });
+
+export function getRequiredModels(config = {}) {
+  const required = new Set();
+  const layoutType = config.layout_config?.model_type ?? config.layout_config?.modelType ?? 'pp_doclayoutv2';
+  const layoutMap = {
+    pp_doclayoutv2: 'layout_pp_doclayoutv2',
+    pp_doclayoutv3: 'layout_pp_doclayoutv3',
+    pp_doclayout_plus_l: 'layout_pp_doclayout_plus_l',
+    pp_doclayout_l: 'layout_pp_doclayout',
+  };
+  required.add(layoutMap[layoutType] ?? 'layout_pp_doclayoutv2');
+
+  required.add('ocr_det');
+  required.add('ocr_rec');
+
+  if (config.formula_enable) {
+    const formulaType = config.formula_config?.modelType ?? config.formula_config?.model_type ?? 'pp_formulanet_plus_s';
+    if (formulaType === 'latex_ocr') {
+      required.add('formula_latex_ocr_resizer');
+      required.add('formula_latex_ocr_encoder');
+      required.add('formula_latex_ocr_decoder');
+      required.add('formula_latex_ocr_tokenizer');
+    } else {
+      required.add(`formula_${formulaType}`);
+    }
+  }
+
+  if (config.table_enable) required.add('table_unet_slanet');
+  if (config.checkbox_enable || config.checkbox_config?.checkbox_enable) required.add('checkbox');
+
+  return [...required].filter(id => Object.prototype.hasOwnProperty.call(UI_MODEL_URL_MAP, id));
+}
 
 // ─── downloadModel ────────────────────────────────────────────────────────────
 
@@ -128,6 +202,7 @@ export async function downloadModel(modelId, onProgress = null, _signal = null) 
     url:        entry.url,
     savePath:   entry.cacheKey,
     onProgress: onProgress ?? null,
+    signal:     _signal ?? null,
   });
 
   const downloader = new DownloadFile();

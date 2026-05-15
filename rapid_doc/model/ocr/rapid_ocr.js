@@ -801,11 +801,12 @@ function getWordInfo(text, validCols) {
 // ─── TextDetector ────────────────────────────────────────────────────────────
 
 class TextDetector {
-  constructor(session, detPreProcess, detPostProcess) {
+  constructor(session, detPreProcess, detPostProcess, { useWebGpu = true } = {}) {
     this.session      = session;
     this.preProcess   = detPreProcess;
     this.postProcess  = detPostProcess;
     this._acquireGpu  = acquireGlobalGpu;
+    this.useWebGpu    = useWebGpu;
   }
 
   /**
@@ -874,11 +875,11 @@ class TextDetector {
     let results, tensor;
     try {
       tensor = new ort.Tensor('float32', flat, [N, C, H, W]);
-      const releaseGpu = await this._acquireGpu();
+      const releaseGpu = this.useWebGpu ? await this._acquireGpu() : null;
       try {
         results = await this.session.run({ [inputName]: tensor });
       } finally {
-        releaseGpu();
+        releaseGpu?.();
       }
 
       // Retrieve first output tensor by position — avoids outputNames key-mismatch.
@@ -927,7 +928,21 @@ class TextDetector {
         }
       }
     } catch (err) {
-      console.warn('[TextDetector] session.run failed:', err?.message ?? err);
+      console.warn(`[TextDetector] session.run failed for batch=${N}:`, err?.message ?? err);
+      if (N > 1) {
+        if (tensor?.dispose) { tensor.dispose(); tensor = null; }
+        if (results) {
+          for (const t of (results instanceof Map ? results.values() : Object.values(results))) {
+            t?.dispose?.();
+          }
+          results = null;
+        }
+        const nextSize = Math.max(1, Math.floor(N / 2));
+        for (let i = 0; i < group.length; i += nextSize) {
+          await this._runBatchGroup(group.slice(i, i + nextSize), output);
+        }
+        return;
+      }
       for (const item of group) {
         output[item.index] = { boxes: null, elapse: (performance.now() - item.t0) / 1000 };
       }
@@ -951,7 +966,7 @@ class TextRecognizer {
    * @param {number}                 recBatchNum
    * @param {[number,number,number]} recImageShape
    */
-  constructor(session, charList, recBatchNum = 48, recImageShape = [3, 48, 320]) {
+  constructor(session, charList, recBatchNum = 48, recImageShape = [3, 48, 320], { useWebGpu = true } = {}) {
     this.session       = session;
     this.charList      = charList;
     this.recBatchNum   = recBatchNum;
@@ -960,6 +975,7 @@ class TextRecognizer {
 
     // Use the global mutex
     this._acquireGpu = acquireGlobalGpu;
+    this.useWebGpu = useWebGpu;
   }
 
   /**
@@ -1020,13 +1036,13 @@ class TextRecognizer {
         tensor = new ort.Tensor('float32', flat, [N, C, imgH, batchW]);
         
         // Lock GPU just for the run command
-        const releaseGpu = await this._acquireGpu();
+        const releaseGpu = this.useWebGpu ? await this._acquireGpu() : null;
         try {
           res = await this.session.run({ [recInputName]: tensor });
         } finally {
           // Hand off GPU to the next batch IMMEDIATELY!
           // Do not wait for .getData() mapAsync to finish.
-          releaseGpu();
+          releaseGpu?.();
         }
 
         // Dispose input tensor early to keep VRAM flat
@@ -1372,7 +1388,7 @@ export class RapidOcrModel {
       1000,                       // maxCandidates
     );
 
-    inst.textDetector = new TextDetector(detSession, detPre, detPost);
+    inst.textDetector = new TextDetector(detSession, detPre, detPost, { useWebGpu });
 
     // ── Load Rec model (PERFORMANCE PATH: WebGPU for the 26s bottleneck) ──
     const recUrl = params.recModelUrl
@@ -1440,7 +1456,7 @@ export class RapidOcrModel {
     charList = _prepareCtcCharacterList(charList);
 
     inst.textRecognizer = new TextRecognizer(
-      recSession, charList, inst.recBatchNum,
+      recSession, charList, inst.recBatchNum, [3, 48, 320], { useWebGpu },
     );
 
     logger.info('RapidOcrModel ready.');

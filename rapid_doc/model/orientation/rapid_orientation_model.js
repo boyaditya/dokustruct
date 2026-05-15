@@ -1,5 +1,5 @@
 import * as ort from "onnxruntime-web";
-import { configureOrtRuntime } from "../../utils/ort_runtime.js";
+import { configureOrtRuntime, acquireGlobalGpu } from "../../utils/ort_runtime.js";
 import { LoadImage } from "../table/rapid_table_self/utils/load_image.js";
 
 const DEFAULT_MODEL_URL = "/models/orientation/rapid_orientation.onnx";
@@ -96,11 +96,13 @@ export class RapidOrientationEngine {
     this.labels = FALLBACK_LABELS;
     this.loader = new LoadImage();
     this.batchSize = 3;
+    this.useWebGpu = false;
   }
 
   static async create({ modelUrl = DEFAULT_MODEL_URL, executionProviders = ["webgpu", "wasm"] } = {}) {
     const inst = new RapidOrientationEngine();
-    await configureOrtRuntime({ numThreads: 4, useWebGpu: executionProviders.includes("webgpu") });
+    inst.useWebGpu = executionProviders.includes("webgpu");
+    await configureOrtRuntime({ numThreads: 4, useWebGpu: inst.useWebGpu });
     const resp = await fetch(modelUrl);
     if (!resp.ok) throw new Error(`RapidOrientationEngine: failed to fetch ${modelUrl} (${resp.status})`);
     const modelBytes = await resp.arrayBuffer();
@@ -108,6 +110,7 @@ export class RapidOrientationEngine {
       executionProviders,
       logSeverityLevel: 4,
       graphOptimizationLevel: "all",
+      ...(inst.useWebGpu ? { preferredOutputLocation: "gpu-buffer" } : {}),
     });
     inst.labels = getLabels(inst.session);
     return inst;
@@ -115,20 +118,34 @@ export class RapidOrientationEngine {
 
   async predictRaw(image) {
     const mat = image instanceof cv.Mat ? image.clone() : await this.loader.run(image);
+    let feeds = null;
+    let result = null;
     try {
       const input = preprocessOrientationMat(mat, this.batchSize);
       const inputName = this.session.inputNames[0];
       const outputName = this.session.outputNames[0];
-      const feeds = { [inputName]: new ort.Tensor("float32", input, [this.batchSize, 3, 224, 224]) };
-      const result = await this.session.run(feeds);
-      const tensor = result[outputName];
-      const outputData = tensor.cpuData ?? tensor.data;
+      feeds = { [inputName]: new ort.Tensor("float32", input, [this.batchSize, 3, 224, 224]) };
+      const releaseGpu = this.useWebGpu ? await acquireGlobalGpu() : null;
+      try {
+        result = await this.session.run(feeds);
+      } finally {
+        releaseGpu?.();
+      }
+      const tensor = result instanceof Map ? result.get(outputName) : result[outputName];
+      const outputData = typeof tensor?.getData === "function" ? await tensor.getData() : (tensor?.cpuData ?? tensor?.data);
       const dims = tensor.dims ?? [this.batchSize, this.labels.length];
       const rows = Number(dims[0] ?? this.batchSize);
       const cols = Number(dims[1] ?? this.labels.length);
       const predIdx = majorityVote(softArgmaxRows(outputData, rows, cols));
       return this.labels[predIdx] ?? String(predIdx);
     } finally {
+      if (feeds) {
+        for (const tensor of Object.values(feeds)) tensor?.dispose?.();
+      }
+      if (result) {
+        const tensors = result instanceof Map ? result.values() : Object.values(result);
+        for (const tensor of tensors) tensor?.dispose?.();
+      }
       mat.delete();
     }
   }

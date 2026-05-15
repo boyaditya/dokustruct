@@ -81,6 +81,7 @@ async function saveToCache(key, buffer) {
  * @property {string}   [savePath]    - Logical save path / cache key override
  * @property {string}   [md5]         - Expected MD5 hash for integrity check
  * @property {function(number):void} [onProgress] - Progress callback (0-100)
+ * @property {AbortSignal|null} [signal] - Optional cancellation signal
  */
 
 export class DownloadFileInput {
@@ -96,6 +97,8 @@ export class DownloadFileInput {
     this.md5 = data.md5 ?? null;
     /** @type {function(number):void|null} */
     this.onProgress = data.onProgress ?? null;
+    /** @type {AbortSignal|null} */
+    this.signal = data.signal ?? null;
   }
 }
 
@@ -128,6 +131,9 @@ export class DownloadFile {
    */
   async call(cfg) {
     const cacheKey = cfg.savePath;
+    if (cfg.signal?.aborted) {
+      throw new DOMException('Operation aborted', 'AbortError');
+    }
 
     // Check IndexedDB cache first
     const cached = await getFromCache(cacheKey);
@@ -138,7 +144,7 @@ export class DownloadFile {
 
     logger.info(`Downloading: ${cfg.url}`);
 
-    const response = await fetch(cfg.url);
+    const response = await fetch(cfg.url, { signal: cfg.signal ?? undefined });
     if (!response.ok) {
       throw new Error(`Download failed: ${response.status} ${cfg.url}`);
     }
@@ -148,16 +154,33 @@ export class DownloadFile {
     const chunks = [];
     let received = 0;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      if (cfg.onProgress && contentLength > 0) {
-        cfg.onProgress((received / contentLength) * 100);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (cfg.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (cfg.onProgress && contentLength > 0) {
+          cfg.onProgress((received / contentLength) * 100);
+        }
       }
+    } catch (err) {
+      if (cfg.signal?.aborted || err?.name === 'AbortError') {
+        try {
+          await reader.cancel();
+        } catch { /* ignore */ }
+      }
+      throw err;
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch { /* ignore */ }
     }
 
+    if (cfg.signal?.aborted) {
+      throw new DOMException('Operation aborted', 'AbortError');
+    }
     const buffer = concatUint8Arrays(chunks).buffer;
     await saveToCache(cacheKey, buffer);
     logger.info(`Download complete and cached: ${cacheKey}`);

@@ -1,3 +1,5 @@
+const browserFileStore = new Map();
+
 /**
  * rapid_doc/data/data_reader_writer/index.js
  * PORTING NOTE: data/data_reader_writer/__init__.py → index.js
@@ -97,6 +99,7 @@ export class FileBasedDataWriter extends MemoryDataWriter {
    */
   write(path, data) {
     const fullPath = this._parentDir ? `${this._parentDir}/${path}` : path;
+    browserFileStore.set(fullPath, data instanceof ArrayBuffer ? new Uint8Array(data) : data);
     super.write(fullPath, data);
   }
 
@@ -106,6 +109,7 @@ export class FileBasedDataWriter extends MemoryDataWriter {
    */
   writeString(path, data) {
     const fullPath = this._parentDir ? `${this._parentDir}/${path}` : path;
+    browserFileStore.set(fullPath, data);
     super.writeString(fullPath, data);
   }
 }
@@ -122,9 +126,12 @@ export class FileBasedDataReader extends DataReader {
     this._parentDir = parentDir;
   }
 
-  /** @returns {Uint8Array} */
-  readAt(_path) {
-    console.warn('[FileBasedDataReader] readAt() not supported in browser.');
+  /** @returns {Uint8Array|string} */
+  readAt(path) {
+    const fullPath = this._parentDir ? `${this._parentDir}/${path}` : path;
+    const value = browserFileStore.get(fullPath) ?? browserFileStore.get(path);
+    if (value !== undefined) return value;
+    console.warn(`[FileBasedDataReader] ${fullPath} is not present in the browser-backed file store.`);
     return new Uint8Array(0);
   }
 }

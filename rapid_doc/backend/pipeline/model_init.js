@@ -86,6 +86,29 @@ export async function disposeModelResource(resource, seen = new WeakSet()) {
 // Individual model init functions
 // ---------------------------------------------------------------------------
 
+function normalizeExecutionProvider(config = null) {
+  return config?.execution_provider ?? config?.executionProvider ?? null;
+}
+
+function normalizeExecutionProviders(config = null) {
+  const explicit = config?.executionProviders ?? config?.execution_providers ?? null;
+  if (Array.isArray(explicit) && explicit.length) return explicit;
+  return normalizeExecutionProvider(config) === "wasm" ? ["wasm"] : ["webgpu", "wasm"];
+}
+
+function withEngineProviderConfig(config = null) {
+  const cfg = config ? { ...config } : {};
+  const provider = normalizeExecutionProvider(cfg);
+  if (provider) {
+    cfg.engine_cfg = {
+      ...(cfg.engine_cfg ?? cfg.engineCfg ?? {}),
+      use_webgpu: provider !== "wasm",
+    };
+    cfg.engineCfg = cfg.engine_cfg;
+  }
+  return cfg;
+}
+
 /**
  * Initialize a table recognition model.
  * PORTING NOTE: table_model_init(lang, ocr_config, table_config) → async
@@ -125,12 +148,11 @@ export async function formulaModelInit(formulaConfig = null) {
     console.info('[formulaModelInit] Loading LaTeX-OCR (WebGPU-compatible)...');
     try {
       const useWebGpu = formulaConfig?.execution_provider !== "wasm";
-      return await LatexOCRModel.create({
-        useWebGpu,
-        maxLen: formulaConfig?.maxLen ?? 512,
-      });
+      const latexConfig = { useWebGpu };
+      if (formulaConfig?.maxLen != null) latexConfig.maxLen = formulaConfig.maxLen;
+      return await LatexOCRModel.create(latexConfig);
     } catch (err) {
-      console.error('[formulaModelInit] LaTeX-OCR failed to load:', err.message);
+      console.error('[formulaModelInit] LaTeX-OCR failed to load after provider retries:', err.message);
       console.warn('[formulaModelInit] Falling back to PP-FormulaNet Plus S...');
       // Fallback to PP-FormulaNet
       return RapidFormulaModel.create({
@@ -151,7 +173,7 @@ export async function formulaModelInit(formulaConfig = null) {
  * @returns {Promise<RapidLayoutModel>}
  */
 export async function layoutModelInit(layoutConfig = null) {
-  return RapidLayoutModel.create(layoutConfig);
+  return RapidLayoutModel.create(withEngineProviderConfig(layoutConfig));
 }
 
 /**
@@ -197,7 +219,10 @@ export async function ocrModelInit(
 }
 
 export async function orientationModelInit(orientationConfig = null) {
-  return RapidOrientationModel.create(orientationConfig ?? {});
+  return RapidOrientationModel.create({
+    ...(orientationConfig ?? {}),
+    executionProviders: normalizeExecutionProviders(orientationConfig),
+  });
 }
 
 /**
@@ -408,6 +433,7 @@ export class MineruPipelineModel {
     inst.formulaConfig = kwargs.formula_config ?? {};
     inst.applyFormula = inst.formulaConfig.enable ?? true;
     inst.tableConfig = kwargs.table_config ?? {};
+    inst.orientationConfig = kwargs.orientation_config ?? {};
     inst.applyTable = inst.tableConfig.enable ?? true;
     inst.lang = kwargs.lang ?? null;
     inst.device = kwargs.device ?? "cpu";

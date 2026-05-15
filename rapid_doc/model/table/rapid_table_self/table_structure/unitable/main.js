@@ -52,11 +52,19 @@ export class UniTableStructure {
       const { data, dims } = unitablePreprocess(img);
       const inputName = this.session.getInputNames()[0];
       const inputTensor = new ort.Tensor("float32", data, dims);
-      const outputMap = await this.session.run({ [inputName]: inputTensor });
-      const outputName = this.session.getOutputNames()[0];
-      const decoded = decodeUniTableOutput(outputMap[outputName], this.vocab);
-      const innerHtml = (decoded[0] ?? "").replace(/<\/?table>/g, "");
-      results.push({ structure: [innerHtml || "<thead></thead><tbody></tbody>"], cellBboxes: [] });
+      let outputMap = null;
+      try {
+        outputMap = await this.session.run({ [inputName]: inputTensor });
+        const outputName = this.session.getOutputNames()[0];
+        const outputTensor = outputMap instanceof Map ? outputMap.get(outputName) : outputMap[outputName];
+        const decoded = decodeUniTableOutput(outputTensor, this.vocab);
+        const innerHtml = (decoded[0] ?? "").replace(/<\/?table>/g, "");
+        results.push({ structure: [innerHtml || "<thead></thead><tbody></tbody>"], cellBboxes: [] });
+      } finally {
+        if (outputMap instanceof Map) {
+          for (const tensor of outputMap.values()) tensor?.dispose?.();
+        }
+      }
     }
     return {
       structures: results.map(r => r.structure),

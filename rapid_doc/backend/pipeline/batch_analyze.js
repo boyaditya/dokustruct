@@ -65,6 +65,7 @@ export class BatchAnalyze {
    * @param {object|null} formulaConfig
    * @param {object|null} tableConfig
    * @param {object|null} checkboxConfig
+   * @param {object|null} orientationConfig
    */
   constructor(
     modelManager,
@@ -76,6 +77,7 @@ export class BatchAnalyze {
     formulaConfig = null,
     tableConfig = null,
     checkboxConfig = null,
+    orientationConfig = null,
   ) {
     this.modelManager = modelManager;
     this.batchRatio = batchRatio;
@@ -88,6 +90,7 @@ export class BatchAnalyze {
     this.ocrConfig = ocrConfig || {};
     this.formulaConfig = formulaConfig || {};
     this.tableConfig = tableConfig || {};
+    this.orientationConfig = orientationConfig || {};
     const ratioBatch = Math.max(1, Number(this.batchRatio) || 1);
     if (!this.ocrConfig["Det.rec_batch_num"]) this.ocrConfig["Det.rec_batch_num"] = Math.min(4, ratioBatch);
     if (!this.layoutConfig.batch_num) this.layoutConfig.batch_num = Math.min(4, ratioBatch);
@@ -163,6 +166,7 @@ export class BatchAnalyze {
       ocr_config: this.ocrConfig,
       formula_config: this.formulaConfig,
       table_config: this.tableConfig,
+      orientation_config: this.orientationConfig,
     });
 
     this.useCustomOcr = typeof this.model.ocrModel?.batchPredict === "function" &&
@@ -184,7 +188,8 @@ export class BatchAnalyze {
     if (this.useDocOrientationClassify) {
       const atomModelManager = AtomModelSingleton.getInstance();
       const imgOrientationClsModel = await atomModelManager.getAtomModel(
-        AtomicModel.ImgOrientationCls
+        AtomicModel.ImgOrientationCls,
+        { orientation_config: this.orientationConfig }
       );
       for (let i = 0; i < npImages.length; i++) {
         const npImg = npImages[i];
@@ -578,7 +583,7 @@ export class BatchAnalyze {
           tableResDict.table_img = tableResDict.rect_table_img;
           await processSingleTable(
             tableResDict, pageDict, scale, atomModelManager,
-            this.tableConfig, this.ocrConfig
+            this.tableConfig, this.ocrConfig, this.orientationConfig
           );
         } catch (err) {
           console.warn('[BatchAnalyze] table recognition skipped:', formatPipelineError(err));
@@ -634,6 +639,7 @@ export class BatchAnalyze {
       const atomModelManager = AtomModelSingleton.getInstance();
       sealOcrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
         is_seal: true,
+        det_db_thresh: this.ocrConfig?.["Det.det_db_thresh"] ?? this.ocrConfig?.det_db_thresh ?? 0.3,
         ocr_config: this.ocrConfig,
       });
       for (const [sealCropBgr, layoutRe] of sealOcrItems) {

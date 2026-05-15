@@ -29,7 +29,7 @@ export class ProviderConfig {
   static async buildSessionOptions(extraOpts = {}) {
     const providers = await ProviderConfig.getAvailableProviders();
     // Configure WASM runtime with multi-threading for maximum CPU utilization
-    configureOrtWasmRuntime({ numThreads: 4, useWebGpu: false });
+    await configureOrtWasmRuntime({ numThreads: 4, useWebGpu: false });
     // CRITICAL ARCHITECTURE DECISION: FormulaNet uses an ONNX `Loop` operator
     // for autoregressive token generation (717 ops/iteration × ~600 iterations).
     // WebGPU has ~0.03ms dispatch overhead per GPU command, creating ~13s of pure

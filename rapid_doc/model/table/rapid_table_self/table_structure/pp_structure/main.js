@@ -9,6 +9,7 @@ import { ModelProcessor } from "../../model_processor/main.js";
 import { ModelType } from "../../utils/typings.js";
 import { TablePreprocess } from "./pre_process.js";
 import { TableLabelDecode } from "./post_process.js";
+import { fetchAssetText } from "../../../../../utils/download_file.js";
 
 /**
  * PP-Structure table structure recognizer.
@@ -52,9 +53,7 @@ export class PPTableStructurer {
         : '/models/table/table_structure_dict_ch.txt';
       
       try {
-        const resp = await fetch(dictUrl);
-        if (!resp.ok) throw new Error(`Failed to fetch dict: ${resp.status}`);
-        const text = await resp.text();
+        const text = await fetchAssetText(dictUrl);
         charList = text.split('\n').filter(s => s.length > 0);
       } catch (err) {
         console.error('[PPTableStructurer] Failed to load dict file:', err);

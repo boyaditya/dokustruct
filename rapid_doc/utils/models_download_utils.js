@@ -1,4 +1,6 @@
 // Copyright (c) Opendatalab. All rights reserved.
+import { fetchAssetBuffer, fetchAssetText } from './download_file.js';
+
 /**
  * PORTING NOTE: models_download_utils.py → models_download_utils.js
  *
@@ -18,9 +20,7 @@
  */
 export async function readYaml(url) {
   const { load } = await import('js-yaml');
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`[models_download_utils] Failed to fetch YAML: ${url}`);
-  const text = await response.text();
+  const text = await fetchAssetText(url);
   return load(text);
 }
 
@@ -50,7 +50,5 @@ export function ocrDownload(_mineruModelsDir, _modelsPkg, _configsPkg) {
  * @returns {Promise<ArrayBuffer>}
  */
 export async function fetchModelBuffer(modelUrl, { sha256: _sha256 = null } = {}) {
-  const response = await fetch(modelUrl);
-  if (!response.ok) throw new Error(`[models_download_utils] Failed to fetch model: ${modelUrl}`);
-  return response.arrayBuffer();
+  return fetchAssetBuffer(modelUrl);
 }

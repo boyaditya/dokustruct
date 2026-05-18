@@ -7,6 +7,7 @@
 import { InferSession } from "../base.js";
 import { ProviderConfig } from "./provider_config.js";
 import * as ort from "onnxruntime-web";
+import { fetchAssetBuffer } from "../../../../../utils/download_file.js";
 
 /**
  * ONNX Runtime inference session for table models.
@@ -40,9 +41,7 @@ export class OrtInferSession extends InferSession {
     const sessionOptions = await ProviderConfig.buildSessionOptions(cfg.engine_cfg ?? {});
     let modelData = cfg.model_dir_or_path;
     if (typeof modelData === "string") {
-      const resp = await fetch(modelData);
-      if (!resp.ok) throw new Error(`OrtInferSession: failed to fetch model ${modelData}`);
-      modelData = await resp.arrayBuffer();
+      modelData = await fetchAssetBuffer(modelData);
     }
     try {
       inst.session = await ort.InferenceSession.create(modelData, sessionOptions);

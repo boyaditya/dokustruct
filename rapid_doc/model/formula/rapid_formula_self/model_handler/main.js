@@ -4,6 +4,7 @@
 
 import { ModelType } from "../utils/typings.js";
 import { PPFormulaNetPlusModelHandler } from "./pp_formulanet_plus/main.js";
+import { fetchAssetText } from "../../../../utils/download_file.js";
 
 // Target sizes per model variant
 const TARGET_SIZE_MAP = {
@@ -44,9 +45,7 @@ export class ModelHandler {
       }
       try {
         const vocabUrl = '/models/formula/formula_vocab.json';
-        const response = await fetch(vocabUrl);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        tokenizerJson = await response.text();
+        tokenizerJson = await fetchAssetText(vocabUrl);
         if (!tokenizerJson.trim()) throw new Error('empty tokenizer file');
       } catch (err) {
         console.error('[RapidFormula] Failed to load fallback tokenizer:', err.message);

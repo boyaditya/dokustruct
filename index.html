@@ -128,7 +128,6 @@
           <select id="formulaModel">
             <option value="pp_formulanet_plus_s">PP-FormulaNet Plus S (Fast)</option>
             <option value="pp_formulanet_plus_m">PP-FormulaNet Plus M (Balanced)</option>
-            <option value="pp_formulanet_plus_l">PP-FormulaNet Plus L (Accurate)</option>
             <option value="latex_ocr">LaTeX-OCR (WebGPU)</option>
           </select>
         </label>
@@ -158,6 +157,48 @@
         <strong>Runtime</strong>
         <span>Preparing document runtime...</span>
       </div>
+
+      <section class="asset-gate-card" id="assetGateCard" aria-label="Required assets">
+        <div class="asset-gate-header">
+          <div>
+            <strong>Assets</strong>
+            <span id="assetGateSummary">Checking required assets...</span>
+            <small>Models are downloaded once and cached in this browser.</small>
+          </div>
+          <span class="asset-gate-badge" id="assetGateBadge">Pending</span>
+        </div>
+        <div class="asset-pack-grid" id="assetPackGrid">
+          <div class="asset-pack-row" id="assetCorePack">
+            <div>
+              <strong>Core pack</strong>
+              <span id="assetCorePackStatus">Checking cache...</span>
+            </div>
+            <span class="asset-pack-badge" id="assetCorePackBadge">Required</span>
+          </div>
+          <div class="asset-pack-row" id="assetFormulaPack">
+            <div>
+              <strong id="assetFormulaPackTitle">Formula pack</strong>
+              <span id="assetFormulaPackStatus">Optional until Formula is enabled.</span>
+            </div>
+            <button class="asset-pack-action" id="assetFormulaDownloadBtn" type="button">Predownload</button>
+          </div>
+        </div>
+        <div class="asset-progress" id="assetProgressTrack" aria-hidden="true">
+          <div class="asset-progress-fill" id="assetProgressFill"></div>
+        </div>
+        <div class="asset-progress-meta">
+          <span id="assetProgressLabel">Download required assets before runtime warmup.</span>
+          <span id="assetProgressPercent">0%</span>
+        </div>
+        <button class="btn-secondary asset-download-btn" id="assetDownloadBtn" type="button">
+          <i data-lucide="download"></i>
+          <span>Download required assets</span>
+        </button>
+        <details class="asset-details" id="assetDetails">
+          <summary>ONNX model details</summary>
+          <div class="asset-list" id="assetList"></div>
+        </details>
+      </section>
     </div>
   </section>
 

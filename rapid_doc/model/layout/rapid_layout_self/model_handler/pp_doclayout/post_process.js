@@ -853,7 +853,7 @@ export function convertPolygonToQuad(polygon) {
     pointsMat = cv.matFromArray(polygon.length, 1, cv.CV_32FC2, flat);
 
     const minRect = cv.minAreaRect(pointsMat);
-    // OpenCV.js 4.x (docs.opencv.org) only accepts 1-arg form.
+    // OpenCV.js 4.x only accepts the 1-arg form.
     let quad = cv.boxPoints(minRect);
 
     // Read 4 points safely: try data32F first, else floatAt fallback.

@@ -97,8 +97,35 @@ export { detectLang, removeInvalidSurrogates } from './utils/language.js';
 // Utilities — model downloads & config
 // ---------------------------------------------------------------------------
 
-export { downloadFile, DownloadFile, DownloadFileInput, CPU_MODEL } from './utils/download_file.js';
-export { UI_MODEL_URL_MAP, downloadModel, getRequiredModels } from './utils/model_url_map.js';
+export {
+  downloadFile,
+  DownloadFile,
+  DownloadFileInput,
+  getAssetStatus,
+  getAssetsStatus,
+  downloadAsset,
+  downloadAssetGroup,
+  downloadModel,
+  clearAsset,
+  fetchAssetBuffer,
+  fetchAssetText,
+  fetchAssetJson,
+  getAssetRuntimeUrl,
+  getCachedAssetObjectUrl,
+  CPU_MODEL,
+} from './utils/download_file.js';
+export {
+  ASSET_MANIFEST,
+  HF_ASSET_BASE,
+  UI_MODEL_URL_MAP,
+  RUNTIME_ASSET_IDS,
+  getAssetDetailRows,
+  findAssetByUrl,
+  getAsset,
+  getRequiredAssets,
+  getRequiredModels,
+  summarizeAssets,
+} from './utils/model_url_map.js';
 export { getDevice, setConfig, readConfig } from './utils/config_reader.js';
 export { makeHashable, bytesMd5, strMd5, strSha256 } from './utils/hash_utils.js';
 

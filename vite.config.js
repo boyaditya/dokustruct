@@ -43,6 +43,7 @@ export default defineConfig({
   },
   
   resolve: {
+    conditions: ['module', 'browser', 'development|production', 'onnxruntime-web-use-extern-wasm'],
     alias: {
       '@rapid_doc': path.resolve(__dirname, 'rapid_doc'),
     }

@@ -6,6 +6,7 @@
 import { InferSession } from "../base.js";
 import { ProviderConfig } from "./provider_config.js";
 import * as ort from "onnxruntime-web";
+import { fetchAssetBuffer } from "../../../../../utils/download_file.js";
 
 /**
  * ONNX Runtime inference session wrapper.
@@ -32,9 +33,7 @@ export class OrtInferSession extends InferSession {
     if (cfg.modelDirOrPath instanceof Uint8Array || cfg.modelDirOrPath instanceof ArrayBuffer) {
       modelData = cfg.modelDirOrPath;
     } else if (typeof cfg.modelDirOrPath === "string") {
-      const resp = await fetch(cfg.modelDirOrPath);
-      if (!resp.ok) throw new Error(`Failed to load model: ${resp.status} ${resp.statusText}`);
-      modelData = await resp.arrayBuffer();
+      modelData = await fetchAssetBuffer(cfg.modelDirOrPath);
     } else {
       throw new Error("OrtInferSession: modelDirOrPath must be a URL string or ArrayBuffer/Uint8Array");
     }

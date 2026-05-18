@@ -250,6 +250,8 @@ function createInitialState() {
     modelStatus: {},           // { [modelId]: 'not_downloaded'|'downloading'|'cached'|'error'|'cancelled' }
     modelProgress: {},         // { [modelId]: 0-100 }
     modelSizeMb: {},           // { [modelId]: number }
+    assetStatus: {},           // { [assetId]: { status, cached, sizeBytes } }
+    assetProgress: null,       // last asset download progress event
     runtimeStatus: 'idle',
     warmupStatus: 'idle',
     warmupConfigKey: null,
@@ -401,7 +403,8 @@ export class AppState {
 
   /**
    * Reset state to initial values and notify all subscribers.
-   * Preserves: modelStatus, modelProgress, modelSizeMb, researchMode,
+   * Preserves: modelStatus, modelProgress, modelSizeMb, assetStatus,
+   *            assetProgress, researchMode,
    *            activeExecutionProvider (hardware detection — not user config).
    */
   reset() {
@@ -409,6 +412,8 @@ export class AppState {
       modelStatus:            { ...this.#state.modelStatus },
       modelProgress:          { ...this.#state.modelProgress },
       modelSizeMb:            { ...this.#state.modelSizeMb },
+      assetStatus:            { ...this.#state.assetStatus },
+      assetProgress:          this.#state.assetProgress,
       researchMode:           this.#state.researchMode,
       activeExecutionProvider: this.#state.activeExecutionProvider,
     };

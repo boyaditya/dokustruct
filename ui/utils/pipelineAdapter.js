@@ -15,6 +15,13 @@
  */
 
 import { appState } from '../state/appState.js';
+import {
+  clearAsset,
+  downloadAssetGroup,
+  getAssetRuntimeUrl,
+  getAssetsStatus,
+} from '../../rapid_doc/utils/download_file.js';
+import { getFormulaAssets, summarizeAssets } from '../../rapid_doc/utils/model_url_map.js';
 
 // ---------------------------------------------------------------------------
 // Image helpers
@@ -1117,6 +1124,57 @@ export class PipelineAdapter {
     }
   }
 
+  getRequiredAssetIds(state = appState, file = state.currentFile) {
+    const config = this._buildConfig(state, file);
+    const engine = _engineModule;
+    if (engine && typeof engine.getRequiredAssets === 'function') {
+      return engine.getRequiredAssets(config);
+    }
+    return [];
+  }
+
+  async getRequiredAssetSummary(state = appState, file = state.currentFile) {
+    const engine = await getEngine();
+    const config = this._buildConfig(state, file);
+    const ids = typeof engine?.getRequiredAssets === 'function'
+      ? engine.getRequiredAssets(config)
+      : [];
+    const status = await getAssetsStatus(ids);
+    return {
+      ...summarizeAssets(ids),
+      status,
+      ready: ids.every(id => status[id]?.cached),
+    };
+  }
+
+  async downloadRequiredAssets(state = appState, file = state.currentFile, onProgress = null, signal = null) {
+    const summary = await this.getRequiredAssetSummary(state, file);
+    const missingIds = summary.ids.filter(id => !summary.status[id]?.cached);
+    if (!missingIds.length) return summary;
+    await downloadAssetGroup(missingIds, onProgress, signal);
+    return this.getRequiredAssetSummary(state, file);
+  }
+
+  async getFormulaAssetSummary(state = appState, file = state.currentFile) {
+    const config = this._buildConfig(state, file);
+    const ids = getFormulaAssets(config);
+    const status = await getAssetsStatus(ids);
+    return {
+      ...summarizeAssets(ids),
+      enabled: Boolean(config.formula_enable),
+      status,
+      ready: ids.length > 0 && ids.every(id => status[id]?.cached),
+    };
+  }
+
+  async downloadFormulaAssets(state = appState, file = state.currentFile, onProgress = null, signal = null) {
+    const summary = await this.getFormulaAssetSummary(state, file);
+    const missingIds = summary.ids.filter(id => !summary.status[id]?.cached);
+    if (!missingIds.length) return summary;
+    await downloadAssetGroup(missingIds, onProgress, signal);
+    return this.getFormulaAssetSummary(state, file);
+  }
+
   /**
    * Check which models are required for the current config and download any missing ones.
    * @param {import('../state/appState.js').AppState} state
@@ -1126,11 +1184,22 @@ export class PipelineAdapter {
     const engine = await getEngine();
     if (!engine) return;
 
-    // If engine exposes a model-check API, use it
-    if (typeof engine.getRequiredModels === 'function') {
+    // The setup gate should have cached these already. This stays as a direct
+    // safeguard for programmatic callers that use PipelineAdapter without the UI.
+    if (typeof engine.getRequiredAssets === 'function') {
+      const required = engine.getRequiredAssets(this._buildConfig(state, state.currentFile));
+      const status = await getAssetsStatus(required);
+      const missing = required.filter(assetId => !status[assetId]?.cached);
+      if (missing.length) {
+        await downloadAssetGroup(missing, (event) => {
+          if (event.assetId) state.setModelStatus(event.assetId, 'downloading', event.percent);
+        }, signal);
+        for (const assetId of missing) state.setModelStatus(assetId, 'cached', 100);
+      }
+    } else if (typeof engine.getRequiredModels === 'function') {
       const required = engine.getRequiredModels(this._buildConfig(state, state.currentFile));
       for (const modelId of required) {
-        if (signal.aborted) return;
+        if (signal?.aborted) return;
         if (state.get('modelStatus')[modelId] !== 'cached') {
           await this._downloadSingleModel(modelId, state, signal);
         }

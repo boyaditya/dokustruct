@@ -1,5 +1,6 @@
 import * as ort from "onnxruntime-web";
 import { configureOrtRuntime, acquireGlobalGpu } from "../../utils/ort_runtime.js";
+import { fetchAssetBuffer } from "../../utils/download_file.js";
 import { LoadImage } from "../table/rapid_table_self/utils/load_image.js";
 import { deleteMat } from "../../utils/resource_utils.js";
 
@@ -169,12 +170,7 @@ export class RapidOrientationEngine {
     inst.useWebGpu = executionProviders.includes("webgpu");
     await configureOrtRuntime({ numThreads: 4, useWebGpu: inst.useWebGpu });
 
-    const resp = await fetch(modelUrl);
-    if (!resp.ok) {
-      throw new Error(`[RapidOrientation] Failed to fetch model at ${modelUrl} (HTTP ${resp.status})`);
-    }
-
-    const modelBytes = await resp.arrayBuffer();
+    const modelBytes = await fetchAssetBuffer(modelUrl);
     inst.session = await ort.InferenceSession.create(modelBytes, {
       executionProviders,
       logSeverityLevel: 4,

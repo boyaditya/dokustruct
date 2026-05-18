@@ -1,6 +1,5 @@
 import * as ort from 'onnxruntime-web';
-import ortWasmThreadedJsepMjsUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url';
-import ortWasmThreadedJsepWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
+import { getAssetRuntimeUrl } from './download_file.js';
 
 let configured = false;
 let gpuDevice = null;
@@ -17,9 +16,13 @@ export async function configureOrtRuntime(opts = {}) {
 
   // WASM Config
   if (runtime.env.wasm) {
+    const [mjsUrl, wasmUrl] = await Promise.all([
+      getAssetRuntimeUrl('runtime_ort_jsep_mjs'),
+      getAssetRuntimeUrl('runtime_ort_jsep_wasm'),
+    ]);
     runtime.env.wasm.wasmPaths = {
-      mjs: ortWasmThreadedJsepMjsUrl,
-      wasm: ortWasmThreadedJsepWasmUrl,
+      mjs: mjsUrl,
+      wasm: wasmUrl,
     };
 
     const fallbackThreads = typeof SharedArrayBuffer === 'undefined' ? 1 : 2;

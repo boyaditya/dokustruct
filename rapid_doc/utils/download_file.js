@@ -255,6 +255,18 @@ async function downloadFromSources({
   throw lastError ?? new Error(`No download source available for ${cacheKey}`);
 }
 
+/**
+ * Compute SHA-256 hex digest of a Uint8Array using SubtleCrypto.
+ * @param {Uint8Array} bytes
+ * @returns {Promise<string>} lowercase hex string
+ */
+async function computeSha256Hex(bytes) {
+  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(buf)]
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export class DownloadFile {
   async call(cfg) {
     const resolvedAsset = findAssetByUrl(cfg.url);
@@ -278,7 +290,23 @@ export class DownloadFile {
         ? (percent) => onProgress(percent)
         : cfg.onProgress,
     }));
-    return toUint8Array(buffer);
+    const bytes = toUint8Array(buffer);
+
+    // FIX: SHA-256 verification (Audit/Requirement 1.1)
+    if (cfg.sha256) {
+      const computed = await computeSha256Hex(bytes);
+      if (computed !== cfg.sha256.toLowerCase()) {
+        throw new Error(
+          `[DownloadFile] SHA-256 mismatch for ${cfg.url}: ` +
+          `expected ${cfg.sha256}, got ${computed}`
+        );
+      }
+    } else if (process.env.NODE_ENV !== 'production') {
+      // Dev-mode warning to discourage missing hashes
+      console.warn(`[DownloadFile] SHA-256 not provided for ${cfg.url}`);
+    }
+
+    return bytes;
   }
 }
 

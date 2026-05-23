@@ -14,6 +14,13 @@ export const REMOTE_REC_MODEL_URL_EN_CANDIDATES = [
   'https://www.modelscope.cn/models/RapidAI/PP-OCRv5_rec/resolve/main/PP-OCRv5_mobile_rec.onnx',
 ];
 
+// FIX (Audit 1.2): SHA-256 hashes for OCR model files in public/models/
+export const DEFAULT_DET_MODEL_SHA256 = '4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae';
+export const DEFAULT_REC_MODEL_SHA256_CH = '5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5';
+export const DEFAULT_REC_MODEL_SHA256_EN = 'c3461add59bb4323ecba96a492ab75e06dda42467c9e3d0c18db5d1d21924be8';
+export const DEFAULT_SEAL_DET_MODEL_URL = '/models/ocr/pp-ocrv4_mobile_seal_det.onnx';
+export const DEFAULT_SEAL_DET_MODEL_SHA256 = 'e6109a1022b5ebf0822fc00646ef2398a7ef387390ca5c978de79352b1314204';
+
 /**
  * Normalizes a URL to a cache key suitable for IndexedDB/Cache API storage.
  * Same-origin paths are stripped to relative form; cross-origin URLs are kept as-is.

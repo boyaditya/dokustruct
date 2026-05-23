@@ -12,6 +12,16 @@
 
 // ─── Threshold maps (unchanged from Python, used by model handlers) ──────────
 
+export const PP_DOCLAYOUTV2_Threshold = Object.freeze({
+  // Index → threshold (matches Python rapid_layout/rapid_layout_self/utils/typings.py)
+  0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5,
+  5: 0.5,  // FIXED: was 0.4 (Audit L6)
+  6: 0.5, 7: 0.5, 8: 0.5, 9: 0.5,
+  10: 0.5, 11: 0.5, 12: 0.5, 13: 0.5, 14: 0.5,
+  15: 0.5, // FIXED: was 0.4 (Audit L6)
+  16: 0.5, 17: 0.5, 18: 0.5, 19: 0.5, 20: 0.5, 21: 0.5,
+});
+
 export const PP_DOCLAYOUT_PLUS_L_Threshold = Object.freeze({
   0: 0.3,  // paragraph_title
   1: 0.5,  // image
@@ -43,7 +53,7 @@ export const PP_DOCLAYOUT_L_Threshold = Object.freeze({
   4: 0.5,  // abstract
   5: 0.5,  // content
   6: 0.5,  // figure_title
-  7: 0.3,  // formula
+  7: 0.5,  // formula         FIXED: was 0.3 (Audit L7)
   8: 0.5,  // table
   9: 0.5,  // table_title
   10: 0.5, // reference
@@ -52,7 +62,7 @@ export const PP_DOCLAYOUT_L_Threshold = Object.freeze({
   13: 0.5, // header
   14: 0.5, // algorithm
   15: 0.5, // footer
-  16: 0.2, // seal
+  16: 0.45, // seal           FIXED: was 0.2 (Audit L7)
   17: 0.5, // header_image
   18: 0.5, // footer_image
   19: 0.5, // aside_text
@@ -82,7 +92,7 @@ export const PP_DOCLAYOUT_SHAPE_MODE = Object.freeze({
   17: 'large', // chart
   18: 'union', // formula_number
   19: 'union', // aside_text
-  19: 'union', // reference_content
+  20: 'union', // reference_content
 });
 
 // ─── Enums ────────────────────────────────────────────────────────────────────

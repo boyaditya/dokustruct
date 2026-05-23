@@ -5,18 +5,21 @@ import { ModelType, normalizeTableModelType } from "../utils/typings.js";
 
 // Models are served locally from public/models/ (Vite static assets).
 // Run `python scripts/copy-models-to-public.py` to populate public/models/.
-// SHA-256 disabled (null) to avoid cache mismatch issues during development
+// SHA-256 hashes computed from local public/models/ files (Audit 1.2: FIX — fill sha256 fields).
+// For models not yet available locally (e.g., UniTable), sha256 remains null until files are present.
+// TODO: fill in sha256 for UniTable files when they become available.
 const MODEL_URLS = {
   [ModelType.SLANETPLUS]: {
     modelUrl: '/models/table/slanet-plus.onnx?v=ort-shape-fix-1',
-    sha256: null, // Disabled for development
+    sha256: 'f9ce699522678406dbab901f4f663346dd8f04f7c752dd3c1bb70554871e49b7',
   },
   [ModelType.UNET]: {
     modelUrl: '/models/table/unet.onnx',
-    sha256: null, // Disabled for development
+    sha256: '0ea48d3a17e35ef5c2e498a5e799566073234d39b1079ca21d9f4fafe73c6d20',
   },
   [ModelType.UNITABLE]: {
     // UNITABLE needs multiple files: encoder + decoder + vocab
+    // TODO: fill in sha256 array [encoder, decoder, vocab] when UniTable files are available
     modelUrls: [
       '/models/table/unitable/encoder.pth',
       '/models/table/unitable/decoder.pth',
@@ -26,19 +29,19 @@ const MODEL_URLS = {
   },
   [ModelType.PADDLE_CLS]: {
     modelUrl: '/models/table/table_cls/paddle_cls.onnx',
-    sha256: null, // Disabled for development
+    sha256: '21c801f0c403cf960f9f1ccaecf506585b3b98421208033755b9e67cd2371492',
   },
   [ModelType.Q_CLS]: {
     modelUrl: '/models/table/table_cls/q_cls.onnx',
-    sha256: null, // Disabled for development
+    sha256: 'ef940037471c49f5d35ba2b1d9df9a19eabddf03f1689026d2a5bcab5efe577b',
   },
   [ModelType.PPSTRUCTURE_CH]: {
     modelUrl: '/models/table/ch_ppstructure_mobile_v2_SLANet.onnx',
-    sha256: null, // Disabled for development
+    sha256: 'ddfc6c97ee4db2a5e9de4de8b6a14508a39d42d228503219fdfebfac364885e3',
   },
   [ModelType.PPSTRUCTURE_EN]: {
     modelUrl: '/models/table/en_ppstructure_mobile_v2_SLANet.onnx',
-    sha256: null, // Disabled for development
+    sha256: '2cae17d16a16f9df7229e21665fe3fbe06f3ca85b2024772ee3e3142e955aa60',
   },
 };
 

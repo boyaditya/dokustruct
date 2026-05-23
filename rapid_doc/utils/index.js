@@ -64,3 +64,6 @@ export * from './markdown_to_word.js';
 
 // ── Download utilities ────────────────────────────────────────────────────────
 export * from './download_file.js';
+
+// ── Shared math helpers (intTrunc, bankerRound, tensorToNumber, …) ────────────
+export * from './math_utils.js';

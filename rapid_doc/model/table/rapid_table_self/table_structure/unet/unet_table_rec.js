@@ -47,7 +47,8 @@ export class UnetTableRecognition {
         }
 
         // Get polygons from structure detection
-        const structResult = await this.tableStructure.run([oriImgs[i]]);
+        // FIX T17: forward kwargs from caller chain to postprocess (matches Python)
+        const structResult = await this.tableStructure.run([oriImgs[i]], opts);
         let { polygons, rotatedPolygons } = structResult[0];
 
         if (!polygons || polygons.length === 0) {
@@ -72,9 +73,10 @@ export class UnetTableRecognition {
         }
 
         if (!needOcr) {
+          // FIX T21: sync to default 0.2 threshold (matches Python)
           const [sortedPolygons, idxList] = sortedOcrBoxes(
             polygons.map(p => box42PolyToBox41(p)),
-            0.3
+            0.2
           );
           predHtmls.push("");
           cellBboxes.push(sortedPolygons);

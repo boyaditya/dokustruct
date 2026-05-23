@@ -15,6 +15,7 @@ import { EngineType } from '../../../../../utils/typings.js';
 import { getLogger } from '../../../../../utils/logger.js';
 import { downloadFile } from '../../../../../utils/download_file.js';
 import { configureOrtWasmRuntime, acquireGlobalGpu } from '../../../../../utils/ort_runtime.js';
+import { tensorDataToFloat64 } from '../../../../../utils/math_utils.js';
 
 const logger = getLogger('OrtInferSession');
 
@@ -172,7 +173,8 @@ export class OrtInferSession extends InferSession {
           imShape[i * 2] = h;
           imShape[i * 2 + 1] = w;
         }
-        inputFeed['im_shape'] = new ort.Tensor('float32', imShape, [batch, 2]);
+        // FIX L15: im_shape always [1, 2] (matches Python — first image H/W only)
+        inputFeed['im_shape'] = new ort.Tensor('float32', imShape.slice(0, 2), [1, 2]);
       }
     } else {
       // Single-input model (standard layout detection)
@@ -203,14 +205,22 @@ export class OrtInferSession extends InferSession {
         if (!tensor) continue;
         
         // Extract data from GPU if needed (async, overlaps with next inference)
-        const data = typeof tensor.getData === 'function' ? await tensor.getData() : tensor.data;
-        
-        // Store as a mock tensor object so downstream post-processors 
+        const rawData = typeof tensor.getData === 'function' ? await tensor.getData() : tensor.data;
+
+        // FIX L1: coerce BigInt to Number for arithmetic
+        // int64 ONNX outputs arrive as BigInt64Array in onnxruntime-web; any downstream
+        // arithmetic on them throws "TypeError: Cannot mix BigInt and other types".
+        // tensorDataToFloat64 handles BigInt64Array safely and is a no-op for float arrays.
+        const data = (rawData instanceof BigInt64Array || tensor.type === 'int64')
+          ? tensorDataToFloat64(rawData)
+          : rawData;
+
+        // Store as a mock tensor object so downstream post-processors
         // can access .data and .dims without holding the WebGPU buffer open.
         finalOutputs.push({
           data: data.slice(), // clone data to ensure safe memory decoupling
           dims: tensor.dims,
-          type: tensor.type
+          type: tensor.type === 'int64' ? 'float64' : tensor.type,
         });
       }
       return finalOutputs;

@@ -8,7 +8,7 @@ import { RapidOcrModel } from "../../model/ocr/rapid_ocr.js";
 import { RapidTableModel } from "../../model/table/rapid_table.js";
 import { RapidOrientationModel } from "../../model/orientation/rapid_orientation_model.js";
 import { makeHashable } from "../../utils/hash_utils.js";
-import { formatPipelineError } from "../../utils/browser_utils.js";
+import { formatPipelineError, detectProfile } from "../../utils/browser_utils.js";
 import { AbortException } from "../../utils/exceptions.js";
 
 const DISPOSED_MARK = Symbol.for("rapiddoc.disposed");
@@ -135,7 +135,8 @@ export async function tableModelInit(lang = null, ocrConfig = null, tableConfig 
  * @returns {Promise<RapidFormulaModel|LatexOCRModel>}
  */
 export async function formulaModelInit(formulaConfig = null) {
-  const modelType = formulaConfig?.modelType || "pp_formulanet_plus_s";
+  // FIX F2: default to PP_FORMULANET_PLUS_M (matches Python default, Audit F2)
+  const modelType = formulaConfig?.modelType || "pp_formulanet_plus_m";
 
   if (modelType === "latex_ocr") {
     try {
@@ -153,7 +154,7 @@ export async function formulaModelInit(formulaConfig = null) {
       }));
       return RapidFormulaModel.create({
         ...formulaConfig,
-        modelType: "pp_formulanet_plus_s",
+        modelType: "pp_formulanet_plus_m", // FIX F2: fallback to M (matches Python default, Audit F2)
       });
     }
   }
@@ -425,6 +426,8 @@ export class MineruPipelineModel {
     this.applyTable = true;
     this.lang = null;
     this.device = "cpu";
+    // FIX P10: capture detected device-tier profile for downstream config access.
+    this.performanceProfile = detectProfile();
   }
 
   /**

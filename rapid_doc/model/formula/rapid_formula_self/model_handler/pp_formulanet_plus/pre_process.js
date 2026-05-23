@@ -209,10 +209,12 @@ export class PPPreProcess {
     //   squeezed = np.squeeze(grayscale_image)
     //   img = cv2.merge([squeezed] * 3)
     //
-    // Note: cv2.COLOR_BGR2GRAY uses weights: 0.114*B + 0.587*G + 0.299*R
-    // Since all 3 channels have same normalized value (same mean/std applied equally),
-    // the grayscale conversion just picks the same value.
-    // So the final 3ch image has identical channels.
+    // FIX F1: INTENTIONAL R/B coefficient swap — matches Python training distribution. DO NOT "FIX".
+    // Python's pipeline feeds RGB-ordered data into cv2.COLOR_BGR2GRAY, which applies
+    // BGR weights (0.114·B + 0.587·G + 0.299·R) to what it thinks is BGR but is actually
+    // RGB. The net effect is the swapped formula: Y = 0.114·R + 0.587·G + 0.299·B.
+    // The model was trained on this distribution; changing the coefficients back to the
+    // standard BGR2GRAY formula will break parity with Python inference output.
 
     const result = new Float32Array(h * w * 3);
 
@@ -223,8 +225,8 @@ export class PPPreProcess {
         const b = (pixels[i * ch + 0] * SCALE - MEAN) / STD;
         const g = (pixels[i * ch + 1] * SCALE - MEAN) / STD;
         const r = (pixels[i * ch + 2] * SCALE - MEAN) / STD;
-        // cv2.COLOR_BGR2GRAY weights
-        grayVal = 0.114 * b + 0.587 * g + 0.299 * r;
+        // INTENTIONAL R/B swap (do not "fix" this — see Audit F1)
+        grayVal = 0.114 * r + 0.587 * g + 0.299 * b;
       } else {
         grayVal = (pixels[i] * SCALE - MEAN) / STD;
       }

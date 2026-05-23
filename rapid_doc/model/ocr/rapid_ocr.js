@@ -20,10 +20,11 @@
 /* global cv */
 import * as ort from 'onnxruntime-web';
 import { getLogger } from '../../model/layout/rapid_layout_self/utils/logger.js';
-import { checkImg, preprocessImage, sortedBoxes, mergeDetBoxes, updateDetBoxes, getRotateCropImage } from '../../utils/ocr_utils.js';
+import { checkImg, preprocessImage, sortedBoxes, mergeDetBoxes, updateDetBoxes, getRotateCropImage, sortPolyBoxes, cropByPolys } from '../../utils/ocr_utils.js';
 import { configureOrtWasmRuntime } from '../../utils/ort_runtime.js';
 import { deleteMat, deleteMatList } from '../../utils/resource_utils.js';
 import { AbortException } from '../../utils/exceptions.js';
+import { detectProfile } from '../../utils/browser_utils.js';
 
 import { DetPreProcess } from './ocr_preprocess.js';
 import { DetPostProcess } from './ocr_postprocess.js';
@@ -35,6 +36,8 @@ import {
   DEFAULT_REC_MODEL_URL_CH,
   DEFAULT_REC_MODEL_URL_EN,
   REMOTE_REC_MODEL_URL_EN_CANDIDATES,
+  DEFAULT_SEAL_DET_MODEL_URL,
+  DEFAULT_SEAL_DET_MODEL_SHA256,
   fetchArrayBufferCached,
   fetchTextCached,
   resolveDetUrl,
@@ -50,10 +53,12 @@ export class RapidOcrModel {
   /** @private */
   constructor() {
     /** @type {TextDetector}  */ this.textDetector = null;
+    /** @type {TextDetector|null} */ this._sealDetector = null;
     /** @type {TextRecognizer}*/ this.textRecognizer = null;
     this.dropScore = 0.5;
     this.enableMergeDetBoxes = true;
-    this.recBatchNum = 6;
+    // FIX P10: default recBatchNum from device-tier profile; overridable via config.
+    this.recBatchNum = detectProfile().REC_BATCH_NUM;
   }
 
   // ── Factory ─────────────────────────────────────────────────────────────────
@@ -69,7 +74,9 @@ export class RapidOcrModel {
 
     inst.dropScore = params.dropScore ?? cfg['Rec.drop_score'] ?? cfg.drop_score ?? cfg.dropScore ?? 0.5;
     inst.enableMergeDetBoxes = params.enableMergeDetBoxes ?? cfg.enable_merge_det_boxes ?? cfg.enableMergeDetBoxes ?? true;
-    inst.recBatchNum = params.recBatchNum ?? cfg['Rec.rec_batch_num'] ?? cfg.rec_batch_num ?? 6;
+    // FIX P10: resolve recBatchNum with profile default as the fallback (overridable via config).
+    const profileDefault = detectProfile().REC_BATCH_NUM;
+    inst.recBatchNum = params.recBatchNum ?? cfg['Rec.rec_batch_num'] ?? cfg.rec_batch_num ?? profileDefault;
 
     const epList = resolveExecutionProviders(params, cfg);
     const useWebGpu = epList.includes('webgpu');
@@ -94,6 +101,13 @@ export class RapidOcrModel {
     );
     inst.textDetector = new TextDetector(detSession, detPre, detPost, { useWebGpu });
 
+    // FIX O1: initialise seal detector when isSeal/is_seal param is set (Audit O1)
+    const isSealMode = params.isSeal === true || params.is_seal === true
+      || cfg.isSeal === true || cfg.is_seal === true;
+    if (isSealMode) {
+      await inst._initSealDetector(sessOpts, useWebGpu);
+    }
+
     const { session: recSession, charList } = await inst._loadRecModel(params, cfg, sessOpts, useWebGpu);
     inst.textRecognizer = new TextRecognizer(
       recSession, charList, inst.recBatchNum, [3, 48, 320], { useWebGpu },
@@ -115,6 +129,50 @@ export class RapidOcrModel {
       const detail = (err instanceof Error) ? err.message : String(err);
       throw new Error(`ONNX session creation failed (OCR det): ${detail}`);
     }
+  }
+
+  /**
+   * Initialise the seal-specific DB detector.
+   * FIX O1 (Audit O1): seal params — box_type='poly', limit_side_len=736,
+   *   limit_type='min', unclip_ratio=0.5, box_thresh=0.6, thresh=0.3.
+   * @private
+   */
+  async _initSealDetector(sessOpts, useWebGpu) {
+    // TODO: replace null SHA-256 with the real hash once the model file is published.
+    //   Expected SHA-256: e6109a1022b5ebf0822fc00646ef2398a7ef387390ca5c978de79352b1314204
+    //   (stored in DEFAULT_SEAL_DET_MODEL_SHA256 in ocr_helpers.js)
+    logger.info(`Loading Seal Det model: ${DEFAULT_SEAL_DET_MODEL_URL}`);
+    const sealBuf = await fetchArrayBufferCached(DEFAULT_SEAL_DET_MODEL_URL);
+    let sealSession;
+    try {
+      sealSession = await ort.InferenceSession.create(sealBuf, sessOpts);
+    } catch (err) {
+      const detail = (err instanceof Error) ? err.message : String(err);
+      throw new Error(`ONNX session creation failed (OCR seal det): ${detail}`);
+    }
+
+    // FIX O1: seal-specific preprocessing params
+    const sealPre = new DetPreProcess(
+      736,       // limit_side_len
+      'min',     // limit_type
+      [0.485, 0.456, 0.406],
+      [0.229, 0.224, 0.225],
+    );
+
+    // FIX O1: seal-specific postprocessing params
+    // FIX O2 (Audit O2): box_type='poly' — use polygons_from_bitmap path in DetPostProcess
+    const sealPost = new DetPostProcess(
+      0.3,   // thresh
+      0.6,   // box_thresh
+      0.5,   // unclip_ratio
+      3,     // minSize
+      false, // useDilation=false (matches Python Det.use_dilation=False for seals)
+      1000,
+      'poly', // FIX O2: poly box_type — extracts contour polygons instead of quads
+    );
+
+    this._sealDetector = new TextDetector(sealSession, sealPre, sealPost, { useWebGpu });
+    logger.info('Seal detector ready.');
   }
 
   /** @private */
@@ -182,6 +240,23 @@ export class RapidOcrModel {
    * @returns {Promise<Array|null>}
    */
   async ocr(img, opts = {}) {
+    // FIX O1: seal branch — route to _ocrSeal when is_seal=true (Audit O1)
+    if (opts.is_seal === true) {
+      const matImg = img instanceof cv.Mat ? img : checkImg(img);
+      const shouldDeleteMat = !(img instanceof cv.Mat);
+      try {
+        const prepImg = preprocessImage(matImg);
+        const deletePrep = prepImg !== matImg;
+        try {
+          return await this._ocrSeal(prepImg, opts);
+        } finally {
+          if (deletePrep) deleteMat(prepImg);
+        }
+      } finally {
+        if (shouldDeleteMat) deleteMat(matImg);
+      }
+    }
+
     const { det = true, rec = true, mfdRes = null, returnWordBox = false } = opts;
 
     if (Array.isArray(img)) {
@@ -290,6 +365,56 @@ export class RapidOcrModel {
       return [recRes.txts.map((txt, i) => [txt, recRes.scores[i], recRes.wordResults[i]])];
     }
     return [recRes.txts.map((txt, i) => [txt, recRes.scores[i]])];
+  }
+
+  // ── Seal OCR ────────────────────────────────────────────────────────────────
+
+  /**
+   * Run seal OCR on an image.
+   * FIX O1 (Audit O1): use seal-specific detection params and poly path.
+   *
+   * Seal detection uses `pp-ocrv4_mobile_seal_det.onnx` with:
+   *   box_type='poly', limit_side_len=736, limit_type='min',
+   *   unclip_ratio=0.5, box_thresh=0.6, thresh=0.3
+   *
+   * The detected poly boxes are sorted (FIX O2) and cropped via
+   * perspective warp before text recognition.
+   *
+   * @param {cv.Mat} image  - preprocessed BGR Mat (caller must not delete before return)
+   * @param {object} [opts]
+   * @returns {Promise<Array>}
+   */
+  async _ocrSeal(image, opts = {}) {
+    if (!this._sealDetector) {
+      throw new Error(
+        '[RapidOcrModel._ocrSeal] Seal detector not initialised. ' +
+        'Pass isSeal=true (or is_seal=true) when calling RapidOcrModel.create().',
+      );
+    }
+
+    // Detect with poly-mode detector
+    const detRes = await this._sealDetector.call(image);
+    const rawBoxes = detRes.boxes;
+
+    if (!rawBoxes || rawBoxes.length === 0) {
+      return [[]];
+    }
+
+    // FIX O2: sort polys by min-y then min-x (matches Python SortPolyBoxes)
+    const sortedPolys = sortPolyBoxes(rawBoxes);
+
+    // FIX O2: crop each polygon region for recognition
+    const crops = cropByPolys(image, sortedPolys);
+    try {
+      const recRes = await this.textRecognizer.call(crops);
+      const result = sortedPolys.map((poly, i) => [
+        poly,
+        [recRes.txts[i] ?? '', recRes.scores[i] ?? 0],
+      ]);
+      return [result];
+    } finally {
+      deleteMatList(crops);
+    }
   }
 
   // ── Batch detection ─────────────────────────────────────────────────────────

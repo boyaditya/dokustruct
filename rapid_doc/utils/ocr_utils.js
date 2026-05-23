@@ -630,6 +630,81 @@ function _remapPoly(poly, pasteX, pasteY, xmin, ymin) {
   return poly.map(([px, py]) => [px - pasteX + xmin, py - pasteY + ymin]);
 }
 
+// ─── Seal OCR helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Sort polygon boxes by min-y then min-x, matching Python SortPolyBoxes.
+ * FIX O1/O2: used in _ocrSeal path for poly-type boxes.
+ * @param {Array<Array<[number,number]>>} polys  - each poly is an array of [x,y] points
+ * @returns {Array<Array<[number,number]>>}
+ */
+export function sortPolyBoxes(polys) {
+  if (!Array.isArray(polys) || polys.length === 0) return [];
+  return [...polys].sort((a, b) => {
+    const aMinY = Math.min(...a.map(p => p[1]));
+    const bMinY = Math.min(...b.map(p => p[1]));
+    if (aMinY !== bMinY) return aMinY - bMinY;
+    const aMinX = Math.min(...a.map(p => p[0]));
+    const bMinX = Math.min(...b.map(p => p[0]));
+    return aMinX - bMinX;
+  });
+}
+
+/**
+ * Crop image regions defined by polygons using bounding-rectangle perspective warp.
+ * Matches Python CropByPolys(det_box_type='poly') get_poly_rect_crop simplified path:
+ * for curved text the full AutoRectifier is used in Python; here we use minAreaRect
+ * perspective warp which is equivalent for circular-seal text (4-point approximation).
+ *
+ * FIX O2: poly path — perspective crop per polygon.
+ * @param {cv.Mat} image
+ * @param {Array<Array<[number,number]>>} polys
+ * @returns {cv.Mat[]} Caller must delete each returned Mat.
+ */
+export function cropByPolys(image, polys) {
+  return polys.map(poly => _warpPolyRectCrop(image, poly));
+}
+
+/**
+ * Crop a polygon region via minAreaRect perspective warp.
+ * Equivalent to Python get_poly_rect_crop when IoU >= 0.7 (the typical seal case).
+ * @private
+ * @param {cv.Mat} img
+ * @param {Array<[number,number]>} points - N × [x,y]
+ * @returns {cv.Mat} caller must delete
+ */
+function _warpPolyRectCrop(img, points) {
+  // Build a cv.Mat from all polygon points for minAreaRect
+  const flatPts = points.flat();
+  const ptsMat = cv.matFromArray(points.length, 1, cv.CV_32FC2, flatPts);
+  let rect, box;
+  try {
+    rect = cv.minAreaRect(ptsMat);
+  } finally {
+    ptsMat.delete();
+  }
+
+  // cv.boxPoints returns a 4×2 float32 mat
+  const bpMat = cv.boxPoints(rect);
+  try {
+    const d = bpMat.data32F;
+    box = [[d[0], d[1]], [d[2], d[3]], [d[4], d[5]], [d[6], d[7]]];
+  } finally {
+    bpMat.delete();
+  }
+
+  // Sort ascending by x to determine left/right pairs
+  const sortedByX = [...box].sort((a, b) => a[0] - b[0]);
+  let ia, ib, ic, id;
+  if (sortedByX[1][1] > sortedByX[0][1]) { ia = 0; id = 1; }
+  else { ia = 1; id = 0; }
+  if (sortedByX[3][1] > sortedByX[2][1]) { ib = 2; ic = 3; }
+  else { ib = 3; ic = 2; }
+
+  const orderedBox = [sortedByX[ia], sortedByX[ib], sortedByX[ic], sortedByX[id]];
+  return getRotateCropImage(img, orderedBox);
+}
+
 // ─── getOcrResultListTable ────────────────────────────────────────────────────
 
 /**

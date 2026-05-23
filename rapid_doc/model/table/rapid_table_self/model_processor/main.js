@@ -6,8 +6,11 @@ import { ModelType, normalizeTableModelType } from "../utils/typings.js";
 // Models are served locally from public/models/ (Vite static assets).
 // Run `python scripts/copy-models-to-public.py` to populate public/models/.
 // SHA-256 hashes computed from local public/models/ files (Audit 1.2: FIX — fill sha256 fields).
-// For models not yet available locally (e.g., UniTable), sha256 remains null until files are present.
-// TODO: fill in sha256 for UniTable files when they become available.
+//
+// FIX T5: UNITABLE is intentionally excluded from production MODEL_URLS.
+// UniTable requires a two-stage autoregressive ONNX encoder+decoder with kv-cache
+// that is not yet implemented in JS. The UniTableStructure class throws a clear error
+// on construction. See documentation/KNOWN_ISSUES.md (T5/T23) for full context.
 const MODEL_URLS = {
   [ModelType.SLANETPLUS]: {
     modelUrl: '/models/table/slanet-plus.onnx?v=ort-shape-fix-1',
@@ -17,16 +20,7 @@ const MODEL_URLS = {
     modelUrl: '/models/table/unet.onnx',
     sha256: '0ea48d3a17e35ef5c2e498a5e799566073234d39b1079ca21d9f4fafe73c6d20',
   },
-  [ModelType.UNITABLE]: {
-    // UNITABLE needs multiple files: encoder + decoder + vocab
-    // TODO: fill in sha256 array [encoder, decoder, vocab] when UniTable files are available
-    modelUrls: [
-      '/models/table/unitable/encoder.pth',
-      '/models/table/unitable/decoder.pth',
-      '/models/table/unitable/vocab.json',
-    ],
-    sha256: null,
-  },
+  // [ModelType.UNITABLE] is intentionally omitted — see FIX T5 comment above.
   [ModelType.PADDLE_CLS]: {
     modelUrl: '/models/table/table_cls/paddle_cls.onnx',
     sha256: '21c801f0c403cf960f9f1ccaecf506585b3b98421208033755b9e67cd2371492',

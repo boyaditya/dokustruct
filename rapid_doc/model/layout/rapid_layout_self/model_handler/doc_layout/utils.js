@@ -68,11 +68,19 @@ export class LetterBox {
     const newUnpadW = Math.round(srcW * r);
     const newUnpadH = Math.round(srcH * r);
 
-    // Divide padding between both sides (when center)
-    const padLeft   = this.center ? Math.round(dw / 2 - 0.1) : 0;
-    const padRight  = Math.round(dw / 2 + 0.1);
-    const padTop    = this.center ? Math.round(dh / 2 - 0.1) : 0;
-    const padBottom = Math.round(dh / 2 + 0.1);
+    // FIX L8: When center=true, divide padding between both sides.
+    // When center=false, all padding goes to bottom/right (top=0, left=0).
+    // Python: if self.center: dw /= 2; dh /= 2
+    //         top  = int(round(dh - 0.1)) if self.center else 0
+    //         left = int(round(dw - 0.1)) if self.center else 0
+    //         bottom = int(round(dh + 0.1))   # uses dh AFTER optional /2
+    //         right  = int(round(dw + 0.1))   # uses dw AFTER optional /2
+    const halfDw = this.center ? dw / 2 : 0;
+    const halfDh = this.center ? dh / 2 : 0;
+    const padLeft   = this.center ? Math.round(halfDw - 0.1) : 0;
+    const padRight  = this.center ? Math.round(halfDw + 0.1) : Math.round(dw + 0.1);
+    const padTop    = this.center ? Math.round(halfDh - 0.1) : 0;
+    const padBottom = this.center ? Math.round(halfDh + 0.1) : Math.round(dh + 0.1);
 
     let resized = image;
     let tempResized = null;

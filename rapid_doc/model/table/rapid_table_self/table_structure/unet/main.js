@@ -6,7 +6,7 @@ import * as ort from "onnxruntime-web";
 import { OrtInferSession } from "../../inference_engine/onnxruntime/main.js";
 import { ModelProcessor } from "../../model_processor/main.js";
 import { ModelType } from "../../utils/typings.js";
-import { labelConnectedComponents } from "./utils/utils.js";
+import { labelConnectedComponents, resizeImgKeepRatio } from "./utils/utils.js";
 import { getTableLine, adjustLines, finalAdjustLines, drawLines, imageLocationSortBox } from "./utils/utils_table_line_rec.js";
 import { box42PolyToBox41, sortedOcrBoxes } from "./utils/utils_table_recover.js";
 
@@ -30,7 +30,7 @@ export class TSRUnetStructurer {
     return inst;
   }
 
-  async run(oriImgs) {
+  async run(oriImgs, opts = {}) {
     const results = [];
     for (const img of oriImgs) {
       const { data, dims } = this._preprocess(img);
@@ -39,7 +39,7 @@ export class TSRUnetStructurer {
       const outputMap = await this.session.run({ [inputName]: inputTensor });
       const outputName = this.session.getOutputNames()[0];
       const pred = outputMap[outputName];
-      const res = this.postprocess(img, pred);
+      const res = this.postprocess(img, pred, opts);
       results.push(res);
     }
     return results;
@@ -47,10 +47,11 @@ export class TSRUnetStructurer {
 
   _preprocess(img) {
     const _cv = typeof cv !== "undefined" ? cv : (globalThis.cv || null);
-    let resized = new _cv.Mat(), rgb = new _cv.Mat(), f32 = new _cv.Mat();
+    // FIX T6: aspect-preserving resize with zero-pad (matches Python resize_img keep_ratio=True)
+    const padded = resizeImgKeepRatio(img, this.inp_height, this.inp_width);
+    let rgb = new _cv.Mat(), f32 = new _cv.Mat();
     try {
-      _cv.resize(img, resized, new _cv.Size(this.inp_width, this.inp_height), 0, 0, _cv.INTER_LINEAR);
-      _cv.cvtColor(resized, rgb, _cv.COLOR_BGR2RGB);
+      _cv.cvtColor(padded, rgb, _cv.COLOR_BGR2RGB);
       rgb.convertTo(f32, _cv.CV_32F);
       const src = f32.data32F, chw = new Float32Array(3 * 1024 * 1024);
       for (let c = 0; c < 3; c++) {
@@ -59,11 +60,31 @@ export class TSRUnetStructurer {
       }
       return { data: chw, dims: [1, 3, 1024, 1024] };
     } finally {
-      resized.delete(); rgb.delete(); f32.delete();
+      padded.delete(); rgb.delete(); f32.delete();
     }
   }
 
-  postprocess(img, pred) {
+  /**
+   * Convert model prediction to polygons.
+   *
+   * @param {cv.Mat} img - Original BGR image
+   * @param {ort.Tensor} pred - Raw model output tensor
+   * @param {object} [opts={}] - Optional kwargs forwarded from caller chain
+   * @param {number} [opts.row] - Expected number of rows (hint, not enforced)
+   * @param {number} [opts.col] - Expected number of columns (hint, not enforced)
+   * @param {number} [opts.h_lines_threshold=50] - Minimum pixel size for horizontal line segments in getTableLine
+   * @param {number} [opts.v_lines_threshold=30] - Minimum pixel size for vertical line segments in getTableLine
+   * @param {number} [opts.angle=50] - Angle tolerance (degrees) passed to adjustLines for both row and col lines
+   * @param {boolean} [opts.enhance_box_line=false] - Whether to enhance box-border lines (reserved for future use)
+   * @param {boolean} [opts.morph_close=true] - Whether to apply MORPH_CLOSE on hPred (unconditional on vPred); see task 10.7
+   * @param {number} [opts.more_h_lines=100] - Alpha distance threshold passed to adjustLines for horizontal (row) lines
+   * @param {number} [opts.more_v_lines=15] - Alpha distance threshold passed to adjustLines for vertical (col) lines
+   * @param {boolean} [opts.extend_line=false] - Whether to extend line endpoints to table boundary (reserved for future use)
+   * @param {boolean} [opts.rotated_fix=true] - Whether to apply rotation correction via cal_rotate_angle + rotate_image + unrotate_polygons
+   * @returns {{ polygons: Array|null, rotatedPolygons: Array|null }}
+   */
+  // FIX T17: forward kwargs from caller chain to postprocess (matches Python)
+  postprocess(img, pred, opts = {}) {
     const _cv = typeof cv !== "undefined" ? cv : (globalThis.cv || null);
     const oriH = img.rows, oriW = img.cols;
     const data = pred.data, dims = pred.dims;
@@ -71,10 +92,21 @@ export class TSRUnetStructurer {
     const H = Number(dims[dims.length - 2]), W = Number(dims[dims.length - 1]);
     const HW = H * W;
 
+    // FIX T8: handle dims [1, 1, H, W] — single channel class IDs (not softmax probs)
+    // Python: result = result[0][0][0] → shape [1, 1, H, W]; data is uint8 class IDs (0=bg, 1=hline, 2=vline)
+    // C=1: data contains class IDs directly — Math.round passes them through correctly
+    // C=3: use argmax across [bg, hline, vline] channels — do NOT threshold > 0.5 (Python uses argmax, not threshold)
     let hMat = _cv.Mat.zeros(H, W, _cv.CV_8UC1);
     let vMat = _cv.Mat.zeros(H, W, _cv.CV_8UC1);
     for (let i = 0; i < HW; i++) {
-      const val = C === 3 ? (data[HW+i] > 0.5 ? 1 : (data[2*HW+i] > 0.5 ? 2 : 0)) : Math.round(Number(data[i]));
+      let val;
+      if (C === 3) {
+        // argmax over 3 channels: channel 0 = bg, channel 1 = hline, channel 2 = vline
+        const c0 = Number(data[i]), c1 = Number(data[HW + i]), c2 = Number(data[2 * HW + i]);
+        val = c1 > c0 && c1 >= c2 ? 1 : c2 > c0 ? 2 : 0;
+      } else {
+        val = Math.round(Number(data[i]));
+      }
       if (val === 1) hMat.data[i] = 255;
       if (val === 2) vMat.data[i] = 255;
     }
@@ -87,23 +119,39 @@ export class TSRUnetStructurer {
     const kHSize = (Math.sqrt(W) * 1.2) | 0, kVSize = (Math.sqrt(H) * 1.2) | 0;
     let hKernel = _cv.getStructuringElement(_cv.MORPH_RECT, new _cv.Size(kHSize, 1));
     let vKernel = _cv.getStructuringElement(_cv.MORPH_RECT, new _cv.Size(1, kVSize));
-    _cv.morphologyEx(hPred, hPred, _cv.MORPH_CLOSE, hKernel);
+    // FIX T16: MORPH_CLOSE on hPred conditional on morph_close opt (matches Python)
+    if (opts.morph_close !== false) {
+      _cv.morphologyEx(hPred, hPred, _cv.MORPH_CLOSE, hKernel);
+    }
     _cv.morphologyEx(vPred, vPred, _cv.MORPH_CLOSE, vKernel);
     hKernel.delete(); vKernel.delete();
 
-    const rowBoxes = getTableLine(hPred.data, oriW, oriH, 0, 50);
-    const colBoxes = getTableLine(vPred.data, oriW, oriH, 1, 30);
+    const rowBoxes = getTableLine(hPred.data, oriW, oriH, 0, opts.h_lines_threshold ?? 50);
+    const colBoxes = getTableLine(vPred.data, oriW, oriH, 1, opts.v_lines_threshold ?? 30);
     hPred.delete(); vPred.delete();
 
-    const moreRow = adjustLines(rowBoxes, 100, 50);
-    const moreCol = adjustLines(colBoxes, 15, 50);
+    const moreRow = adjustLines(rowBoxes, opts.more_h_lines ?? 100, opts.angle ?? 50);
+    const moreCol = adjustLines(colBoxes, opts.more_v_lines ?? 15, opts.angle ?? 50);
     let finalRow = rowBoxes.concat(moreRow), finalCol = colBoxes.concat(moreCol);
     finalAdjustLines(finalRow, finalCol);
 
     let lineImg = _cv.Mat.zeros(oriH, oriW, _cv.CV_8UC1);
     drawLines(lineImg, finalRow.concat(finalCol));
 
-    const polygons = this.calRegionBoxes(lineImg);
+    // FIX T7: rotation correction — matches Python cal_rotate_angle + rotate_image + unrotate_polygons
+    const rotatedFix = opts.rotated_fix !== false; // default enabled
+    const rotatedAngle = this._calRotateAngle(lineImg);
+
+    let polygons, rotatedPolygons;
+    if (rotatedFix && Math.abs(rotatedAngle) > 0.5) {
+      const rotatedLineImg = this._rotateImage(lineImg, rotatedAngle);
+      rotatedPolygons = this.calRegionBoxes(rotatedLineImg);
+      rotatedLineImg.delete();
+      polygons = this._unrotatePolygons(rotatedPolygons, rotatedAngle, oriW, oriH);
+    } else {
+      polygons = this.calRegionBoxes(lineImg);
+      rotatedPolygons = polygons.map(p => p.map(v => [...v])); // deep copy
+    }
     lineImg.delete();
 
     if (polygons.length === 0) return { polygons: null, rotatedPolygons: null };
@@ -113,10 +161,15 @@ export class TSRUnetStructurer {
       const p1 = poly[1], p3 = poly[3];
       poly[1] = p3; poly[3] = p1;
     }
+    for (const poly of rotatedPolygons) {
+      const p1 = poly[1], p3 = poly[3];
+      poly[1] = p3; poly[3] = p1;
+    }
 
-    const [, idx] = sortedOcrBoxes(polygons.map(p => box42PolyToBox41(p)), 0.4);
+    const [, idx] = sortedOcrBoxes(rotatedPolygons.map(p => box42PolyToBox41(p)), 0.4);
     const finalPolys = idx.map(i => polygons[i]);
-    return { polygons: finalPolys, rotatedPolygons: finalPolys };
+    const finalRotatedPolys = idx.map(i => rotatedPolygons[i]);
+    return { polygons: finalPolys, rotatedPolygons: finalRotatedPolys };
   }
 
   calRegionBoxes(tmp) {
@@ -156,11 +209,104 @@ export class TSRUnetStructurer {
 
       const sorted = imageLocationSortBox(boxArr);
       const box = [[sorted[0], sorted[1]], [sorted[2], sorted[3]], [sorted[4], sorted[5]], [sorted[6], sorted[7]]];
-      const w = Math.sqrt((box[1][0]-box[0][0])**2 + (box[1][1]-box[0][1])**2);
-      const h = Math.sqrt((box[3][0]-box[0][0])**2 + (box[3][1]-box[0][1])**2);
-      if (w * h < maxArea * 0.5 && w >= 15 && h >= 15) boxes.push(box);
+      // FIX T19: average opposite sides for w/h (matches Python)
+      const w = (Math.sqrt((box[1][0]-box[0][0])**2 + (box[1][1]-box[0][1])**2)
+               + Math.sqrt((box[2][0]-box[3][0])**2 + (box[2][1]-box[3][1])**2)) / 2;
+      const h = (Math.sqrt((box[3][0]-box[0][0])**2 + (box[3][1]-box[0][1])**2)
+               + Math.sqrt((box[2][0]-box[1][0])**2 + (box[2][1]-box[1][1])**2)) / 2;
+      const bboxArea = w * h;
+      // FIX T18: skip outer-table-border region (bbox area > 75% of image)
+      if (bboxArea > maxArea * 0.75) continue;
+      if (bboxArea < maxArea * 0.5 && w >= 15 && h >= 15) boxes.push(box);
     }
     return boxes;
+  }
+  /**
+   * FIX T7: Port of Python cal_rotate_angle(lineMat).
+   * Finds the largest contour in the line image, computes minAreaRect angle,
+   * and normalizes to [-45, 45] range. Returns 0 if no contours found.
+   * @param {cv.Mat} lineMat - CV_8UC1 binary line image
+   * @returns {number} rotation angle in degrees
+   */
+  _calRotateAngle(lineMat) {
+    const _cv = typeof cv !== "undefined" ? cv : (globalThis.cv || null);
+    const contours = new _cv.MatVector();
+    const hierarchy = new _cv.Mat();
+    try {
+      _cv.findContours(lineMat, contours, hierarchy, _cv.RETR_EXTERNAL, _cv.CHAIN_APPROX_SIMPLE);
+      if (contours.size() === 0) return 0;
+
+      // Find the largest contour by area
+      let largestIdx = 0, largestArea = -1;
+      for (let i = 0; i < contours.size(); i++) {
+        const area = _cv.contourArea(contours.get(i));
+        if (area > largestArea) {
+          largestArea = area;
+          largestIdx = i;
+        }
+      }
+
+      const rect = _cv.minAreaRect(contours.get(largestIdx));
+      // rect.angle is in degrees; normalize to tilt range
+      let angle = rect.angle;
+      if (angle < -45) {
+        angle += 90;
+      } else if (angle > 45) {
+        angle -= 90;
+      }
+      return angle;
+    } finally {
+      contours.delete();
+      hierarchy.delete();
+    }
+  }
+
+  /**
+   * FIX T7: Port of Python rotate_image(image, angle).
+   * Rotates the image using getRotationMatrix2D at its center,
+   * keeping the same size with INTER_NEAREST + BORDER_REPLICATE.
+   * Caller is responsible for deleting the returned Mat.
+   * @param {cv.Mat} image - source image
+   * @param {number} angle - rotation angle in degrees
+   * @returns {cv.Mat} rotated image (caller must delete)
+   */
+  _rotateImage(image, angle) {
+    const _cv = typeof cv !== "undefined" ? cv : (globalThis.cv || null);
+    const h = image.rows, w = image.cols;
+    const center = new _cv.Point2f(Math.floor(w / 2), Math.floor(h / 2));
+    const M = _cv.getRotationMatrix2D(center, angle, 1.0);
+    const rotated = new _cv.Mat();
+    _cv.warpAffine(image, rotated, M, new _cv.Size(w, h), _cv.INTER_NEAREST, _cv.BORDER_REPLICATE);
+    M.delete();
+    return rotated;
+  }
+
+  /**
+   * FIX T7: Port of Python unrotate_polygons(polygons, angle, img_shape).
+   * Applies inverse rotation (-angle) to each polygon vertex to map
+   * rotated-frame polygons back to the original image frame.
+   * @param {Array<Array<[number, number]>>} polys - array of [[x,y],[x,y],[x,y],[x,y]]
+   * @param {number} angle - original rotation angle in degrees
+   * @param {number} W - original image width
+   * @param {number} H - original image height
+   * @returns {Array<Array<[number, number]>>} unrotated polygons
+   */
+  _unrotatePolygons(polys, angle, W, H) {
+    const _cv = typeof cv !== "undefined" ? cv : (globalThis.cv || null);
+    const center = new _cv.Point2f(Math.floor(W / 2), Math.floor(H / 2));
+    const Minv = _cv.getRotationMatrix2D(center, -angle, 1.0);
+    // Minv is a 2x3 affine matrix stored row-major: [m00, m01, m02, m10, m11, m12]
+    const m = Minv.data64F;
+    const m00 = m[0], m01 = m[1], m02 = m[2];
+    const m10 = m[3], m11 = m[4], m12 = m[5];
+    Minv.delete();
+
+    return polys.map(poly =>
+      poly.map(([x, y]) => [
+        m00 * x + m01 * y + m02,
+        m10 * x + m11 * y + m12,
+      ])
+    );
   }
 }
 

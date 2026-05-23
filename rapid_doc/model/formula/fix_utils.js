@@ -16,6 +16,7 @@ const VALID_DELIMS = new Set([
 const ENV_TYPES = [
   "array", "matrix", "pmatrix", "bmatrix", "vmatrix",
   "Bmatrix", "Vmatrix", "cases", "aligned", "gathered",
+  "align", "align*", // FIX F7: added 'align' and 'align*' (matches Python fix_utils.py, Audit fix_utils miss)
 ];
 
 const UP_COMMANDS_KEEP = new Set(["arrow", "downarrow", "lus", "silon"]);

@@ -2,6 +2,8 @@
 // PORTING NOTE: table_structure/pp_structure/post_process.py → post_process.js
 // TableLabelDecode: decode character probabilities → HTML structure tokens + cell bboxes
 
+import { ModelType, normalizeTableModelType } from '../../utils/typings.js';
+
 /**
  * Decode table structure predictions from an ONNX model.
  * PORTING NOTE: TableLabelDecode(dict_character, cfg)
@@ -34,12 +36,13 @@ export class TableLabelDecode {
   }
 
   /**
-   * Full decode: probs → structure tokens + cell bboxes.
+   * Full decode: probs → structure tokens + cell bboxes + per-image mean confidence score.
+   * FIX T11b: include mean score in decode output (matches Python TableLabelDecode)
    * @param {import('onnxruntime-web').Tensor|null} bboxPreds - [N, SeqLen, 4] or null
    * @param {import('onnxruntime-web').Tensor} structureProbs - [N, SeqLen, VocabSize]
    * @param {number[][]} shapeList - [[origH,origW,ratioH,ratioW,padH,padW],...]
    * @param {cv.Mat[]} [oriImgs]
-   * @returns {{ structures: string[][], cellBboxes: number[][][] }}
+   * @returns {{ structures: string[][], cellBboxes: number[][][], scores: number[] }}
    */
   decode(bboxPreds, structureProbs, shapeList, oriImgs = []) {
     const N = structureProbs.dims[0];
@@ -51,11 +54,15 @@ export class TableLabelDecode {
 
     const allStructures = [];
     const allCellBboxes = [];
+    // FIX T11b: accumulate per-image mean confidence scores
+    const allScores = [];
 
     for (let n = 0; n < N; n++) {
       const shape = shapeList[n];
       const tokens = [];
       const bboxes = [];
+      // FIX T11b: collect argmax probabilities (maxVal) per token step
+      const stepScores = [];
 
       for (let s = 0; s < SeqLen; s++) {
         // Argmax over vocab
@@ -71,17 +78,21 @@ export class TableLabelDecode {
         const char = this.character[maxIdx];
         
         // Skip sos/eos tokens (Python parity)
-        if (char === "eos") break;
+        // FIX T11a: only break on EOS if idx > 0 (matches Python)
+        if (s > 0 && char === 'eos') break;
         if (char === "sos") continue;
         
         // Safety check: skip undefined tokens
         if (char === undefined || char === null) continue;
         
         tokens.push(char);
+        // FIX T11b: record argmax prob for this token step
+        stepScores.push(maxVal);
 
         // Decode bounding box for <td> tokens only (Python parity)
         // Python: if text in self.td_token (checks ["<td>", "<td", "<td></td>"])
-        const isTdToken = this.td_token.some(t => char === t || char.startsWith(t));
+        // FIX T11c: exact in-list check (matches Python td_token contains check, not startsWith)
+        const isTdToken = this.td_token.includes(char);
         if (bboxData && isTdToken) {
           const bboxOffset = (n * SeqLen + s) * bboxDims;
           const rawBox = [];
@@ -94,10 +105,17 @@ export class TableLabelDecode {
 
       allStructures.push(tokens);
 
+      // FIX T11b: compute mean score for this image (0 if no tokens decoded)
+      const meanScore = stepScores.length > 0
+        ? stepScores.reduce((a, b) => a + b, 0) / stepScores.length
+        : 0;
+      allScores.push(meanScore);
+
       // Python: normalize_bboxes → rescale_cell_bboxes (SLANETPLUS only) + filter_blank_bbox
       let finalBboxes = bboxes.filter(b => b.some(v => v !== 0));
-      const modelType = this.cfg.model_type ?? this.cfg.modelType ?? '';
-      if (modelType === 'slanet_plus' || modelType === 'slanetplus') {
+      // FIX T12: normalize model_type before comparison (use ModelType constant, not literal)
+      const modelType = normalizeTableModelType(this.cfg.model_type ?? this.cfg.modelType ?? '');
+      if (modelType === ModelType.SLANETPLUS) {
         const oriImg = oriImgs[n];
         if (oriImg && finalBboxes.length > 0) {
           const h = oriImg.rows, w = oriImg.cols;
@@ -118,7 +136,7 @@ export class TableLabelDecode {
       allCellBboxes.push(finalBboxes);
     }
 
-    return { structures: allStructures, cellBboxes: allCellBboxes };
+    return { structures: allStructures, cellBboxes: allCellBboxes, scores: allScores };
   }
 
   /**

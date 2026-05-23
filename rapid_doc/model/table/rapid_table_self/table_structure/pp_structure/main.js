@@ -68,8 +68,9 @@ export class PPTableStructurer {
 
   /**
    * Run structure recognition on a batch of images.
+   * FIX T11b: return shape now includes per-image mean confidence scores
    * @param {cv.Mat[]} oriImgs
-   * @returns {Promise<{ structures: string[][], cellBboxes: number[][][] }>}
+   * @returns {Promise<{ structures: string[][], cellBboxes: number[][][], scores: number[] }>}
    */
   async run(oriImgs) {
     // Preprocess

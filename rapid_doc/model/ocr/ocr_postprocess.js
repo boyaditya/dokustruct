@@ -174,17 +174,49 @@ function extractLargestContour(contours, offset, minX, minY) {
 const MIN_RECT_SIDE = 3;
 
 /**
- * Converts DB probability map to list of 4-vertex text detection boxes.
+ * Converts DB probability map to list of text detection boxes.
+ *
+ * Supports two box_type modes:
+ *   - 'quad' (default): returns 4-vertex min-area-rect quads (standard text detection).
+ *   - 'poly': returns raw polygon contours from the binary mask, matching Python
+ *             `polygons_from_bitmap` (rapid_ocr_onnxruntime). Used for seal text.
+ *
+ * FIX O2 (Audit O2): added `box_type='poly'` path — `polygons_from_bitmap`.
  */
 export class DetPostProcess {
-  constructor(thresh = 0.3, boxThresh = 0.5, unclipRatio = 1.6, minSize = 3, useDilation = true, maxCandidates = 1000) {
+  /**
+   * @param {number} thresh
+   * @param {number} boxThresh
+   * @param {number} unclipRatio
+   * @param {number} minSize
+   * @param {boolean} useDilation
+   * @param {number} maxCandidates
+   * @param {'quad'|'poly'} [boxType='quad']
+   */
+  constructor(thresh = 0.3, boxThresh = 0.5, unclipRatio = 1.6, minSize = 3, useDilation = true, maxCandidates = 1000, boxType = 'quad') {
     this.thresh = thresh;
     this.boxThresh = boxThresh;
     this.unclipRatio = unclipRatio;
     this.minSize = minSize;
     this.useDilation = useDilation;
     this.maxCandidates = maxCandidates;
+    // FIX O2: store box_type for quad vs poly dispatch
+    this.boxType = boxType === 'poly' ? 'poly' : 'quad';
     this.dilationKernel = useDilation ? [[1, 1], [1, 1]] : null;
+    // FIX P4 (Audit P4): Cache the 2×2 dilation kernel cv.Mat once at construction
+    // time rather than recreating it on every _applyDilation call.  Only allocated
+    // when useDilation=true to avoid unnecessary WASM heap allocation.
+    // Must be released by calling dispose() when this instance is no longer needed.
+    this._dilationKernelMat = useDilation ? cv.matFromArray(2, 2, cv.CV_8UC1, [1, 1, 1, 1]) : null;
+  }
+
+  /**
+   * Release WASM-heap resources owned by this instance.
+   * Must be called when the DetPostProcess instance is no longer needed.
+   */
+  dispose() {
+    deleteMat(this._dilationKernelMat);
+    this._dilationKernelMat = null;
   }
 
   /**
@@ -199,6 +231,12 @@ export class DetPostProcess {
     const [, , H, W] = predTensor.dims;
 
     const segmentation = this._binarize(pred, H, W);
+
+    // FIX O2 (Audit O2): dispatch to poly path when box_type='poly'.
+    // polygons_from_bitmap extracts raw contour polygons instead of min-area-rect quads.
+    if (this.boxType === 'poly') {
+      return this._polygonsFromBitmap(segmentation, pred, H, W, srcH, srcW);
+    }
 
     let mask = null;
     let kernel = null;
@@ -223,6 +261,150 @@ export class DetPostProcess {
     }
   }
 
+  /**
+   * FIX O2 (Audit O2): polygons_from_bitmap — poly box_type path.
+   *
+   * Matches Python `rapid_ocr_onnxruntime` `polygons_from_bitmap`:
+   *   1. Find contours on the binary mask.
+   *   2. For each contour: score check, unclip, scale back to original image coordinates.
+   *   3. Return polygon contour points directly (not min-area-rect quads).
+   *
+   * The returned polygons may have more than 4 vertices, which is appropriate
+   * for curved seal text. Callers (e.g. _ocrSeal via cropByPolys) handle N-point polys.
+   *
+   * Caller is responsible for deleting any returned cv.Mat objects only if
+   * this method returns Mats — it does not; all intermediate Mats are cleaned up here.
+   *
+   * @private
+   * @param {Uint8Array} segmentation - binarised H×W bitmap
+   * @param {Float32Array} pred - raw probability map (H×W)
+   * @param {number} H
+   * @param {number} W
+   * @param {number} srcH - original image height
+   * @param {number} srcW - original image width
+   * @returns {Array<Array<[number,number]>>} array of polygons, each [[x,y],...]
+   */
+  _polygonsFromBitmap(segmentation, pred, H, W, srcH, srcW) {
+    let mask = null;
+    let contours = null;
+    let hierarchy = null;
+
+    try {
+      mask = cv.matFromArray(H, W, cv.CV_8UC1, Array.from(segmentation));
+      // NOTE: dilation is intentionally skipped for poly mode — Python's
+      // polygons_from_bitmap operates on the raw binarised mask, not dilated.
+
+      contours = new cv.MatVector();
+      hierarchy = new cv.Mat();
+      cv.findContours(mask, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+      const numContours = Math.min(contours.size(), this.maxCandidates);
+      const polygons = [];
+
+      for (let i = 0; i < numContours; i++) {
+        const contour = contours.get(i);
+        let approx = null;
+        try {
+          // Minimum bounding side-length check (same as quad path)
+          const rect = cv.minAreaRect(contour);
+          const sside = Math.min(rect.size.width, rect.size.height);
+          if (sside < this.minSize) continue;
+
+          // Score check using the contour's bounding area
+          const score = this._polygonScoreFast(pred, W, H, contour);
+          if (score < this.boxThresh) continue;
+
+          // Approximate contour to reduce vertex count (matches Python approxPolyDP)
+          const epsilon = 0.002 * cv.arcLength(contour, true);
+          approx = new cv.Mat();
+          cv.approxPolyDP(contour, approx, epsilon, true);
+
+          // Need at least 3 points for a valid polygon
+          if (approx.rows < 3) continue;
+
+          // Unclip using the approximated contour points
+          const pts = [];
+          for (let r = 0; r < approx.rows; r++) {
+            pts.push([approx.intAt(r, 0), approx.intAt(r, 1)]);
+          }
+          const unclipped = unclipPolygon(pts, this.unclipRatio);
+          if (unclipped.length < 3) continue;
+
+          // Scale from detection-map coordinates → original image coordinates
+          const scaledPoly = unclipped.map(([x, y]) => [
+            Math.max(0, Math.min(Math.round(x / W * srcW), srcW)),
+            Math.max(0, Math.min(Math.round(y / H * srcH), srcH)),
+          ]);
+
+          polygons.push(scaledPoly);
+        } catch (err) {
+          if (err instanceof AbortException) throw err;
+          // Skip failed contour, continue
+        } finally {
+          contour.delete?.();
+          if (approx) deleteMat(approx);
+        }
+      }
+
+      return polygons;
+    } finally {
+      deleteMat(mask);
+      if (contours) contours.delete();
+      deleteMat(hierarchy);
+    }
+  }
+
+  /**
+   * Score a polygon region using the raw probability bitmap.
+   * Uses the contour directly for mask filling (more accurate than bounding-box for curved text).
+   * @private
+   */
+  _polygonScoreFast(bitmap, W, H, contour) {
+    const rect = contour.boundingRect();
+    const xmin = Math.max(0, rect.x);
+    const ymin = Math.max(0, rect.y);
+    const xmax = Math.min(W - 1, rect.x + rect.width);
+    const ymax = Math.min(H - 1, rect.y + rect.height);
+
+    const maskH = ymax - ymin + 1;
+    const maskW = xmax - xmin + 1;
+    if (maskH <= 0 || maskW <= 0) return 0;
+
+    // Shift contour points to the ROI coordinate system
+    const pts = [];
+    for (let r = 0; r < contour.rows; r++) {
+      pts.push([contour.intAt(r, 0) - xmin, contour.intAt(r, 1) - ymin]);
+    }
+
+    let roiMat = null;
+    let ptsM = null;
+    let ptsVec = null;
+
+    try {
+      roiMat = new cv.Mat(maskH, maskW, cv.CV_8UC1, new cv.Scalar(0));
+      ptsM = cv.matFromArray(pts.length, 1, cv.CV_32SC2, pts.flat().map(Math.round));
+      ptsVec = new cv.MatVector();
+      ptsVec.push_back(ptsM);
+      cv.fillPoly(roiMat, ptsVec, new cv.Scalar(1));
+
+      let sum = 0, count = 0;
+      const maskData = roiMat.data;
+      for (let y = 0; y < maskH; y++) {
+        for (let x = 0; x < maskW; x++) {
+          if (maskData[y * maskW + x] > 0) {
+            sum += bitmap[(ymin + y) * W + (xmin + x)];
+            count++;
+          }
+        }
+      }
+      return count > 0 ? sum / count : 0;
+    } finally {
+      deleteMat(roiMat);
+      deleteMat(ptsM);
+      if (ptsVec) ptsVec.delete();
+    }
+  }
+
   /** @private */
   _binarize(pred, H, W) {
     const segmentation = new Uint8Array(H * W);
@@ -234,19 +416,17 @@ export class DetPostProcess {
 
   /** @private */
   _applyDilation(mask) {
-    if (!this.useDilation || !this.dilationKernel) return mask;
+    if (!this.useDilation || !this._dilationKernelMat) return mask;
 
-    const kernel = cv.matFromArray(2, 2, cv.CV_8UC1, [1, 1, 1, 1]);
+    // FIX P4 (Audit P4): Reuse the cached kernel Mat instead of allocating a new one.
     const dilated = new cv.Mat();
     try {
-      cv.dilate(mask, dilated, kernel);
+      cv.dilate(mask, dilated, this._dilationKernelMat);
       deleteMat(mask);
       return dilated;
     } catch (err) {
       deleteMat(dilated);
       throw err;
-    } finally {
-      deleteMat(kernel);
     }
   }
 
@@ -256,32 +436,50 @@ export class DetPostProcess {
     const scores = [];
     const numContours = Math.min(contours.size(), this.maxCandidates);
 
-    for (let i = 0; i < numContours; i++) {
-      const contour = contours.get(i);
-      try {
-        const result = this._processSingleContour(contour, pred, W, H, srcH, srcW);
-        if (result) {
-          boxes.push(result.box);
-          scores.push(result.score);
+    // FIX P2 (Audit P2): Hoist the quad-points cv.Mat and its MatVector out of the
+    // hot contour loop.  The pts Mat always has shape 4×1 CV_32SC2 (4 corners, x/y
+    // int32); pre-allocating once and updating data in-place via data32S avoids a
+    // per-iteration WASM heap alloc + data copy for every contour.
+    //
+    // Note: maskMat inside _boxScoreFast CANNOT be hoisted — its shape (maskH×maskW)
+    // changes per contour because it mirrors each contour's individual bounding rect.
+    let hoistedPtsMat = null;
+    let hoistedPtsVec = null;
+    try {
+      hoistedPtsMat = new cv.Mat(4, 1, cv.CV_32SC2);
+      hoistedPtsVec = new cv.MatVector();
+      hoistedPtsVec.push_back(hoistedPtsMat);
+
+      for (let i = 0; i < numContours; i++) {
+        const contour = contours.get(i);
+        try {
+          const result = this._processSingleContour(contour, pred, W, H, srcH, srcW, hoistedPtsMat, hoistedPtsVec);
+          if (result) {
+            boxes.push(result.box);
+            scores.push(result.score);
+          }
+        } catch (err) {
+          if (err instanceof AbortException) throw err;
+          // Skip failed contour, continue processing others
+          continue;
+        } finally {
+          contour.delete?.();
         }
-      } catch (err) {
-        if (err instanceof AbortException) throw err;
-        // Skip failed contour, continue processing others
-        continue;
-      } finally {
-        contour.delete?.();
       }
+    } finally {
+      if (hoistedPtsVec) hoistedPtsVec.delete();
+      deleteMat(hoistedPtsMat);
     }
 
     return { boxes, scores };
   }
 
   /** @private */
-  _processSingleContour(contour, pred, W, H, srcH, srcW) {
+  _processSingleContour(contour, pred, W, H, srcH, srcW, hoistedPtsMat, hoistedPtsVec) {
     const { box: points, sside } = this._getMiniBoxes(contour);
     if (sside < this.minSize) return null;
 
-    const score = this._boxScoreFast(pred, W, H, points);
+    const score = this._boxScoreFast(pred, W, H, points, hoistedPtsMat, hoistedPtsVec);
     if (score < this.boxThresh) return null;
 
     const unclipped = unclipPolygon(points, this.unclipRatio);
@@ -296,7 +494,22 @@ export class DetPostProcess {
     return { box: scaledBox, score };
   }
 
-  _boxScoreFast(bitmap, W, H, box) {
+  /**
+   * FIX P2 (Audit P2): Accept optional hoisted pts Mat + MatVector to avoid
+   * per-call cv.matFromArray allocation for the 4 box corner points.
+   * When hoistedPtsMat/Vec are provided the method writes corner data in-place
+   * via data32S; they must have shape 4×1 CV_32SC2 and already be pushed into
+   * the MatVector.  The maskMat is still allocated per-call because its
+   * dimensions (maskH × maskW) differ per contour and cannot be pre-allocated.
+   *
+   * @param {Float32Array} bitmap
+   * @param {number} W
+   * @param {number} H
+   * @param {Array<[number,number]>} box
+   * @param {cv.Mat|null} [hoistedPtsMat]
+   * @param {cv.MatVector|null} [hoistedPtsVec]
+   */
+  _boxScoreFast(bitmap, W, H, box, hoistedPtsMat = null, hoistedPtsVec = null) {
     const xs = box.map(p => p[0]);
     const ys = box.map(p => p[1]);
     const xmin = Math.max(0, Math.floor(Math.min(...xs)));
@@ -306,18 +519,34 @@ export class DetPostProcess {
 
     const maskH = ymax - ymin + 1;
     const maskW = xmax - xmin + 1;
-    const maskArr = new Uint8Array(maskH * maskW);
     const shiftedBox = box.map(([x, y]) => [x - xmin, y - ymin]);
 
-    let maskMat = null;
+    // Build pts Mat — reuse hoisted allocation when caller provides one.
     let pts = null;
     let ptsList = null;
-
-    try {
-      maskMat = cv.matFromArray(maskH, maskW, cv.CV_8UC1, Array.from(maskArr));
+    let ownedPts = false;
+    let ownedVec = false;
+    if (hoistedPtsMat && hoistedPtsVec) {
+      // Write corner data in-place (4 points × 2 int32 values = 8 elements)
+      const d = hoistedPtsMat.data32S;
+      for (let k = 0; k < 4; k++) {
+        d[k * 2]     = Math.round(shiftedBox[k][0]);
+        d[k * 2 + 1] = Math.round(shiftedBox[k][1]);
+      }
+      pts = hoistedPtsMat;
+      ptsList = hoistedPtsVec;
+    } else {
       pts = cv.matFromArray(4, 1, cv.CV_32SC2, shiftedBox.flat().map(Math.round));
       ptsList = new cv.MatVector();
       ptsList.push_back(pts);
+      ownedPts = true;
+      ownedVec = true;
+    }
+
+    // maskMat shape varies per contour — must be allocated here
+    let maskMat = null;
+    try {
+      maskMat = new cv.Mat(maskH, maskW, cv.CV_8UC1, new cv.Scalar(0));
       cv.fillPoly(maskMat, ptsList, new cv.Scalar(1));
 
       let sum = 0, count = 0;
@@ -333,8 +562,8 @@ export class DetPostProcess {
       return count > 0 ? sum / count : 0;
     } finally {
       deleteMat(maskMat);
-      deleteMat(pts);
-      if (ptsList) ptsList.delete();
+      if (ownedVec && ptsList) ptsList.delete();
+      if (ownedPts) deleteMat(pts);
     }
   }
 

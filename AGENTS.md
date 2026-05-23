@@ -38,3 +38,36 @@ RapidDoc-JS ports the RapidDoc document intelligence engine to a browser-native 
 - Browser smoke test: `rtk npm run dev`, then open `http://localhost:5173`.
 - Python baseline when needed: `rtk python demo/demo.py` or targeted scripts from `demo/`.
 - For parity-sensitive changes, compare Markdown, middle JSON, model JSON, page counts, bounding boxes, and table/formula/OCR output on the same sample document.
+
+## Audit Finding ID Convention
+
+Each finding in `documentation/PARITY_AUDIT_2026-05-23.md` has a short ID (e.g. `L1`, `T6`, `R4`, `O1`, `F2`). Reference that ID whenever touching parity-related code.
+
+**PR title**
+
+```
+[Audit-L1] BigInt coercion in OrtInferSession
+```
+
+**Commit message**
+
+```
+fix: [Audit-L1] BigInt coercion in OrtInferSession
+```
+
+**Code comment (bug fix)**
+
+```js
+// FIX L1: coerce int64 tensor to Number before arithmetic
+```
+
+**Code comment (intentional Python-quirk replication)**
+
+```js
+// FIX T2: INTENTIONAL R/B swap in luminance — matches Python training distribution. DO NOT "FIX".
+// See documentation/PYTHON_PARITY_DIVERGENCES.md
+```
+
+Use `// INTENTIONAL {ID}: ...` when the code intentionally diverges from "correct" behavior to replicate a Python training-data quirk. If a reviewer would be tempted to "fix" it, add `DO NOT "FIX" — see PYTHON_PARITY_DIVERGENCES.md`.
+
+Look up IDs in `documentation/PARITY_AUDIT_2026-05-23.md`. Every CRITICAL/HIGH fix must carry the ID in commit message, PR body, and the relevant code comment.

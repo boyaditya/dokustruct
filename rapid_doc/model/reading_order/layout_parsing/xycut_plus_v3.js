@@ -1,6 +1,7 @@
 // Copyright (c) 2024 PaddlePaddle Authors. All Rights Reserved.
 // Apache License, Version 2.0
 
+import { intTrunc } from '../../../utils/math_utils.js';
 import { LayoutBlock, LayoutRegion } from "./layout_objects.js";
 import {
   BLOCK_LABEL_MAP,
@@ -70,7 +71,8 @@ function standardizedData(
   if (!layoutDetRes || !layoutDetRes.boxes) {
     layoutDetRes = { boxes: [] };
   }
-  const matchedOcrDict = {};
+  // FIX R3: use Map (insertion-order preserving) instead of plain object (integer keys sort differently)
+  const matchedOcrDict = new Map();
   const regionToBlockMap = {};
   const blockToOcrMap = {};
   const objectBoxes = [];
@@ -119,10 +121,10 @@ function standardizedData(
       );
       blockToOcrMap[boxIdx] = matchedIdxes;
       for (const mIdx of matchedIdxes) {
-        if (matchedOcrDict[mIdx] == null) {
-          matchedOcrDict[mIdx] = [boxIdx];
+        if (!matchedOcrDict.has(mIdx)) {
+          matchedOcrDict.set(mIdx, [boxIdx]);
         } else {
-          matchedOcrDict[mIdx].push(boxIdx);
+          matchedOcrDict.get(mIdx).push(boxIdx);
         }
       }
     }
@@ -149,8 +151,7 @@ function standardizedData(
 
   // ── Replace OCR boxes at block boundaries ─────────────────
   const scoreThresh = textRecScoreThresh ?? 0;
-  for (const [ocrIdxStr, layoutBoxIds] of Object.entries(matchedOcrDict)) {
-    const overallOcrIdx = Number(ocrIdxStr);
+  for (const [overallOcrIdx, layoutBoxIds] of matchedOcrDict) {
     if (layoutBoxIds.length <= 1) continue;
     let matchedNo = 0;
     const overallOcrBox = [...overallOcrRes.rec_boxes[overallOcrIdx]];
@@ -421,7 +422,7 @@ function getLayoutParsingObjects(
 
   for (let regionIdx = 0; regionIdx < regionDetRes.boxes.length; regionIdx++) {
     const regionInfo = regionDetRes.boxes[regionIdx];
-    const regionBbox = regionInfo.coordinate.map(Math.round);
+    const regionBbox = regionInfo.coordinate.map(intTrunc); // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
     const regionBlocks = (
       regionBlockOcrIdxMap.region_to_block_map[regionIdx] || []
     ).map((idx) => layoutParsingBlocks[idx]);
@@ -434,7 +435,7 @@ function getLayoutParsingObjects(
   }
 
   const layoutParsingPage = new LayoutRegion(
-    pageRegionBbox.map(Math.round),
+    pageRegionBbox.map(intTrunc), // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
     layoutParsingRegions
   );
   return layoutParsingPage;

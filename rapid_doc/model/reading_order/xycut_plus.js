@@ -1,5 +1,7 @@
 // Copyright (c) Opendatalab. All rights reserved.
 
+import { intTrunc } from '../../utils/math_utils.js';
+
 // ─────────────────────────────────────────────────────────────
 // Low-level projection helpers (plain [x1,y1,x2,y2] arrays)
 // ─────────────────────────────────────────────────────────────
@@ -29,9 +31,9 @@ export function projectionByBboxes(boxes, axis) {
 
   const projection = new Int32Array(maxLength);
   for (const box of boxes) {
+    // FIX R6/R11: removed swap [start, end] — matches Python (no swap in Python baseline)
     let start = Math.abs(Math.round(box[axis]));
     let end = Math.abs(Math.round(box[axis + 2]));
-    if (start > end) [start, end] = [end, start];
     start = Math.max(0, start);
     end = Math.min(maxLength, end);
     for (let k = start; k < end; k++) projection[k]++;
@@ -249,7 +251,8 @@ export function calculateTextLineDirection(bboxes, directionRatio = 1.5) {
  */
 export function sortByXycut(blockBboxes, direction = "vertical", minGap = 1) {
   if (!blockBboxes.length) return [];
-  const intBoxes = blockBboxes.map((b) => b.map(Math.round));
+  // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
+  const intBoxes = blockBboxes.map((b) => b.map(intTrunc));
   const indices = Array.from({ length: intBoxes.length }, (_, i) => i);
   const res = [];
   if (direction === "vertical") {

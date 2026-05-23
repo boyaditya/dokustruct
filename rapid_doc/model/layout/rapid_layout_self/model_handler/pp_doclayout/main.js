@@ -12,6 +12,7 @@ import {
   PP_DOCLAYOUT_PLUS_L_layout_merge_bboxes_mode,
   PP_DOCLAYOUTV2_layout_merge_bboxes_mode,
 } from '../../utils/typings.js';
+import { tensorToNumber } from '../../../../../utils/math_utils.js';
 
 export class PPDocLayoutModelHandler extends BaseModelHandler {
   /**
@@ -160,6 +161,8 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
         [oriImgShape[1], oriImgShape[0]],  // [W, H]
         masks,
         layoutShapeMode,
+        output.maskH ?? 0,
+        output.maskW ?? 0,
       );
 
       let boxes = [], polygonPoints = [], scores = [], classNames = [], orders = null;
@@ -170,11 +173,20 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
         scores        = datas.map(d => d.score);
         classNames    = datas.map(d => d.label);
 
-        orders = (this.modelType === ModelType.PP_DOCLAYOUTV3)
-          ? datas.map((_, idx) => idx)
-          : null; // Force DocLayoutV2 and Plus-L to use XY-Cut algorithm for better parity
+        // FIX L5: emit model-native sequential order for V2/V3/Plus-L (matches Python)
+        // Audit L5: V2 and Plus-L have a native reading order from the model;
+        // only S/M/L (no native order) should fall back to XY-Cut (orders = null).
+        const isNativeOrderModel = [
+          ModelType.PP_DOCLAYOUTV2,
+          ModelType.PP_DOCLAYOUTV3,
+          ModelType.PP_DOCLAYOUT_PLUS_L,
+        ].includes(this.modelType);
+        orders = isNativeOrderModel
+          ? Array.from({ length: datas.length }, (_, i) => i)
+          : null; // S/M/L: no native reading order — fallback to XY-Cut
 
-        if (polygonPoints.every(p => p === null)) polygonPoints = null;
+        // FIX L4: drop polygon_points if any p is null (matches Python)
+        if (polygonPoints.some(p => p === null)) polygonPoints = null;
       } else {
         orders = [];
       }
@@ -241,15 +253,33 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
     const boxNumsData   = this._tensorData(boxNumsTensor);    // [batchSize]
     const allMasksData  = hasMasks ? this._tensorData(masksTensor) : null;
 
+    // FIX L2: byte-offset slicing — determine mask H/W from tensor dims
+    let maskH = 0, maskW = 0;
+    if (hasMasks && masksTensor) {
+      if (masksTensor.dims && masksTensor.dims.length >= 2) {
+        maskH = masksTensor.dims[masksTensor.dims.length - 2];
+        maskW = masksTensor.dims[masksTensor.dims.length - 1];
+      } else {
+        // Fallback: infer assuming square masks from total data length
+        const totalBoxesFallback = Array.from(boxNumsData).reduce((a, b) => a + tensorToNumber(b), 0) || 1;
+        maskH = Math.round(Math.sqrt(allMasksData.length / totalBoxesFallback));
+        maskW = maskH;
+      }
+    }
+
+    // Pre-compute totalBoxes and boxCols outside the loop (constant across batch)
+    const totalBoxes = Array.from(boxNumsData).reduce((a, b) => a + tensorToNumber(b), 0) || 1;
+    const boxCols  = Math.floor(allBoxesData.length / totalBoxes);
+
     const results = [];
     let boxIdxStart = 0;
 
     for (let idx = 0; idx < boxNumsData.length; idx++) {
-      const np_boxes_num  = boxNumsData[idx];
+      // FIX L1: coerce BigInt to Number for arithmetic
+      const np_boxes_num  = tensorToNumber(boxNumsData[idx]);
       const boxIdxEnd     = boxIdxStart + np_boxes_num;
 
       // Slice rows into 2D array to preserve columns
-      const boxCols  = Math.floor(allBoxesData.length / (boxNumsData.reduce((a, b) => a + b, 0) || 1));
       const npBoxes2D = [];
       for (let i = 0; i < np_boxes_num; i++) {
         const start = (boxIdxStart + i) * boxCols;
@@ -258,8 +288,15 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
       }
 
       if (hasMasks) {
-        const npMasks = allMasksData.slice(boxIdxStart, boxIdxEnd);
-        results.push({ boxes: npBoxes2D, masks: npMasks });
+        // FIX L2: byte-offset slicing, not box-count slicing
+        // allMasksData is flat [totalBoxes * H * W]; each mask occupies H*W elements
+        const maskStride = maskH * maskW; // FIX L2: byte-offset, not box-count
+        const npMasks = [];
+        for (let i = 0; i < np_boxes_num; i++) {
+          const maskOffset = (boxIdxStart + i) * maskStride; // FIX L2: byte-offset
+          npMasks.push(allMasksData.slice(maskOffset, maskOffset + maskStride));
+        }
+        results.push({ boxes: npBoxes2D, masks: npMasks, maskH, maskW });
       } else {
         results.push({ boxes: npBoxes2D });
       }

@@ -2,6 +2,7 @@
 
 import { BlockType, ContentType } from './enum_class.js';
 import { bboxToPoints } from './ocr_utils.js';
+import { intTrunc } from './math_utils.js';
 
 /**
  * Default reading order providers — set by the pipeline layer via `configureReadingOrder`.
@@ -49,6 +50,42 @@ function deepCopy(obj) {
 }
 
 /**
+ * Compare two arrays element-by-element for value equality.
+ * Used for bbox arrays (e.g. [x0, y0, x1, y1]) where reference equality fails
+ * when arrays are re-created from the same numeric values.
+ * FIX 8.10: replaces `===` reference check in xycut-plus fallback.
+ *
+ * @param {Array} a
+ * @param {Array} b
+ * @returns {boolean}
+ */
+function deepEqualArray(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Find the first index in `arr` where `deepEqualArray(arr[i], target)` is true.
+ * Returns -1 if not found.
+ * FIX 8.10: value-equality replacement for `arr.findIndex(b => b === target)`.
+ *
+ * @param {Array[]} arr   Array of bbox arrays
+ * @param {Array}   target  Bbox array to find
+ * @returns {number}
+ */
+function findIndexByValue(arr, target) {
+  for (let i = 0; i < arr.length; i++) {
+    if (deepEqualArray(arr[i], target)) return i;
+  }
+  return -1;
+}
+
+/**
  * Sort blocks within a page using line-height analysis and xycut-plus layout ordering.
  *
  * @param {Array<object>} blocks
@@ -93,7 +130,7 @@ export function getLineHeight(blocks) {
     if (textTypes.has(block.type)) {
       for (const line of block.lines ?? []) {
         const [, y0, , y1] = line.bbox;
-        heights.push(Math.round(y1 - y0));
+        heights.push(intTrunc(y1 - y0)); // FIX R9: int() truncation, not Math.round
       }
     }
   }
@@ -326,7 +363,9 @@ export async function sortBlocksByXycutPlus(fixBlocks, pagePilImg) {
       const sortedIndices = _readingOrderProviders.xycutPlusSort(blockBboxes);
       const sortedBoxes = sortedIndices.map(i => blockBboxes[i]);
       for (let i = 0; i < fixBlocks.length; i++) {
-        fixBlocks[i].index = sortedBoxes.findIndex(b => b === blockBboxes[i]);
+        // FIX 8.10: blockBboxes[i] is an array — reference equality always fails
+        // for re-created arrays; use value-equality deep comparison instead.
+        fixBlocks[i].index = findIndexByValue(sortedBoxes, blockBboxes[i]);
       }
     } catch (e2) {
       console.warn('[sortBlocksByXycutPlus] xycut-plus fallback failed:', e2?.message ?? e2);

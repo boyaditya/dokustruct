@@ -3,7 +3,7 @@
 // Python `tokenizers` (HuggingFace) library → JS JSON-based tokenizer from model metadata.
 // `ftfy.fix_text` → identity (optional text cleanup not critical for browser).
 
-import { fixLatex } from "./utils.js";
+import { fixLatex, gpt2BytesToUnicodeInverse, decodeByteLevelToken } from "./utils.js";
 
 /**
  * UniMERNet token decoder using vocabulary stored in ONNX model metadata.
@@ -92,6 +92,8 @@ export class UniMERNetDecode {
    * @returns {string}
    */
   tokenToStr(tokenIds) {
+    // FIX F4: HuggingFace byte-level BPE inverse map for Greek/CJK token decoding
+    const inverseMap = gpt2BytesToUnicodeInverse();
     const tokens = [];
     for (const id of tokenIds) {
       if (this.specialIds.has(id)) continue;
@@ -103,6 +105,8 @@ export class UniMERNetDecode {
       // GPT-2 BPE: Ġ (U+0120) is the space marker — replace with actual space
       // Reference: Python post_process.py line 266: toks[b][i].replace("Ġ", " ")
       token = token.replace(/\u0120/g, ' ');
+      // FIX F4: apply byte-level inverse map per-token to decode Greek/CJK escapes
+      token = decodeByteLevelToken(token, inverseMap);
       tokens.push(token);
     }
     return this._postProcess(tokens.join(""));
@@ -124,42 +128,9 @@ export class UniMERNetDecode {
     
     // 3. ftfy.fix_text - skip in JS (optional text cleanup)
     
-    // 4. Normalize whitespace (Python: self.normalize, commented out in Python
-    //    but needed in JS because PIL/OpenCV resize differences cause the decoder
-    //    to produce space-separated character tokens like "1 7 0 9" instead of "1709")
-    result = this._normalize(result);
+    // FIX F5: _normalize workaround removed — F1 BGR/RGB swap fixed in pre_process.js
     
     return result.trim();
-  }
-
-  /**
-   * Normalize LaTeX by collapsing unnecessary spaces between tokens.
-   * Targeted approach: only collapse specific patterns that the decoder
-   * produces due to PIL/OpenCV resize differences (space-separated digits,
-   * spaces inside subscripts/superscripts, etc.)
-   * @param {string} s
-   * @returns {string}
-   */
-  _normalize(s) {
-    // 1. Collapse spaces between digits: '1 7 0 9' -> '1709'
-    s = s.replace(/(\d)\s+(?=\d)/g, '$1');
-
-    // 2. Collapse spaces around decimal points: '6 . 8' -> '6.8'
-    s = s.replace(/(\d)\s*\.\s*(\d)/g, '$1.$2');
-
-    // 3. Remove space before subscript/superscript: 'Q _{' -> 'Q_{', 'r ^{' -> 'r^{'
-    s = s.replace(/\s+([_^])/g, '$1');
-
-    // 4. Collapse spaces inside braces after _/^: '_{ 0 }' -> '_{0}'
-    s = s.replace(/([_^])\s*\{\s*([^}]+?)\s*\}/g, '$1{$2}');
-
-    // 5. Collapse space after minus sign when followed by digit: '- 6' -> '-6'
-    s = s.replace(/([-])\s+(\d)/g, '$1$2');
-
-    // 6. Collapse multiple spaces to single space
-    s = s.replace(/\s{2,}/g, ' ');
-
-    return s;
   }
 
   /**

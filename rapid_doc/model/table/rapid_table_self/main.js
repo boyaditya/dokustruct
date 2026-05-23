@@ -55,13 +55,15 @@ export class RapidTable {
     const mats = await Promise.all(oriImgs.map(img => this._loadImage.run(img)));
 
     try {
-      const { predHtmls, cellBboxes, logicPointsList } = await this._runStructurer(mats, ocrResults);
+      const { predHtmls, cellBboxes, logicPointsList, scores } = await this._runStructurer(mats, ocrResults);
       const elapse = (performance.now() - t0) / 1000;
       return new RapidTableOutput({
         imgs: oriImgs,
         predHtmls,
         cellBboxes,
         logicPoints: logicPointsList,
+        // FIX T11b: include per-image mean decode scores
+        scores,
         elapse,
       });
     } finally {
@@ -80,13 +82,17 @@ export class RapidTable {
         predHtmls: result.predHtmls,
         cellBboxes: result.cellBboxes,
         logicPointsList: result.logicPointsList,
+        // FIX T11b: UNET path does not produce decode scores; use empty array for shape consistency
+        scores: result.scores ?? [],
       };
     }
 
-    const { structures, cellBboxes } = await this._structurer.run(mats);
+    const { structures, cellBboxes, scores } = await this._structurer.run(mats);
     const predHtmls = [];
     const allCellBboxes = [];
     const logicPointsList = [];
+    // FIX T11b: collect per-image mean scores from decode output
+    const allScores = [];
 
     for (let i = 0; i < structures.length; i++) {
       try {
@@ -94,6 +100,7 @@ export class RapidTable {
         predHtmls.push(html);
         allCellBboxes.push(cellBboxes[i] ?? []);
         logicPointsList.push([]);
+        allScores.push(scores ? (scores[i] ?? 0) : 0);
       } catch (err) {
         if (err instanceof AbortException) throw err;
         console.warn(formatPipelineError({
@@ -106,10 +113,11 @@ export class RapidTable {
         predHtmls.push("");
         allCellBboxes.push([]);
         logicPointsList.push([]);
+        allScores.push(0);
       }
     }
 
-    return { predHtmls, cellBboxes: allCellBboxes, logicPointsList };
+    return { predHtmls, cellBboxes: allCellBboxes, logicPointsList, scores: allScores };
   }
 
   /**

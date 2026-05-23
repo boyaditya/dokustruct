@@ -33,6 +33,15 @@ export {
 };
 
 // ─────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────
+
+/** FIX 11.2: Maximum recursion depth for recursive_xy_cut / recursive_yx_cut.
+ *  Prevents V8 stack overflow on degenerate layouts with many tiny non-separable boxes.
+ */
+const MAX_XYCUT_DEPTH = 100;
+
+// ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
 
@@ -71,11 +80,14 @@ function getNearestEdgeDistance(bbox1, bbox2, weight = [1, 1, 1, 1]) {
  */
 function projectionByBboxes(boxes, axis) {
   if (!boxes || boxes.length === 0) return new Int32Array(0);
+  // FIX R10: check both axis and axis+2 columns in both branches
   // determine histogram length
   let maxLength = 0;
   for (const box of boxes) {
-    const val = Math.abs(box[axis + 2]);
-    if (val > maxLength) maxLength = val;
+    const v1 = Math.abs(box[axis]);
+    const v2 = Math.abs(box[axis + 2]);
+    if (v1 > maxLength) maxLength = v1;
+    if (v2 > maxLength) maxLength = v2;
   }
   // check for negative start
   let hasNeg = false;
@@ -85,17 +97,18 @@ function projectionByBboxes(boxes, axis) {
   if (hasNeg) {
     maxLength = 0;
     for (const box of boxes) {
-      const v = Math.abs(box[axis]);
-      if (v > maxLength) maxLength = v;
+      const v1 = Math.abs(box[axis]);
+      const v2 = Math.abs(box[axis + 2]);
+      if (v1 > maxLength) maxLength = v1;
+      if (v2 > maxLength) maxLength = v2;
     }
   }
   const projection = new Int32Array(maxLength);
   for (const box of boxes) {
     const start = Math.abs(box[axis]);
     const end = Math.abs(box[axis + 2]);
-    const s = Math.min(start, end);
-    const e = Math.max(start, end);
-    for (let i = s; i < e && i < maxLength; i++) projection[i]++;
+    // FIX R6/R11: removed swap [start, end] — matches Python (no swap in Python baseline)
+    for (let i = start; i < end && i < maxLength; i++) projection[i]++;
   }
   return projection;
 }
@@ -122,31 +135,38 @@ function splitProjectionProfile(arrValues, minValue, minGap) {
   const starts = [sigIdxs[0]];
   const ends = [];
   for (const gi of gapIdxs) {
-    ends.push(sigIdxs[gi] + 1);
+    ends.push(sigIdxs[gi]);    // FIX R4: was sigIdxs[gi] + 1 (off-by-one)
     starts.push(sigIdxs[gi + 1]);
   }
-  ends.push(sigIdxs[sigIdxs.length - 1] + 1);
+  ends.push(sigIdxs[sigIdxs.length - 1] + 1); // last segment keeps +1 (matches Python np.append(..., last+1))
   return [starts, ends];
 }
 
 /**
  * Recursive Y-then-X cut.
- * @param {number[][]} boxes  N×4
- * @param {number[]} indices
+ * @param {number[][]} boxes  N×4 root array (never sliced; shared across all recursion levels)
+ * @param {number[]} indices  indices into boxes for this recursion level
  * @param {number[]} res  output (modified in place)
  * @param {number} minGap
+ * @param {number} depth  current recursion depth (default 0)
  */
-function recursiveYxCut(boxes, indices, res, minGap = 1) {
-  if (boxes.length !== indices.length)
-    throw new Error("boxes and indices length mismatch");
-  if (boxes.length === 0) return;
+function recursiveYxCut(boxes, indices, res, minGap = 1, depth = 0) {
+  // FIX 11.2: guard against stack overflow on degenerate layouts
+  if (depth >= MAX_XYCUT_DEPTH) {
+    console.warn(
+      `[xycut_enhanced] recursiveYxCut reached MAX_XYCUT_DEPTH (${MAX_XYCUT_DEPTH}); ` +
+      `appending ${indices.length} remaining block(s) in current order.`
+    );
+    res.push(...indices);
+    return;
+  }
+  // FIX P1: boxes is always the root array; indices is the active slice — no length-match check
+  if (indices.length === 0) return;
 
-  // Sort by y_min
-  const ySorted = boxes
-    .map((b, i) => ({ b, idx: indices[i] }))
-    .sort((a, b) => a.b[1] - b.b[1]);
-  const ySortedBoxes = ySorted.map((x) => x.b);
-  const ySortedIndices = ySorted.map((x) => x.idx);
+  // FIX P1: sort only the index array by y_min — no new box sub-array allocation
+  const ySortedIndices = [...indices].sort((a, b) => boxes[a][1] - boxes[b][1]);
+  // Transient view needed only for projectionByBboxes (not passed to recursion)
+  const ySortedBoxes = ySortedIndices.map(i => boxes[i]);
 
   const yProj = projectionByBboxes(ySortedBoxes, 1);
   const yIntervals = splitProjectionProfile(yProj, 0, 1);
@@ -155,16 +175,13 @@ function recursiveYxCut(boxes, indices, res, minGap = 1) {
   const [yStarts, yEnds] = yIntervals;
   for (let k = 0; k < yStarts.length; k++) {
     const yStart = yStarts[k], yEnd = yEnds[k];
-    const yMask = ySortedBoxes.map((b) => b[1] >= yStart && b[1] < yEnd);
-    const yBoxChunk = ySortedBoxes.filter((_, i) => yMask[i]);
-    const yIdxChunk = ySortedIndices.filter((_, i) => yMask[i]);
+    // FIX P1: filter only the index array — eliminates per-cut box-array allocation
+    const yIdxChunk = ySortedIndices.filter(idx => boxes[idx][1] >= yStart && boxes[idx][1] < yEnd);
 
-    // Sort by x_min
-    const xSorted = yBoxChunk
-      .map((b, i) => ({ b, idx: yIdxChunk[i] }))
-      .sort((a, b) => a.b[0] - b.b[0]);
-    const xBoxChunk = xSorted.map((x) => x.b);
-    const xIdxChunk = xSorted.map((x) => x.idx);
+    // Sort by x_min (index-only sort)
+    const xSortedIndices = [...yIdxChunk].sort((a, b) => boxes[a][0] - boxes[b][0]);
+    // Transient box view for projectionByBboxes
+    const xBoxChunk = xSortedIndices.map(i => boxes[i]);
 
     const xProj = projectionByBboxes(xBoxChunk, 0);
     const xIntervals = splitProjectionProfile(xProj, 0, minGap);
@@ -172,21 +189,24 @@ function recursiveYxCut(boxes, indices, res, minGap = 1) {
 
     const [xStarts, xEnds] = xIntervals;
     if (xStarts.length === 1) {
-      res.push(...xIdxChunk);
+      res.push(...xSortedIndices);
       continue;
     }
 
-    const hasNegX = xBoxChunk.some((b) => b[0] < 0);
+    const hasNegX = xSortedIndices.some(idx => boxes[idx][0] < 0);
     const effectiveStarts = hasNegX ? [...xStarts].reverse() : xStarts;
     const effectiveEnds = hasNegX ? [...xEnds].reverse() : xEnds;
 
     for (let m = 0; m < effectiveStarts.length; m++) {
       const xStart = effectiveStarts[m], xEnd = effectiveEnds[m];
-      const xMask = xBoxChunk.map((b) => Math.abs(b[0]) >= xStart && Math.abs(b[0]) < xEnd);
+      // FIX P1: filter only the index array; pass root boxes unchanged to recursion
+      const xIdxFiltered = xSortedIndices.filter(idx => Math.abs(boxes[idx][0]) >= xStart && Math.abs(boxes[idx][0]) < xEnd);
       recursiveYxCut(
-        xBoxChunk.filter((_, i) => xMask[i]),
-        xIdxChunk.filter((_, i) => xMask[i]),
-        res
+        boxes,
+        xIdxFiltered,
+        res,
+        minGap,
+        depth + 1
       );
     }
   }
@@ -194,38 +214,48 @@ function recursiveYxCut(boxes, indices, res, minGap = 1) {
 
 /**
  * Recursive X-then-Y cut.
+ * @param {number[][]} boxes  N×4 root array (never sliced; shared across all recursion levels)
+ * @param {number[]} indices  indices into boxes for this recursion level
+ * @param {number[]} res  output (modified in place)
+ * @param {number} minGap
+ * @param {number} depth  current recursion depth (default 0)
  */
-function recursiveXyCut(boxes, indices, res, minGap = 1) {
-  if (boxes.length !== indices.length)
-    throw new Error("boxes and indices length mismatch");
-  if (boxes.length === 0) return;
+function recursiveXyCut(boxes, indices, res, minGap = 1, depth = 0) {
+  // FIX 11.2: guard against stack overflow on degenerate layouts
+  if (depth >= MAX_XYCUT_DEPTH) {
+    console.warn(
+      `[xycut_enhanced] recursiveXyCut reached MAX_XYCUT_DEPTH (${MAX_XYCUT_DEPTH}); ` +
+      `appending ${indices.length} remaining block(s) in current order.`
+    );
+    res.push(...indices);
+    return;
+  }
+  // FIX P1: boxes is always the root array; indices is the active slice — no length-match check
+  if (indices.length === 0) return;
 
-  const xSorted = boxes
-    .map((b, i) => ({ b, idx: indices[i] }))
-    .sort((a, b) => a.b[0] - b.b[0]);
-  const xSortedBoxes = xSorted.map((x) => x.b);
-  const xSortedIndices = xSorted.map((x) => x.idx);
+  // FIX P1: sort only the index array by x_min — no new box sub-array allocation
+  const xSortedIndices = [...indices].sort((a, b) => boxes[a][0] - boxes[b][0]);
+  // Transient view needed only for projectionByBboxes (not passed to recursion)
+  const xSortedBoxes = xSortedIndices.map(i => boxes[i]);
 
   const xProj = projectionByBboxes(xSortedBoxes, 0);
   const xIntervals = splitProjectionProfile(xProj, 0, 1);
   if (!xIntervals) return;
 
   const [xStarts, xEnds] = xIntervals;
-  const hasNegX = xSortedBoxes.some((b) => b[0] < 0);
+  const hasNegX = xSortedIndices.some(idx => boxes[idx][0] < 0);
   const effStarts = hasNegX ? [...xStarts].reverse() : xStarts;
   const effEnds = hasNegX ? [...xEnds].reverse() : xEnds;
 
   for (let k = 0; k < effStarts.length; k++) {
     const xStart = effStarts[k], xEnd = effEnds[k];
-    const xMask = xSortedBoxes.map((b) => Math.abs(b[0]) >= xStart && Math.abs(b[0]) < xEnd);
-    const xBoxChunk = xSortedBoxes.filter((_, i) => xMask[i]);
-    const xIdxChunk = xSortedIndices.filter((_, i) => xMask[i]);
+    // FIX P1: filter only the index array — eliminates per-cut box-array allocation
+    const xIdxChunk = xSortedIndices.filter(idx => Math.abs(boxes[idx][0]) >= xStart && Math.abs(boxes[idx][0]) < xEnd);
 
-    const ySorted = xBoxChunk
-      .map((b, i) => ({ b, idx: xIdxChunk[i] }))
-      .sort((a, b) => a.b[1] - b.b[1]);
-    const yBoxChunk = ySorted.map((x) => x.b);
-    const yIdxChunk = ySorted.map((x) => x.idx);
+    // Sort by y_min (index-only sort)
+    const ySortedIndices = [...xIdxChunk].sort((a, b) => boxes[a][1] - boxes[b][1]);
+    // Transient box view for projectionByBboxes
+    const yBoxChunk = ySortedIndices.map(i => boxes[i]);
 
     const yProj = projectionByBboxes(yBoxChunk, 1);
     const yIntervals = splitProjectionProfile(yProj, 0, minGap);
@@ -233,16 +263,19 @@ function recursiveXyCut(boxes, indices, res, minGap = 1) {
 
     const [yStarts, yEnds] = yIntervals;
     if (yStarts.length === 1) {
-      res.push(...yIdxChunk);
+      res.push(...ySortedIndices);
       continue;
     }
     for (let m = 0; m < yStarts.length; m++) {
       const yStart = yStarts[m], yEnd = yEnds[m];
-      const yMask = yBoxChunk.map((b) => b[1] >= yStart && b[1] < yEnd);
+      // FIX P1: filter only the index array; pass root boxes unchanged to recursion
+      const yIdxFiltered = ySortedIndices.filter(idx => boxes[idx][1] >= yStart && boxes[idx][1] < yEnd);
       recursiveXyCut(
-        yBoxChunk.filter((_, i) => yMask[i]),
-        yIdxChunk.filter((_, i) => yMask[i]),
-        res
+        boxes,
+        yIdxFiltered,
+        res,
+        minGap,
+        depth + 1
       );
     }
   }
@@ -646,16 +679,18 @@ function updateVisionChildBlocks(block, region) {
       block, refBlocks, threshold, direction
     );
 
-    const processGroup = (group, isPrev) => {
+    // FIX R12: distinct break conditions for prev/post blocks (matches Python)
+    const processPrevBlocks = (group) => {
       for (const ref of group) {
+        // prev: break if label is not in (text_labels + vision_title_labels)
         if (
-          hasVisionFootnote &&
-          BLOCK_LABEL_MAP.text_labels.includes(ref.label)
+          !BLOCK_LABEL_MAP.text_labels.includes(ref.label) &&
+          !BLOCK_LABEL_MAP.vision_title_labels.includes(ref.label)
         ) break;
 
         const edgeDist = getNearestEdgeDistance(block.bbox, ref.bbox);
-        const [bcx, bcy] = block.getCentroid();
-        const [rcx, rcy] = ref.getCentroid();
+        const [bcx] = block.getCentroid();
+        const [rcx] = ref.getCentroid();
 
         if (
           BLOCK_LABEL_MAP.vision_title_labels.includes(ref.label) &&
@@ -687,9 +722,7 @@ function updateVisionChildBlocks(block, region) {
             ) {
               hasVisionFootnote = true;
               ref.order_label = "vision_footnote";
-              if (!isPrev) {
-                ref.label = "vision_footnote";
-              }
+              // prev blocks: do NOT set ref.label (matches Python prev loop)
               block.appendChildBlock(ref);
               const pos = region.normal_text_block_idxes.indexOf(ref.index);
               if (pos !== -1) region.normal_text_block_idxes.splice(pos, 1);
@@ -700,8 +733,61 @@ function updateVisionChildBlocks(block, region) {
       }
     };
 
-    processGroup(prevBlocks, true);
-    processGroup(postBlocks, false);
+    const processPostBlocks = (group) => {
+      for (const ref of group) {
+        // post: break if has_vision_footnote && label in text_labels
+        if (
+          hasVisionFootnote &&
+          BLOCK_LABEL_MAP.text_labels.includes(ref.label)
+        ) break;
+
+        const edgeDist = getNearestEdgeDistance(block.bbox, ref.bbox);
+        const [bcx] = block.getCentroid();
+        const [rcx] = ref.getCentroid();
+
+        if (
+          BLOCK_LABEL_MAP.vision_title_labels.includes(ref.label) &&
+          edgeDist <= ref.text_line_height * 2
+        ) {
+          hasVisionTitle = true;
+          ref.order_label = "vision_title";
+          block.appendChildBlock(ref);
+          const pos = region.vision_title_block_idxes.indexOf(ref.index);
+          if (pos !== -1) region.vision_title_block_idxes.splice(pos, 1);
+        }
+
+        if (BLOCK_LABEL_MAP.text_labels.includes(ref.label)) {
+          if (
+            !hasVisionFootnote &&
+            ref.direction === block.direction &&
+            ref.long_side_length < block.long_side_length &&
+            edgeDist <= ref.text_line_height * 2
+          ) {
+            const centerClose = Math.abs(bcx - rcx) < 10;
+            const leftAligned = block.bbox[0] - ref.bbox[0] < 10 && ref.num_of_lines === 1;
+            const rightAligned = block.bbox[2] - ref.bbox[2] < 10 && ref.num_of_lines === 1;
+            if (
+              (ref.short_side_length < block.short_side_length &&
+               ref.long_side_length < 0.5 * block.long_side_length &&
+               centerClose) ||
+              leftAligned ||
+              rightAligned
+            ) {
+              hasVisionFootnote = true;
+              ref.label = "vision_footnote";
+              ref.order_label = "vision_footnote";
+              block.appendChildBlock(ref);
+              const pos = region.normal_text_block_idxes.indexOf(ref.index);
+              if (pos !== -1) region.normal_text_block_idxes.splice(pos, 1);
+            }
+          }
+          break;
+        }
+      }
+    };
+
+    processPrevBlocks(prevBlocks);
+    processPostBlocks(postBlocks);
     if (hasVisionTitle) break;
   }
 

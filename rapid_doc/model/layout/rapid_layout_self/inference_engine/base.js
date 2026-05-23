@@ -80,6 +80,32 @@ export async function loadEngineCfg(url) {
   }
 }
 
+// ─── setNestedKey helper ──────────────────────────────────────────────────────
+
+/**
+ * Set a value at a dotted-key path inside an object, creating intermediate
+ * objects as needed.  Matches OmegaConf Python semantics for flat overrides
+ * such as `cuda_ep_cfg.device_id`.
+ *
+ * FIX L14: support dotted-key paths (matches OmegaConf Python semantics)
+ *
+ * @param {Object} obj      - Target object (mutated in-place)
+ * @param {string} dotPath  - Dot-separated key path, e.g. "cuda_ep_cfg.device_id"
+ * @param {*}      value    - Value to set at the leaf
+ */
+export function setNestedKey(obj, dotPath, value) {
+  const parts = dotPath.split('.');
+  let cursor = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (cursor[part] === null || typeof cursor[part] !== 'object' || Array.isArray(cursor[part])) {
+      cursor[part] = {};
+    }
+    cursor = cursor[part];
+  }
+  cursor[parts[parts.length - 1]] = value;
+}
+
 // ─── InferSession abstract base class ────────────────────────────────────────
 
 export class InferSession {
@@ -149,8 +175,10 @@ export class InferSession {
 
   /**
    * Merge override params into a config object (deep-merge).
+   * Supports dotted-key paths (e.g. "cuda_ep_cfg.device_id") that expand to
+   * nested object traversal, matching OmegaConf Python semantics (Audit L14).
    * @param {Object} cfg    - Base config
-   * @param {Object} params - Override params
+   * @param {Object} params - Override params (may contain dotted-key keys)
    * @returns {Object}
    */
   static updateParams(cfg, params) {
@@ -158,7 +186,10 @@ export class InferSession {
 
     const result = { ...cfg };
     for (const [k, v] of Object.entries(params)) {
-      if (v !== null && typeof v === 'object' && !Array.isArray(v) &&
+      // FIX L14: support dotted-key paths (matches OmegaConf Python semantics)
+      if (k.includes('.')) {
+        setNestedKey(result, k, v);
+      } else if (v !== null && typeof v === 'object' && !Array.isArray(v) &&
           result[k] !== null && typeof result[k] === 'object') {
         result[k] = InferSession.updateParams(result[k], v);
       } else {

@@ -8,11 +8,29 @@
 import * as ort from 'onnxruntime-web';
 import { acquireGlobalGpu } from '../../utils/ort_runtime.js';
 import { AbortException } from '../../utils/exceptions.js';
-import { formatPipelineError } from '../../utils/browser_utils.js';
+import { formatPipelineError, detectProfile } from '../../utils/browser_utils.js';
 import { RecPreProcess } from './ocr_preprocess.js';
 import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 
-const MAX_CONCURRENT_BATCHES = 5;
+// FIX P10: scale MAX_CONCURRENT_BATCHES based on detected device tier.
+// User-provided recBatchNum config overrides this at the recognizer level.
+const MAX_CONCURRENT_BATCHES = detectProfile().MAX_CONCURRENT_BATCHES;
+
+/**
+ * Yield execution to the browser's idle callback mechanism.
+ * FIX P11: keeps the browser event loop responsive between non-critical OCR rec batches.
+ * Uses requestIdleCallback when available; falls back to setTimeout(cb, 0).
+ * @returns {Promise<void>}
+ */
+function yieldToIdleCallback() {
+  return new Promise(resolve => {
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(() => resolve());
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
 
 /**
  * Batch CRNN text recognition with CTC decoding.
@@ -167,13 +185,21 @@ export class TextRecognizer {
   /** @private */
   async _runWithConcurrency(tasks, processFn) {
     const inFlight = new Set();
+    let isFirstBatch = true;
     for (const task of tasks) {
       const p = processFn(task).finally(() => inFlight.delete(p));
       inFlight.add(p);
       if (inFlight.size >= MAX_CONCURRENT_BATCHES) {
         await Promise.race(inFlight);
       }
-      await new Promise(r => setTimeout(r, 0));
+      // FIX P11: first batch is critical — start immediately without yielding.
+      // Subsequent batches are non-critical; yield to idle so the browser event
+      // loop stays responsive between batches.
+      if (isFirstBatch) {
+        isFirstBatch = false;
+      } else {
+        await yieldToIdleCallback();
+      }
     }
     await Promise.all(inFlight);
   }

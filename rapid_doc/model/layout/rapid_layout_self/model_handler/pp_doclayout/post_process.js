@@ -7,6 +7,8 @@
  * cv2 operations → OpenCV.js equivalents.
  */
 
+import { intTrunc } from '../../../../../utils/math_utils.js';
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const SKIP_ORDER_LABELS = [
@@ -57,7 +59,7 @@ export class PPPostProcess {
    * @param {string} [layoutShapeMode='auto']
    * @returns {Object[]} List of box dicts
    */
-  call(boxes, imgSize, masks = null, layoutShapeMode = 'auto') {
+  call(boxes, imgSize, masks = null, layoutShapeMode = 'auto', maskH = 0, maskW = 0) {
     // Convert to a mutable 2-D JS array for easier manipulation
     let boxArr = toBoxArray(boxes);
 
@@ -171,20 +173,18 @@ export class PPPostProcess {
     // Sort ordered detection formats
     const colLen = boxArr[0].length;
     if (colLen === 8) {
-      boxArr.sort((a, b) => {
-        if (a[6] !== b[6]) return a[6] - b[6];
-        return b[7] - a[7];
-      });
+      // FIX L3: build sortIdx BEFORE sort, then apply to masks
+      const sortIdx = boxArr
+        .map((b, i) => ({ b, i }))
+        .sort((a, b) => {
+          if (a.b[6] !== b.b[6]) return a.b[6] - b.b[6];
+          return b.b[7] - a.b[7];
+        })
+        .map(x => x.i);
       if (masks) {
-        // apply same sort
-        const sortIdx = boxArr.map((_, i) => i);
-        sortIdx.sort((a, b) => {
-          if (boxArr[a][6] !== boxArr[b][6]) return boxArr[a][6] - boxArr[b][6];
-          return boxArr[b][7] - boxArr[a][7];
-        });
         masks = sortIdx.map(i => masks[i]);
       }
-      boxArr = boxArr.map(b => b.slice(0, 6));
+      boxArr = sortIdx.map(i => boxArr[i].slice(0, 6));
     } else if (colLen === 7) {
       const sortIdx = [...Array(boxArr.length).keys()].sort((a, b) => boxArr[a][6] - boxArr[b][6]);
       if (masks) masks = sortIdx.map(i => masks[i]);
@@ -195,7 +195,7 @@ export class PPPostProcess {
     let polygonPoints = null;
     if (masks && this.scaleSize) {
       const scaleRatio = this.scaleSize.map((s, i) => s / imgSize[i]);
-      polygonPoints = extractPolygonPointsByMasks(boxArr, masks, scaleRatio, layoutShapeMode);
+      polygonPoints = extractPolygonPointsByMasks(boxArr, masks, scaleRatio, layoutShapeMode, maskH, maskW);
     }
 
     // Unclip boxes
@@ -442,6 +442,55 @@ function polygonArea(polygon) {
 }
 
 /**
+ * Check whether a polygon is convex by verifying all cross-products of
+ * consecutive edge pairs have a consistent sign (all ≥ 0 or all ≤ 0).
+ * A mixed sign means at least one concave vertex.
+ *
+ * @param {number[][]} poly - [[x,y], ...] with at least 3 vertices
+ * @returns {boolean} true if convex (or degenerate line/point)
+ */
+export function isPolygonConvex(poly) {
+  const n = poly.length;
+  if (n < 3) return true; // degenerate — treat as convex for fallback purposes
+
+  let sign = 0;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % n];
+    const c = poly[(i + 2) % n];
+    // 2-D cross product of vectors (b-a) × (c-b)
+    const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+    if (cross !== 0) {
+      if (sign === 0) {
+        sign = cross > 0 ? 1 : -1;
+      } else if ((cross > 0 ? 1 : -1) !== sign) {
+        return false; // mixed signs → concave
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Compute axis-aligned bounding box IoU from a polygon's vertex extents.
+ * Used as a fallback when Sutherland-Hodgman cannot be applied (concave input).
+ *
+ * @param {number[][]} p1 - [[x,y], ...]
+ * @param {number[][]} p2 - [[x,y], ...]
+ * @param {'union'|'small'|'large'} mode
+ * @returns {number}
+ */
+function bboxIouFromPolygons(p1, p2, mode) {
+  const xs1 = p1.map(p => p[0]), ys1 = p1.map(p => p[1]);
+  const xs2 = p2.map(p => p[0]), ys2 = p2.map(p => p[1]);
+
+  const bbox1 = [Math.min(...xs1), Math.min(...ys1), Math.max(...xs1), Math.max(...ys1)];
+  const bbox2 = [Math.min(...xs2), Math.min(...ys2), Math.max(...xs2), Math.max(...ys2)];
+
+  return calculateOverlapRatio(bbox1, bbox2, mode);
+}
+
+/**
  * Calculate polygon overlap ratio using Sutherland-Hodgman clipping.
  * Replaces Python: calculate_polygon_overlap_ratio() / Shapely.
  *
@@ -464,6 +513,11 @@ export function calculatePolygonOverlapRatio(polygon1, polygon2, mode = 'union')
   const p2 = toPairs(polygon2);
 
   if (p1.length < 3 || p2.length < 3) return 0;
+
+  // FIX L12: fall back to bbox IoU for concave polygons (Sutherland-Hodgman requires convex input)
+  if (!isPolygonConvex(p1) || !isPolygonConvex(p2)) {
+    return bboxIouFromPolygons(p1, p2, mode);
+  }
 
   const clipped = sutherlandHodgman(p1, p2);
   const intersectionArea = clipped.length >= 3 ? polygonArea(clipped) : 0;
@@ -531,12 +585,13 @@ export function restructuredBoxes(boxes, labels, imgSize, polygonPoints = null) 
     const box = boxes[idx];
     let [, , xmin, ymin, xmax, ymax] = box;
 
-    // NATIVE PARITY: Python uses int(np.round(x)). 
-    // Previously used floor/ceil which causes +-1 pixel jitter on WebGPU vs WASM.
-    xmin = Math.max(0, Math.round(xmin));
-    ymin = Math.max(0, Math.round(ymin));
-    xmax = Math.min(w, Math.round(xmax));
-    ymax = Math.min(h, Math.round(ymax));
+    // FIX L9: intTrunc matches Python int() truncation, not Math.round
+    // Python uses bare int() which truncates toward zero (not round-half-up).
+    // Math.round caused ±1 px jitter vs Python baseline on non-integer coords.
+    xmin = Math.max(0, intTrunc(xmin));
+    ymin = Math.max(0, intTrunc(ymin));
+    xmax = Math.min(w, intTrunc(xmax));
+    ymax = Math.min(h, intTrunc(ymax));
 
     if (xmax <= xmin || ymax <= ymin) continue;
 
@@ -907,15 +962,20 @@ export function convertPolygonToQuad(polygon) {
  * @param {Uint8Array[]} masks     - Per-box binary masks
  * @param {number[]} scaleRatio    - [scaleW, scaleH]
  * @param {string} layoutShapeMode
+ * @param {number} [maskH=0]       - explicit mask height (0 = infer from mask length assuming square)
+ * @param {number} [maskW=0]       - explicit mask width  (0 = infer from mask length assuming square)
  * @returns {(number[][])[]}
  */
-export function extractPolygonPointsByMasks(boxes, masks, scaleRatio, layoutShapeMode) {
+export function extractPolygonPointsByMasks(boxes, masks, scaleRatio, layoutShapeMode, maskH = 0, maskW = 0) {
+  // FIX L10: use explicit H, W instead of Math.sqrt(mask.length) — supports rectangular masks
+  if (!maskH || !maskW) {
+    // Fallback: infer assuming square (legacy square-only path)
+    maskH = masks[0] ? Math.round(Math.sqrt(masks[0].length)) : 1;
+    maskW = maskH;
+  }
+
   const scaleW = scaleRatio[0] / 4;
   const scaleH = scaleRatio[1] / 4;
-
-  // Infer mask dimensions from the first mask (assumed square flat array)
-  const maskH = masks[0] ? Math.round(Math.sqrt(masks[0].length)) : 1;
-  const maskW = maskH;
 
   const maxBoxW = Math.max(...boxes.map(b => b[4] - b[3]));
   const polygonPoints = [];
@@ -992,7 +1052,8 @@ export function extractPolygonPointsByMasks(boxes, masks, scaleRatio, layoutShap
         const iouQuad = calculatePolygonOverlapRatio(rectList, quad, 'union');
         const finalQuad = iouQuad >= 0.95 ? rect : quad;
         const polyList = offsetPoly;
-        const iouPolyQuad = calculatePolygonOverlapRatio(polyList, finalQuad, 'union');
+        // FIX L11: use quad_list (not finalQuad) for second IoU check (matches Python)
+        const iouPolyQuad = calculatePolygonOverlapRatio(polyList, quad, 'union');
         const prev = polygonPoints.length > 0 ? polygonPoints[polygonPoints.length - 1] : null;
         const iouPre = prev ? calculatePolygonOverlapRatio(prev, rectList, 'small') : 0;
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2024 PaddlePaddle Authors. All Rights Reserved.
 // Apache License, Version 2.0
 
+import { intTrunc } from '../../../utils/math_utils.js';
 import { REGION_SETTINGS } from "./setting.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -382,7 +383,9 @@ export function shrinkSupplementRegionBbox(
           const srcIdx2 = ed.indexOf(maxDist);
           const dstIdx2 = indexConversionMap[srcIdx2];
           tmpRegionBbox[dstIdx2] = splitBlockBbox[srcIdx2];
-          shrinkSupplementRegionBbox(
+          // FIX R2: capture return value from recursive call (Audit R2)
+          let inerIdxes;
+          [tmpRegionBbox, inerIdxes] = shrinkSupplementRegionBbox(
             tmpRegionBbox,
             refRegionBbox,
             imageWidth,
@@ -390,6 +393,7 @@ export function shrinkSupplementRegionBbox(
             new Set(inerBlockIdxes),
             blockBboxes
           );
+          if (inerIdxes.length === 0) continue; // FIX R2: was missing
         }
       }
       const matchedBboxes = inerBlockIdxes.map((idx) => blockBboxes[idx]);
@@ -415,12 +419,13 @@ export function shrinkSupplementRegionBbox(
 export function updateRegionBox(bbox, regionBox) {
   if (regionBox === null) return bbox.slice();
   const [x1, y1, x2, y2] = bbox;
+  // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
   return [
     Math.min(x1, regionBox[0]),
     Math.min(y1, regionBox[1]),
     Math.max(x2, regionBox[2]),
     Math.max(y2, regionBox[3]),
-  ].map(Math.round);
+  ].map(intTrunc);
 }
 
 /**

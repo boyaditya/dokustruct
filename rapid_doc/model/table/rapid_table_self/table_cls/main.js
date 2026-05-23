@@ -39,11 +39,10 @@ function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
     resized.delete();
   }
 
-  let rgb = new cv.Mat();
+  // FIX T1: keep BGR — model trained against BGR-input; do not convert.
   let float32 = new cv.Mat();
   try {
-    cv.cvtColor(cropped, rgb, cv.COLOR_BGR2RGB);
-    rgb.convertTo(float32, cv.CV_32F, 1.0 / 255.0);
+    cropped.convertTo(float32, cv.CV_32F, 1.0 / 255.0);
 
     const data = new Float32Array(3 * cropSize * cropSize);
     const src = float32.data32F;
@@ -57,7 +56,6 @@ function paddleClsPreprocess(img, resizeShort = 256, cropSize = 224) {
     return data;
   } finally {
     if (cropped) cropped.delete();
-    rgb.delete();
     float32.delete();
   }
 }
@@ -77,9 +75,13 @@ function qanythingClsPreprocess(img, cropSize = 224) {
   const float32 = new cv.Mat();
   try {
     cv.cvtColor(img, rgb, cv.COLOR_BGR2RGB);
-    cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
+    // FIX T2: INTENTIONAL R/B swap in luminance — matches Python training distribution. DO NOT "FIX".
+    // Python applies cv2.COLOR_BGR2GRAY coefficients to an RGB Mat → Y = 0.114·R + 0.587·G + 0.299·B
+    // (standard is Y = 0.299·R + 0.587·G + 0.114·B). The model was trained against this quirk.
+    cv.cvtColor(rgb, gray, cv.COLOR_BGR2GRAY);
     cv.cvtColor(gray, gray3, cv.COLOR_GRAY2RGB);
-    cv.resize(gray3, resized, new cv.Size(cropSize, cropSize), 0, 0, cv.INTER_LINEAR);
+    // FIX T3: INTER_CUBIC matches Pillow ≥9.1 default BICUBIC interpolation used in Python
+    cv.resize(gray3, resized, new cv.Size(cropSize, cropSize), 0, 0, cv.INTER_CUBIC);
     resized.convertTo(float32, cv.CV_32F, 1.0 / 255.0);
 
     const data = new Float32Array(3 * cropSize * cropSize);

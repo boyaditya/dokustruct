@@ -12,8 +12,6 @@ const TARGET_SIZE_MAP = {
   [ModelType.PP_FORMULANET_PLUS_M]: [384, 384],
   [ModelType.PP_FORMULANET_PLUS_S]: [384, 384],
 };
-let warnedMissingFastTokenizer = false;
-
 /**
  * Factory that creates the correct model handler given config + session.
  * PORTING NOTE: ModelHandler(cfg, session).__call__ → ModelHandler.create(cfg, session).run()
@@ -33,23 +31,22 @@ export class ModelHandler {
   }
 
   async _initialize(cfg, session, targetSize) {
-    let tokenizerJson = "{}";
+    // FIX F3: access tokenizer via JSON.parse(metaMap["character"])["fast_tokenizer_file"]
+    let tokenizerJson;
     const metaMap = session.session?.customMetadataMap ?? {};
 
-    if (session.haveKey && session.haveKey("fast_tokenizer_file")) {
-      tokenizerJson = metaMap["fast_tokenizer_file"];
-    } else {
-      if (!warnedMissingFastTokenizer) {
-        console.warn('[RapidFormula] "fast_tokenizer_file" not found in model metadata; using fallback vocab.');
-        warnedMissingFastTokenizer = true;
-      }
+    if (metaMap['character']) {
       try {
-        const vocabUrl = '/models/formula/formula_vocab.json';
-        tokenizerJson = await fetchAssetText(vocabUrl);
-        if (!tokenizerJson.trim()) throw new Error('empty tokenizer file');
-      } catch (err) {
-        console.error('[RapidFormula] Failed to load fallback tokenizer:', err.message);
+        const characterObj = JSON.parse(metaMap['character']);
+        tokenizerJson = JSON.stringify(characterObj.fast_tokenizer_file);
+      } catch (e) {
+        console.warn('[RapidFormula] Failed to parse "character" metadata:', e.message);
       }
+    }
+
+    if (!tokenizerJson) {
+      // Fallback (asset bundled with app)
+      tokenizerJson = await fetchAssetText('/models/formula/formula_vocab.json');
     }
 
     const modelTypeLower = (cfg.modelType ?? "").toLowerCase();

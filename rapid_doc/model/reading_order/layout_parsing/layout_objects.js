@@ -1,6 +1,7 @@
 // Copyright (c) 2024 PaddlePaddle Authors. All Rights Reserved.
 // Apache License, Version 2.0
 
+import { intTrunc } from '../../../utils/math_utils.js';
 import { BLOCK_LABEL_MAP, LINE_SETTINGS } from "./setting.js";
 import {
   caculateEuclideanDist,
@@ -129,8 +130,11 @@ class TextLine {
         const newSpans = [];
         for (const span of splitedSpans) {
           if (span.label === "text") {
-            // no live re-inference available
-            span.text = "-";
+            // no live re-inference available — matches Python: crop_img_rec_score = 0
+            const recScore = 0;
+            span.text = "-"; // preserve text="-" assignment for parity
+            // FIX R1: skip low-score spans in formula path (Audit R1)
+            if (recScore < textRecScoreThresh) continue;
           }
           newSpans.push(span);
         }
@@ -294,7 +298,8 @@ class LayoutBlock {
   constructor(label, bbox, content = "") {
     this.label = label;
     this.order_label = null;
-    this.bbox = bbox.map(Math.round);
+    // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
+    this.bbox = bbox.map(intTrunc);
     this.content = content;
     this.seg_start_coordinate = Infinity;
     this.seg_end_coordinate = -Infinity;
@@ -316,8 +321,27 @@ class LayoutBlock {
     return `\n\n#################\nindex:\t${this.index}\nlabel:\t${this.label}\nregion_label:\t${this.order_label}\nbbox:\t${this.bbox}\ncontent:\t${this.content}\n#################`;
   }
 
+  /**
+   * Generator that yields own serializable [key, value] pairs lazily.
+   * Callers that need only a subset of properties can iterate and break early
+   * without materialising the full object — reducing peak memory on dense pages.
+   * FIX P12: streaming property serializer (Audit P12).
+   * @yields {[string, *]}
+   */
+  *entries() {
+    for (const key of Object.keys(this)) {
+      yield [key, this[key]];
+    }
+  }
+
+  /**
+   * Serialize to a plain object (backward-compatible).
+   * Internally driven by the lazy entries() generator.
+   * FIX P12: replaces eager spread `{ ...this }` (Audit P12).
+   * @returns {Object}
+   */
   toDict() {
-    return { ...this };
+    return Object.fromEntries(this.entries());
   }
 
   updateDirection(direction = null) {

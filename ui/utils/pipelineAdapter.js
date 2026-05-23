@@ -22,6 +22,7 @@ import {
   getAssetsStatus,
 } from '../../rapid_doc/utils/download_file.js';
 import { getFormulaAssets, summarizeAssets } from '../../rapid_doc/utils/model_url_map.js';
+import { detectProfile } from '../../rapid_doc/utils/browser_utils.js';
 
 // ---------------------------------------------------------------------------
 // Image helpers
@@ -404,8 +405,15 @@ async function destroyPdfProxy(pdfDoc) {
 }
 
 function getDefaultPdfPagesBatch(state) {
+  // FIX P10: scale pdf_pages_batch based on device tier detected at startup.
+  // WebGPU hint: lower default because GPU memory is more constrained per batch.
+  // User config overrides this via pdf_pages_batch field.
   const ep = String(state.get('activeExecutionProvider') || '').toLowerCase();
-  return ep === 'webgpu' ? 4 : 8;
+  if (ep === 'webgpu') {
+    // WebGPU path: use half the profile's batch size (GPU memory pressure)
+    return Math.max(1, Math.floor(detectProfile().PDF_PAGES_BATCH / 2));
+  }
+  return detectProfile().PDF_PAGES_BATCH;
 }
 
 function markdownHasImageRefs(markdown) {

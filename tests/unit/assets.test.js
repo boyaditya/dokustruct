@@ -89,7 +89,6 @@ describe('asset manifest resolution', () => {
     expect(opencvSources[0]).toBe('https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js');
     expect(opencvSources.at(-1)).toBe('/opencv/opencv.js');
   });
-  });
 
   it('formats asset details as ONNX-only user-facing rows', () => {
     const rows = getAssetDetailRows([

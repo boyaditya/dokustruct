@@ -9,6 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest --run",
+    "lint": "eslint rapid_doc/ ui/ --ext .js",
+    "lint:bbox": "eslint rapid_doc/ --ext .js --rule \"rapiddoc/no-math-round-bbox: warn\"",
     "parity:audit:static": "node scripts/parity_audit.mjs --static",
     "parity:audit:sample": "node scripts/parity_audit.mjs --sample"
   },
@@ -25,6 +27,7 @@
     "pdfjs-dist": "^4.5.136"
   },
   "devDependencies": {
+    "eslint": "^9.39.4",
     "fast-check": "^4.8.0",
     "vite": "^7.3.1",
     "vitest": "^4.1.6"

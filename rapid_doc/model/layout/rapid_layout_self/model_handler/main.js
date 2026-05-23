@@ -32,6 +32,7 @@ export class ModelHandler {
     logger.info(`${modelType} contains ${characters.length} character entries`);
 
     if (modelType.startsWith('pp_doc') || modelType.startsWith('rt_detr')) {
+      // FIX L16: alias resolution order — snake_case (Python style) takes precedence over camelCase
       return new PPDocLayoutModelHandler(
         characters,
         cfg.conf_thresh ?? cfg.confThresh ?? 0.5,
@@ -43,10 +44,11 @@ export class ModelHandler {
     }
 
     if (modelType.startsWith('doclayout')) {
+      // FIX L16: alias resolution order — snake_case (Python style) takes precedence over camelCase
       return new DocLayoutModelHandler(
         characters,
-        cfg.confThresh ?? cfg.conf_thresh ?? 0.5,
-        cfg.iouThresh  ?? cfg.iou_thresh  ?? 0.5,
+        cfg.conf_thresh ?? cfg.confThresh ?? 0.5,
+        cfg.iou_thresh  ?? cfg.iouThresh  ?? 0.5,
         session,
       );
     }

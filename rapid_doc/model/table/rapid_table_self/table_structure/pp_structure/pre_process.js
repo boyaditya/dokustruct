@@ -3,6 +3,8 @@
 // TablePreprocess: resize → normalize → pad → CHW
 // W2: cv.Mat objects cleaned in try/finally
 
+import { intTrunc } from '../../../../../utils/math_utils.js';
+
 // ImageNet normalization (PP-StructureV2 standard values)
 const IMG_MEAN = [0.485, 0.456, 0.406];
 const IMG_STD = [0.229, 0.224, 0.225];
@@ -27,8 +29,9 @@ export class TablePreprocess {
   resizeImage(img) {
     const h = img.rows, w = img.cols;
     const ratio = this.maxLen / Math.max(h, w);
-    const newH = Math.round(h * ratio);
-    const newW = Math.round(w * ratio);
+    // FIX T10: intTrunc matches Python int() truncation
+    const newH = intTrunc(h * ratio);
+    const newW = intTrunc(w * ratio);
     const resized = new cv.Mat();
     cv.resize(img, resized, new cv.Size(newW, newH), 0, 0, cv.INTER_LINEAR);
     return { resized, shape: [h, w, ratio, ratio] };
@@ -40,14 +43,9 @@ export class TablePreprocess {
    * @returns {cv.Mat} float32 BGR Mat (caller must delete)
    */
   normalize(img) {
+    // FIX T4: keep BGR for SLANET_plus inference (matches Python).
     let float32 = new cv.Mat();
-    let rgb = new cv.Mat();
-    try {
-      cv.cvtColor(img, rgb, cv.COLOR_BGR2RGB);
-      rgb.convertTo(float32, cv.CV_32F, 1.0 / 255.0);
-    } finally {
-      rgb.delete();
-    }
+    img.convertTo(float32, cv.CV_32F, 1.0 / 255.0);
 
     let channels = new cv.MatVector();
     cv.split(float32, channels);

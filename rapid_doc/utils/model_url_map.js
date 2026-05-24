@@ -1,8 +1,9 @@
 /**
- * Browser asset manifest for external-first downloads.
+ * Browser asset manifest for local-first downloads with external fallback.
  *
- * External URLs are tried first. The local `/models`, `/opencv`, and `/ort`
- * paths remain fallback sources for development and offline deployments.
+ * Local `/models`, `/opencv`, and `/ort` paths are tried first (served by
+ * Vite dev server or static host).  External URLs (HuggingFace / CDN) are
+ * used as fallback when the local file is absent or the request fails.
  */
 
 export const HF_ASSET_BASE = 'https://huggingface.co/boyaditya/document-parsing-project/resolve/main';
@@ -344,7 +345,9 @@ export function findAssetByUrl(url) {
 export function getAssetSourceUrls(assetId) {
   const entry = getAsset(assetId);
   if (!entry) return [];
-  return [entry.url, entry.localUrl].filter(Boolean);
+  // Local-first: try localUrl (public/models/ served by Vite dev server or static host)
+  // before falling back to external URL (HuggingFace / CDN).
+  return [entry.localUrl, entry.url].filter(Boolean);
 }
 
 export function getRequiredAssets(config = {}) {

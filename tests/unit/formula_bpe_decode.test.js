@@ -218,6 +218,29 @@ describe('UniMERNetDecode.tokenToStr() — byte-level BPE tokens', () => {
     expect(result).toContain('中');
   });
 
+  it('decodes a UTF-8 character when byte-level pieces are split across tokens', () => {
+    const inv = gpt2BytesToUnicodeInverse();
+    const fwd = new Map();
+    for (const [ch, b] of inv) fwd.set(b, ch);
+
+    const json = JSON.stringify({
+      model: {
+        vocab: {
+          [fwd.get(0xCE)]: 20,
+          [fwd.get(0xB1)]: 21,
+        },
+      },
+      added_tokens: [
+        { id: 0, content: '<sos>', special: true },
+        { id: 1, content: '<pad>', special: true },
+        { id: 2, content: '<eos>', special: true },
+      ],
+    });
+
+    const decoder = new UniMERNetDecode(json);
+    expect(decoder.tokenToStr([20, 21])).toBe('\u03b1');
+  });
+
   it('still filters special tokens correctly after F4 patch', () => {
     const { json, alphaId } = buildTokenizerWithByteEncodedTokens();
     const decoder = new UniMERNetDecode(json);

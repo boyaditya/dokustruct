@@ -48,6 +48,14 @@ export class Logger {
   }
 
   /**
+   * Alias used by browser-side model wrappers.
+   * @param {...*} args
+   */
+  warn(...args) {
+    this.warning(...args);
+  }
+
+  /**
    * @param {...*} args
    */
   error(...args) {

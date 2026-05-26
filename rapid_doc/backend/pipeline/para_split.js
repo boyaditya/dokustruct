@@ -450,7 +450,7 @@ export function paraSplit(pageInfoList) {
   const allBlocks = [];
 
   for (const pageInfo of pageInfoList) {
-    const blocks = JSON.parse(JSON.stringify(pageInfo.preproc_blocks || []));
+    const blocks = structuredClone(pageInfo.preproc_blocks || []);
     for (const block of blocks) {
       block.page_num = pageInfo.page_idx;
       block.page_size = pageInfo.page_size;

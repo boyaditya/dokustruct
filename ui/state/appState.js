@@ -176,7 +176,7 @@ function createInitialState() {
     tableEnable: false,
     checkboxEnable: false,
     formulaLevel: 0,
-    formulaModelType: 'pp_formulanet_plus_s',
+    formulaModelType: 'pp_formulanet_plus_m',
 
     // ── Layout config ──────────────────────────────────────────────────────
     layoutModelType: 'pp_doclayoutv2',

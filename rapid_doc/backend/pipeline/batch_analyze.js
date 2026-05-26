@@ -57,6 +57,8 @@ export class BatchAnalyze {
     this.tableConfig = tableConfig || {};
     this.orientationConfig = orientationConfig || {};
 
+    // Browser-specific batch size defaults (Python reads from config without VRAM-based adjustment).
+    // Only applied when user hasn't set these values in config.
     const ratioBatch = Math.max(1, Number(this.batchRatio) || 1);
     if (!this.ocrConfig["Det.rec_batch_num"]) this.ocrConfig["Det.rec_batch_num"] = Math.min(4, ratioBatch);
     if (!this.layoutConfig.batch_num) this.layoutConfig.batch_num = Math.min(4, ratioBatch);
@@ -67,10 +69,11 @@ export class BatchAnalyze {
     this.useDetMode = this.ocrConfig.use_det_mode || "auto";
     this.ocrDetBaseBatchSize = this.ocrConfig["Det.rec_batch_num"];
     this.sealEnable = this.ocrConfig.seal_enable ?? true;
+    // FIX N13: default false to match Python's os.getenv("USE_DOC_ORIENTATION_CLASSIFY", "false")
     this.useDocOrientationClassify =
       this.layoutConfig.use_doc_orientation_classify ??
       this.layoutConfig.useDocOrientationClassify ??
-      true;
+      false;
     this.useCustomOcr = false;
     this.useCustomTable = false;
 
@@ -353,10 +356,14 @@ export class BatchAnalyze {
           tableImg = new cv.Mat(0, 0, cv.CV_8UC3);
           usefulList = [];
         } else {
-          let bbox = normalizeToIntBbox(poly, [npImg.rows, npImg.cols]);
+          // FIX QA3: match Python's single-normalization pattern:
+          // bbox = [poly[0], poly[1], poly[4], poly[5]] → divide by scale → normalize_to_int_bbox
           const scale = 5;
-          bbox = bbox ? bbox.map(v => v / scale) : null;
-          const intBbox = normalizeToIntBbox(bbox);
+          const rawBbox = [
+            Number(poly[0]) / scale, Number(poly[1]) / scale,
+            Number(poly[4]) / scale, Number(poly[5]) / scale,
+          ];
+          const intBbox = normalizeToIntBbox(rawBbox);
 
           if (!intBbox) {
             tableImg = new cv.Mat(0, 0, cv.CV_8UC3);

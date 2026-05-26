@@ -386,7 +386,7 @@ export function getRequiredAssets(config = {}) {
 export const getRequiredModels = getRequiredAssets;
 
 export function getFormulaAssets(config = {}) {
-  const formulaType = config.formula_config?.modelType ?? config.formula_config?.model_type ?? 'pp_formulanet_plus_s';
+  const formulaType = config.formula_config?.modelType ?? config.formula_config?.model_type ?? 'pp_formulanet_plus_m';
   if (formulaType === 'latex_ocr') {
     return [
       'formula_latex_ocr_resizer',

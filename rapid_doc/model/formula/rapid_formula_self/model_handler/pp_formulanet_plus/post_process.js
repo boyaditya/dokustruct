@@ -93,7 +93,6 @@ export class UniMERNetDecode {
    */
   tokenToStr(tokenIds) {
     // FIX F4: HuggingFace byte-level BPE inverse map for Greek/CJK token decoding
-    const inverseMap = gpt2BytesToUnicodeInverse();
     const tokens = [];
     for (const id of tokenIds) {
       if (this.specialIds.has(id)) continue;
@@ -102,14 +101,14 @@ export class UniMERNetDecode {
       if (token == null) continue;
       // Skip special token strings that may have slipped through ID-based filtering
       if (token === '<s>' || token === '</s>' || token === '<pad>' || token === '<unk>') continue;
-      // GPT-2 BPE: Ġ (U+0120) is the space marker — replace with actual space
-      // Reference: Python post_process.py line 266: toks[b][i].replace("Ġ", " ")
-      token = token.replace(/\u0120/g, ' ');
-      // FIX F4: apply byte-level inverse map per-token to decode Greek/CJK escapes
-      token = decodeByteLevelToken(token, inverseMap);
       tokens.push(token);
     }
-    return this._postProcess(tokens.join(""));
+
+    // FIX F4: Python calls HuggingFace tokenizer.decode() on the full id sequence.
+    // Decode after concatenation so multi-byte UTF-8 sequences split across BPE tokens survive.
+    const inverseMap = gpt2BytesToUnicodeInverse();
+    const decoded = decodeByteLevelToken(tokens.join(""), inverseMap);
+    return this._postProcess(decoded);
   }
 
   /**

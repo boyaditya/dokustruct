@@ -945,7 +945,7 @@ export function convertPolygonToQuad(polygon) {
     const topLeftIdx = sums.indexOf(Math.min(...sums));
     const rolled = [...pts.slice(topLeftIdx), ...pts.slice(0, topLeftIdx)];
 
-    quad.delete();
+    if (quad && typeof quad.delete === 'function') quad.delete();
     return rolled;
   } finally {
     if (pointsMat) pointsMat.delete();

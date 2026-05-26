@@ -261,11 +261,11 @@ export function txtSpansBboxExtract(pageDict, inputRes, mfdRes, scale, usefulLis
  * @returns {number}
  */
 export function txtMostAngleExtractTable(pageDict, tableResDict, scale) {
-  if (!pageDict || !tableResDict?.table_res) return 0;
+  if (!pageDict || !tableResDict?.table_res) return { mostAngle: 0, hasAngles: false };
 
   const inputRes = tableResDict.table_res;
   const poly = inputRes.poly;
-  if (!poly) return 0;
+  if (!poly) return { mostAngle: 0, hasAngles: false };
 
   const inputResBbox = [poly[0] / scale, poly[1] / scale, poly[4] / scale, poly[5] / scale];
   const angles = [];
@@ -284,10 +284,12 @@ export function txtMostAngleExtractTable(pageDict, tableResDict, scale) {
     }
   }
 
-  if (!angles.length) return 0;
+  // FIX N4: return both mostAngle and hasAngles to match Python's (str, angles) return
+  if (!angles.length) return { mostAngle: 0, hasAngles: false };
   const counter = {};
   for (const a of angles) counter[a] = (counter[a] ?? 0) + 1;
-  return Number(Object.entries(counter).reduce((a, b) => b[1] > a[1] ? b : a)[0]);
+  const mostAngle = Number(Object.entries(counter).reduce((a, b) => b[1] > a[1] ? b : a)[0]);
+  return { mostAngle, hasAngles: true };
 }
 
 /**

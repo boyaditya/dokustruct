@@ -443,9 +443,10 @@ export async function extractTableTextFromPdf(tableResDict, pageDict, scale, det
   try {
     const ocrSpans = getOcrResultListTable(detRes, usefulList, scale) || [];
     const poly = tableResDict.table_res.poly || [0, 0, 0, 0, 0, 0, 0, 0];
+    // FIX N1: use Math.trunc to match Python's int() truncation (not Math.floor)
     const tableBboxes = [[
-      Math.floor(Number(poly[0] || 0) / scale), Math.floor(Number(poly[1] || 0) / scale),
-      Math.floor(Number(poly[4] || 0) / scale), Math.floor(Number(poly[5] || 0) / scale),
+      Math.trunc(Number(poly[0] || 0) / scale), Math.trunc(Number(poly[1] || 0) / scale),
+      Math.trunc(Number(poly[4] || 0) / scale), Math.trunc(Number(poly[5] || 0) / scale),
       null, null, null, 'text', null, null, null, null, 1,
     ]];
 
@@ -574,15 +575,20 @@ async function determineRotationLabel(
 ) {
   const pdfNotRotate = !["90", "180", "270"].includes(String(pageDict?.rotate_label ?? "0"));
   let rotateLabel = "0";
+  // FIX N4: track whether any PDF text angles were found, to distinguish
+  // "text at 0°" (don't use orientation model) from "no text at all" (use it).
+  let hasAngles = false;
 
   if (pdfNotRotate) {
-    const mostAngle = Number(txtMostAngleExtractTable(pageDict, tableResDict, Number(scale)) || 0);
+    const { mostAngle, hasAngles: found } = txtMostAngleExtractTable(pageDict, tableResDict, Number(scale));
+    hasAngles = found;
     if (mostAngle) {
       rotateLabel = String(mostAngle);
     }
   }
 
-  if (rotateLabel === "0" && pdfNotRotate) {
+  // FIX N4: only fall through to orientation model when NO text angles exist
+  if (!hasAngles) {
     try {
       const imgOrientationClsModel = await atomModelManager.getAtomModel(
         AtomicModel.ImgOrientationCls,
@@ -688,16 +694,18 @@ function assignTableHtml(tableResDict, htmlCode, scale, fillImageRes) {
     .map(t => t.bbox);
 
   if (formulaBoxes.length && tableResDict.table_res) {
+    // FIX N10: use Math.trunc to match Python's int() truncation
     tableResDict.table_res.formula_boxes = formulaBoxes.map(
-      bbox => Array.isArray(bbox) ? bbox.map(c => Math.round(Number(c) / scale)) : []
+      bbox => Array.isArray(bbox) ? bbox.map(c => Math.trunc(Number(c) / scale)) : []
     );
   }
 
   const validFillImgResArr = Array.isArray(fillImageRes) ? fillImageRes : [];
   const imgBoxes = validFillImgResArr.filter(t => t && t.bbox).map(t => t.ori_bbox);
   if (imgBoxes?.length && tableResDict.table_res) {
+    // FIX N10: use Math.trunc to match Python's int() truncation
     tableResDict.table_res.img_boxes = imgBoxes.map(
-      bbox => Array.isArray(bbox) ? bbox.map(c => Math.round(Number(c) / scale)) : []
+      bbox => Array.isArray(bbox) ? bbox.map(c => Math.trunc(Number(c) / scale)) : []
     );
   }
 }

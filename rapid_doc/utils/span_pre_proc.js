@@ -121,17 +121,18 @@ export function removeOutsideSpans(spans, allBboxes, allDiscardedBlocks) {
 export function removeOverlapsLowConfidenceSpans(spans) {
   if (!Array.isArray(spans)) return [[], []];
 
-  const droppedSpans = [];
+  // FIX OP4: use Set for O(1) membership checks instead of O(N) Array.includes
+  const droppedSet = new Set();
   for (let i = 0; i < spans.length; i++) {
-    if (droppedSpans.includes(spans[i])) continue;
+    if (droppedSet.has(spans[i])) continue;
     for (let j = i + 1; j < spans.length; j++) {
-      if (droppedSpans.includes(spans[j])) continue;
+      if (droppedSet.has(spans[j])) continue;
       if (calculateIou(spans[i].bbox, spans[j].bbox) > IOU_OVERLAP_THRESHOLD) {
-        const toRemove = spans[i].score < spans[j].score ? spans[i] : spans[j];
-        if (!droppedSpans.includes(toRemove)) droppedSpans.push(toRemove);
+        droppedSet.add(spans[i].score < spans[j].score ? spans[i] : spans[j]);
       }
     }
   }
+  const droppedSpans = [...droppedSet];
   for (const s of droppedSpans) {
     const idx = spans.indexOf(s);
     if (idx !== -1) spans.splice(idx, 1);
@@ -147,23 +148,28 @@ export function removeOverlapsLowConfidenceSpans(spans) {
 export function removeOverlapsMinSpans(spans) {
   if (!Array.isArray(spans)) return [[], []];
 
-  const droppedSpans = [];
+  // FIX OP5: use Set for O(1) membership checks instead of O(N) Array.includes
+  // getMinboxIfOverlapByRatio returns a reference to one of its input arrays,
+  // so === reference comparison is safe (no need for JSON.stringify).
+  const droppedSet = new Set();
   for (let i = 0; i < spans.length; i++) {
-    if (droppedSpans.includes(spans[i])) continue;
+    if (droppedSet.has(spans[i])) continue;
     for (let j = i + 1; j < spans.length; j++) {
-      if (droppedSpans.includes(spans[j])) continue;
+      if (droppedSet.has(spans[j])) continue;
 
       const overlapBox = getMinboxIfOverlapByRatio(spans[i].bbox, spans[j].bbox, 0.65);
       if (overlapBox === null) continue;
 
       if (spans[i].original_label === "seal" || spans[j].original_label === "seal") continue;
 
-      const toRemove = spans.find(s => JSON.stringify(s.bbox) === JSON.stringify(overlapBox));
-      if (toRemove && !droppedSpans.includes(toRemove) && toRemove.original_label !== "seal") {
-        droppedSpans.push(toRemove);
+      // FIX OP5: overlapBox is === spans[i].bbox or spans[j].bbox (reference equality)
+      const toRemove = overlapBox === spans[i].bbox ? spans[i] : spans[j];
+      if (toRemove.original_label !== "seal") {
+        droppedSet.add(toRemove);
       }
     }
   }
+  const droppedSpans = [...droppedSet];
   for (const s of droppedSpans) {
     const idx = spans.indexOf(s);
     if (idx !== -1) spans.splice(idx, 1);

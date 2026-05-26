@@ -77,9 +77,11 @@ export function applyMaskBoxesToImage(bgrMat, maskBoxes) {
     return bgrMat;
   }
 
-  const maskedMat = bgrMat.clone();
-  const imageH = maskedMat.rows;
-  const imageW = maskedMat.cols;
+  // FIX N18/ST3: defer clone until first valid mask bbox confirmed — avoids
+  // unnecessary Mat allocation when all maskBoxes have null/zero-area bboxes.
+  let maskedMat = null;
+  const imageH = bgrMat.rows;
+  const imageW = bgrMat.cols;
 
   for (const maskBox of maskBoxes) {
     const bbox = maskBox.bbox;
@@ -92,6 +94,9 @@ export function applyMaskBoxesToImage(bgrMat, maskBoxes) {
     const width = x1 - x0;
     const height = y1 - y0;
     if (width <= 0 || height <= 0) continue;
+
+    // Lazy-clone on first valid mask
+    if (!maskedMat) maskedMat = bgrMat.clone();
 
     try {
       const roi = maskedMat.roi(new cv.Rect(x0, y0, width, height));
@@ -107,7 +112,8 @@ export function applyMaskBoxesToImage(bgrMat, maskBoxes) {
     }
   }
 
-  return maskedMat;
+  return maskedMat ?? bgrMat;
+
 }
 
 

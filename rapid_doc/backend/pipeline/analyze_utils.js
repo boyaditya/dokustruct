@@ -41,6 +41,7 @@ function combineMfdetrecAndCheckbox(ocrResDict) {
  */
 function padImageTo(img, targetH, targetW) {
   if (typeof cv !== 'undefined' && img instanceof cv.Mat) {
+    if (img.rows >= targetH && img.cols >= targetW) return img;
     let padded = new cv.Mat();
     try {
       cv.copyMakeBorder(

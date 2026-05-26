@@ -12,6 +12,42 @@ const TARGET_SIZE_MAP = {
   [ModelType.PP_FORMULANET_PLUS_M]: [384, 384],
   [ModelType.PP_FORMULANET_PLUS_S]: [384, 384],
 };
+
+function normalizeTokenizerPayload(payload) {
+  if (!payload) return null;
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed;
+    return JSON.stringify(trimmed);
+  }
+  return JSON.stringify(payload);
+}
+
+function parseMetadataObject(value, label) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    console.warn(`[RapidFormula] Failed to parse "${label}" metadata:`, e.message);
+    return null;
+  }
+}
+
+function getMetadataValue(metaMap, key) {
+  return metaMap?.get?.(key) ?? metaMap?.[key];
+}
+
+function resolveTokenizerJson(metaMap = {}) {
+  // FIX F3: prefer Python metadata path, but keep top-level support for older S assets.
+  const characterObj = parseMetadataObject(getMetadataValue(metaMap, "character"), "character");
+  const fromCharacter = normalizeTokenizerPayload(characterObj?.fast_tokenizer_file);
+  if (fromCharacter) return fromCharacter;
+
+  return normalizeTokenizerPayload(getMetadataValue(metaMap, "fast_tokenizer_file"));
+}
+
 /**
  * Factory that creates the correct model handler given config + session.
  * PORTING NOTE: ModelHandler(cfg, session).__call__ → ModelHandler.create(cfg, session).run()
@@ -31,18 +67,8 @@ export class ModelHandler {
   }
 
   async _initialize(cfg, session, targetSize) {
-    // FIX F3: access tokenizer via JSON.parse(metaMap["character"])["fast_tokenizer_file"]
-    let tokenizerJson;
     const metaMap = session.session?.customMetadataMap ?? {};
-
-    if (metaMap['character']) {
-      try {
-        const characterObj = JSON.parse(metaMap['character']);
-        tokenizerJson = JSON.stringify(characterObj.fast_tokenizer_file);
-      } catch (e) {
-        console.warn('[RapidFormula] Failed to parse "character" metadata:', e.message);
-      }
-    }
+    let tokenizerJson = resolveTokenizerJson(metaMap);
 
     if (!tokenizerJson) {
       // Fallback (asset bundled with app)

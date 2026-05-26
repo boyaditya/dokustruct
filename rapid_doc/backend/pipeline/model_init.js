@@ -135,8 +135,8 @@ export async function tableModelInit(lang = null, ocrConfig = null, tableConfig 
  * @returns {Promise<RapidFormulaModel|LatexOCRModel>}
  */
 export async function formulaModelInit(formulaConfig = null) {
-  // FIX F2: default to PP_FORMULANET_PLUS_M (matches Python default, Audit F2)
-  const modelType = formulaConfig?.modelType || "pp_formulanet_plus_m";
+  // INTENTIONAL F2: browser default uses S for cleaner/faster UI output; Python parity callers should pass M explicitly.
+  const modelType = formulaConfig?.modelType || "pp_formulanet_plus_s";
 
   if (modelType === "latex_ocr") {
     try {
@@ -154,7 +154,8 @@ export async function formulaModelInit(formulaConfig = null) {
       }));
       return RapidFormulaModel.create({
         ...formulaConfig,
-        modelType: "pp_formulanet_plus_m", // FIX F2: fallback to M (matches Python default, Audit F2)
+        // INTENTIONAL F2: keep browser fallback on S to minimize renderer garbage/red KaTeX output.
+        modelType: "pp_formulanet_plus_s",
       });
     }
   }

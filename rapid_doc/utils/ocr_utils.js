@@ -7,6 +7,8 @@
 
 /* global cv */
 
+import { intTrunc } from './math_utils.js';
+
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 export const OcrConfidence = Object.freeze({
@@ -734,10 +736,10 @@ export function getOcrResultListTable(ocrRes, usefulList, scale) {
     results.push({
       ori_bbox: boxOcrRes,
       bbox: [
-        Math.round(rp1[0] / scale),
-        Math.round(rp1[1] / scale),
-        Math.round(rp3[0] / scale),
-        Math.round(rp3[1] / scale),
+        intTrunc(rp1[0] / scale),
+        intTrunc(rp1[1] / scale),
+        intTrunc(rp3[0] / scale),
+        intTrunc(rp3[1] / scale),
       ],
       score: 1,
       content: '',

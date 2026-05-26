@@ -8,7 +8,7 @@ import { fixLatex, gpt2BytesToUnicodeInverse, decodeByteLevelToken } from "./uti
 /**
  * UniMERNet token decoder using vocabulary stored in ONNX model metadata.
  * PORTING NOTE: UniMERNetDecode loads a fast_tokenizer from model metadata JSON.
- * In browser, the tokenizer JSON is read from `session.customMetadataMap["fast_tokenizer_file"]`.
+ * In browser, the tokenizer JSON is resolved from model metadata or bundled fallback assets.
  *
  * The tokenizer is stored as a JSON object with fields:
  *   - model.vocab: { token → id } mapping

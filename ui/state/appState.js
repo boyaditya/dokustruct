@@ -176,7 +176,8 @@ function createInitialState() {
     tableEnable: false,
     checkboxEnable: false,
     formulaLevel: 0,
-    formulaModelType: 'pp_formulanet_plus_m',
+    // INTENTIONAL F2: browser UI defaults to S for cleaner/faster rendered formulas.
+    formulaModelType: 'pp_formulanet_plus_s',
 
     // ── Layout config ──────────────────────────────────────────────────────
     layoutModelType: 'pp_doclayoutv2',

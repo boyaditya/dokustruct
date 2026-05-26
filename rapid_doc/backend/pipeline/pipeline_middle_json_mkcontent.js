@@ -17,7 +17,7 @@ try {
 }
 
 const defaultDelimiters = {
-  display: { left: '$', right: '$' },
+  display: { left: '$$', right: '$$' },
   inline: { left: '$', right: '$' },
 };
 

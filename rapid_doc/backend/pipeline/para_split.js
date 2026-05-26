@@ -4,7 +4,7 @@
 import { ContentType, BlockType, SplitFlag } from "../../utils/enum_class.js";
 import { detectLang } from "../../utils/language.js";
 
-const LINE_STOP_FLAG = ['.', '!', '?', '。', '！', '？', ')', '）', '"', '"', ':', '：', ';', '；'];
+const LINE_STOP_FLAG = ['.', '!', '?', '。', '！', '？', ')', '）', '"', '\u201d', ':', '：', ';', '；'];
 const LIST_END_FLAG = ['.', '。', ';', '；'];
 
 const CJK_LANGUAGES = new Set(['zh', 'ja', 'ko']);
@@ -80,12 +80,19 @@ function computeBlockBboxFs(block) {
   if (!lines || !lines.length) {
     return block.bbox ? [...block.bbox] : [0, 0, 0, 0];
   }
-  return [
-    Math.min(...lines.map(l => l.bbox[0])),
-    Math.min(...lines.map(l => l.bbox[1])),
-    Math.max(...lines.map(l => l.bbox[2])),
-    Math.max(...lines.map(l => l.bbox[3])),
-  ];
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const line of lines) {
+    const bbox = line.bbox;
+    if (!Array.isArray(bbox) || bbox.length < 4) continue;
+    x0 = Math.min(x0, bbox[0]);
+    y0 = Math.min(y0, bbox[1]);
+    x1 = Math.max(x1, bbox[2]);
+    y1 = Math.max(y1, bbox[3]);
+  }
+  return Number.isFinite(x0) ? [x0, y0, x1, y1] : (block.bbox ? [...block.bbox] : [0, 0, 0, 0]);
 }
 
 /**

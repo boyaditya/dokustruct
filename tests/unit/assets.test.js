@@ -69,25 +69,25 @@ describe('asset manifest resolution', () => {
     expect(asset?.id).toBe('layout_pp_doclayoutv2');
   });
 
-  it('keeps external URLs before local fallback URLs', () => {
+  it('keeps local URLs before external fallback URLs', () => {
     const sources = getAssetSourceUrls('layout_pp_doclayoutv2');
-    expect(sources[0]).toBe(`${HF_ASSET_BASE}/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx`);
-    expect(sources.at(-1)).toBe('/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx');
+    expect(sources[0]).toBe('/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx');
+    expect(sources.at(-1)).toBe(`${HF_ASSET_BASE}/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx`);
   });
 
-  it('uses Hugging Face for model and data assets', () => {
-    expect(getAssetSourceUrls('ocr_dict_ch')[0]).toBe(`${HF_ASSET_BASE}/ocr/ppocrv5_dict.txt`);
-    expect(getAssetSourceUrls('table_paddle_cls')[0]).toBe(`${HF_ASSET_BASE}/table/table_cls/paddle_cls.onnx`);
-    expect(getAssetSourceUrls('formula_latex_ocr_tokenizer')[0]).toBe(`${HF_ASSET_BASE}/formula/LaTeX-OCR/tokenizer.json`);
+  it('keeps Hugging Face as fallback for model and data assets', () => {
+    expect(getAssetSourceUrls('ocr_dict_ch').at(-1)).toBe(`${HF_ASSET_BASE}/ocr/ppocrv5_dict.txt`);
+    expect(getAssetSourceUrls('table_paddle_cls').at(-1)).toBe(`${HF_ASSET_BASE}/table/table_cls/paddle_cls.onnx`);
+    expect(getAssetSourceUrls('formula_latex_ocr_tokenizer').at(-1)).toBe(`${HF_ASSET_BASE}/formula/LaTeX-OCR/tokenizer.json`);
   });
 
-  it('keeps runtime assets on their runtime sources with local fallback', () => {
- const ortSources = getAssetSourceUrls('runtime_ort_jsep_wasm');
+  it('keeps runtime assets local-first with runtime source fallback', () => {
+    const ortSources = getAssetSourceUrls('runtime_ort_jsep_wasm');
     const opencvSources = getAssetSourceUrls('runtime_opencv');
-    expect(ortSources[0]).toMatch(/^https:\/\/cdn\.jsdelivr\.net\/npm\/onnxruntime-web@/);
-    expect(ortSources.at(-1)).toBe('/ort/ort-wasm-simd-threaded.jsep.wasm');
-    expect(opencvSources[0]).toBe('https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js');
-    expect(opencvSources.at(-1)).toBe('/opencv/opencv.js');
+    expect(ortSources[0]).toBe('/ort/ort-wasm-simd-threaded.jsep.wasm');
+    expect(ortSources.at(-1)).toMatch(/^https:\/\/cdn\.jsdelivr\.net\/npm\/onnxruntime-web@/);
+    expect(opencvSources[0]).toBe('/opencv/opencv.js');
+    expect(opencvSources.at(-1)).toBe('https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js');
   });
 
   it('formats asset details as ONNX-only user-facing rows', () => {
@@ -132,10 +132,12 @@ describe('asset manifest resolution', () => {
 });
 
 describe('asset cache downloads', () => {
-  it('tries the external source first, falls back locally, and caches the result', async () => {
+  it('tries the local source first, falls back externally, and caches the result', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const fetchMock = vi.fn(async (url) => {
-      if (String(url).startsWith('https://')) throw new Error('network blocked');
+      if (!String(url).startsWith('https://')) {
+        return new Response('missing', { status: 404 });
+      }
       return new Response(bytes, {
         status: 200,
         headers: { 'Content-Length': String(bytes.byteLength) },
@@ -147,8 +149,8 @@ describe('asset cache downloads', () => {
     const buffer = await downloadAsset('layout_pp_doclayoutv2', event => progress.push(event));
     expect([...new Uint8Array(buffer)]).toEqual([...bytes]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^https:\/\//);
-    expect(String(fetchMock.mock.calls[1][0])).toBe('/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx');
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx');
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/^https:\/\//);
     expect(progress.at(-1)?.percent).toBe(100);
 
     const status = await getAssetStatus('layout_pp_doclayoutv2');
@@ -201,7 +203,7 @@ describe('asset cache downloads', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(downloadAsset('layout_pp_doclayoutv2')).rejects.toThrow(/500/);
+    await expect(downloadAsset('layout_pp_doclayoutv2')).rejects.toThrow(/external down/);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(await getAssetStatus('layout_pp_doclayoutv2')).toMatchObject({ cached: false });
   });

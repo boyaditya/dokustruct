@@ -28,7 +28,8 @@ export class RapidFormulaInput {
    * @param {object} [params.engineCfg]
    */
   constructor({
-    modelType = ModelType.PP_FORMULANET_PLUS_M, // FIX F2: default to PP_FORMULANET_PLUS_M (matches Python default, Audit F2)
+    // INTENTIONAL F2: browser default uses S for cleaner/faster UI output; Python parity callers should pass M explicitly.
+    modelType = ModelType.PP_FORMULANET_PLUS_S,
     modelDirOrPath = null,
     dictKeysPath = null,
     engineType = EngineType.ONNXRUNTIME,

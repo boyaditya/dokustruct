@@ -16,8 +16,8 @@ import { getPage } from './pdf_text_tool.js';
 // Constants
 // ────────────────────────────────────────────────
 
-const LINE_STOP_FLAG = new Set(['.','!','?','。','！','？',')','）','"','"',':','：',';','；',']','】','}','}','>','》','、',',','，','-','—','–']);
-const LINE_START_FLAG = new Set(['(','（','"','"','【','{','《','<','「','『','【','[']);
+const LINE_STOP_FLAG = new Set(['.','!','?','。','！','？',')','）','"','\u201d',':','：',';','；',']','】','}','}','>','》','、',',','，','-','—','–']);
+const LINE_START_FLAG = new Set(['(','（','"','\u201c','【','{','《','<','「','『','【','[']);
 
 const SPAN_HEIGHT_RADIO = 0.33;
 const CONTRAST_THRESHOLD = 0.17;
@@ -71,6 +71,63 @@ function spanOverlapsAny(spanBbox, bboxes, ratio) {
   return bboxes.some(bb => calculateOverlapAreaInBbox1AreaRatio(spanBbox, bb) > ratio);
 }
 
+function getBboxCellRange(bbox, cellSize) {
+  if (!Array.isArray(bbox) || bbox.length < 4 || !bbox.every(Number.isFinite)) return null;
+  return {
+    x0: Math.floor(Math.min(bbox[0], bbox[2]) / cellSize),
+    y0: Math.floor(Math.min(bbox[1], bbox[3]) / cellSize),
+    x1: Math.floor(Math.max(bbox[0], bbox[2]) / cellSize),
+    y1: Math.floor(Math.max(bbox[1], bbox[3]) / cellSize),
+  };
+}
+
+function estimateSpanGridCellSize(spans) {
+  const sizes = spans
+    .map(span => {
+      const bbox = span?.bbox;
+      return Array.isArray(bbox) && bbox.length >= 4
+        ? Math.max(Math.abs(bbox[2] - bbox[0]), Math.abs(bbox[3] - bbox[1]))
+        : 0;
+    })
+    .filter(size => Number.isFinite(size) && size > 0)
+    .sort((a, b) => a - b);
+  if (!sizes.length) return 128;
+  return Math.max(32, sizes[Math.floor(sizes.length / 2)] * 2);
+}
+
+function buildSpanSpatialIndex(spans, cellSize) {
+  const grid = new Map();
+  spans.forEach((span, index) => {
+    const range = getBboxCellRange(span?.bbox, cellSize);
+    if (!range) return;
+    for (let gx = range.x0; gx <= range.x1; gx++) {
+      for (let gy = range.y0; gy <= range.y1; gy++) {
+        const key = `${gx}:${gy}`;
+        if (!grid.has(key)) grid.set(key, []);
+        grid.get(key).push(index);
+      }
+    }
+  });
+  return grid;
+}
+
+function getSpanSpatialCandidates(spans, grid, index, cellSize) {
+  const range = getBboxCellRange(spans[index]?.bbox, cellSize);
+  if (!range) {
+    return spans.map((_, candidateIndex) => candidateIndex).filter(candidateIndex => candidateIndex > index);
+  }
+  const candidates = new Set();
+  for (let gx = range.x0; gx <= range.x1; gx++) {
+    for (let gy = range.y0; gy <= range.y1; gy++) {
+      const indexes = grid.get(`${gx}:${gy}`) || [];
+      for (const candidateIndex of indexes) {
+        if (candidateIndex > index) candidates.add(candidateIndex);
+      }
+    }
+  }
+  return [...candidates].sort((a, b) => a - b);
+}
+
 // ────────────────────────────────────────────────
 // Public API
 // ────────────────────────────────────────────────
@@ -121,11 +178,13 @@ export function removeOutsideSpans(spans, allBboxes, allDiscardedBlocks) {
 export function removeOverlapsLowConfidenceSpans(spans) {
   if (!Array.isArray(spans)) return [[], []];
 
-  // FIX OP4: use Set for O(1) membership checks instead of O(N) Array.includes
+  // FIX OP4/OP-B: Set membership plus a spatial index avoids full O(N^2) scans on dense pages.
   const droppedSet = new Set();
+  const cellSize = estimateSpanGridCellSize(spans);
+  const grid = buildSpanSpatialIndex(spans, cellSize);
   for (let i = 0; i < spans.length; i++) {
     if (droppedSet.has(spans[i])) continue;
-    for (let j = i + 1; j < spans.length; j++) {
+    for (const j of getSpanSpatialCandidates(spans, grid, i, cellSize)) {
       if (droppedSet.has(spans[j])) continue;
       if (calculateIou(spans[i].bbox, spans[j].bbox) > IOU_OVERLAP_THRESHOLD) {
         droppedSet.add(spans[i].score < spans[j].score ? spans[i] : spans[j]);
@@ -133,10 +192,9 @@ export function removeOverlapsLowConfidenceSpans(spans) {
     }
   }
   const droppedSpans = [...droppedSet];
-  for (const s of droppedSpans) {
-    const idx = spans.indexOf(s);
-    if (idx !== -1) spans.splice(idx, 1);
-  }
+  const keptSpans = spans.filter(s => !droppedSet.has(s));
+  spans.length = 0;
+  spans.push(...keptSpans);
   return [spans, droppedSpans];
 }
 
@@ -152,9 +210,11 @@ export function removeOverlapsMinSpans(spans) {
   // getMinboxIfOverlapByRatio returns a reference to one of its input arrays,
   // so === reference comparison is safe (no need for JSON.stringify).
   const droppedSet = new Set();
+  const cellSize = estimateSpanGridCellSize(spans);
+  const grid = buildSpanSpatialIndex(spans, cellSize);
   for (let i = 0; i < spans.length; i++) {
     if (droppedSet.has(spans[i])) continue;
-    for (let j = i + 1; j < spans.length; j++) {
+    for (const j of getSpanSpatialCandidates(spans, grid, i, cellSize)) {
       if (droppedSet.has(spans[j])) continue;
 
       const overlapBox = getMinboxIfOverlapByRatio(spans[i].bbox, spans[j].bbox, 0.65);
@@ -170,10 +230,9 @@ export function removeOverlapsMinSpans(spans) {
     }
   }
   const droppedSpans = [...droppedSet];
-  for (const s of droppedSpans) {
-    const idx = spans.indexOf(s);
-    if (idx !== -1) spans.splice(idx, 1);
-  }
+  const keptSpans = spans.filter(s => !droppedSet.has(s));
+  spans.length = 0;
+  spans.push(...keptSpans);
   return [spans, droppedSpans];
 }
 
@@ -531,21 +590,44 @@ function processNeedOcrSpans(needOcrSpans, spans, inputImg, scale) {
   for (const span of needOcrSpans) {
     const spanCanvas = getCropNpImg(span.bbox, inputImg, scale);
     if (!spanCanvas || spanCanvas.cols === 0 || spanCanvas.rows === 0) {
+      if (spanCanvas?.delete) spanCanvas.delete();
       removeSpan(spans, span);
       continue;
     }
 
     const contrast = calculateContrastMat(spanCanvas);
-    spanCanvas.delete?.();
 
     if (contrast <= CONTRAST_THRESHOLD) {
+      spanCanvas.delete?.();
       removeSpan(spans, span);
       continue;
     }
 
+    // FIX BF7: Convert to BGR and preserve for later batch OCR (matches Python L352-360).
+    // The Mat is owned by postProcessOcr which deletes it after OCR.
+    let bgrImg;
+    try {
+      bgrImg = new cv.Mat();
+      // getCropNpImg returns RGBA from canvas or same type as input Mat
+      const channels = spanCanvas.channels?.() ?? 4;
+      if (channels === 4) {
+        cv.cvtColor(spanCanvas, bgrImg, cv.COLOR_RGBA2BGR);
+      } else if (channels === 3) {
+        spanCanvas.copyTo(bgrImg);
+      } else {
+        cv.cvtColor(spanCanvas, bgrImg, cv.COLOR_GRAY2BGR);
+      }
+    } catch {
+      bgrImg?.delete?.();
+      // Fallback: store the Mat as-is if conversion fails
+      bgrImg = spanCanvas.clone();
+    } finally {
+      spanCanvas.delete?.();
+    }
+
     span.content = '';
     span.score = 1.0;
-    span.np_img = null;
+    span.np_img = bgrImg;
   }
 }
 

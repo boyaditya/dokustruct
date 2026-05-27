@@ -29,7 +29,8 @@ const _ctx = {
  * @param {ActionsRenderContext} ctx
  */
 export function initActionsRenderer(ctx) {
-  Object.assign(_ctx, ctx);
+  const descriptors = Object.getOwnPropertyDescriptors(ctx);
+  Object.defineProperties(_ctx, descriptors);
 }
 
 // ── Block classification helpers ──────────────────────────────────────────────

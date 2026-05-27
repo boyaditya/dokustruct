@@ -36,7 +36,8 @@ const _ctx = {
  * @param {StylingRenderContext} ctx
  */
 export function initStylingRenderer(ctx) {
-  Object.assign(_ctx, ctx);
+  const descriptors = Object.getOwnPropertyDescriptors(ctx);
+  Object.defineProperties(_ctx, descriptors);
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

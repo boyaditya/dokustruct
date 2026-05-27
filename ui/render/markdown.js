@@ -43,7 +43,8 @@ const _ctx = {
  * @param {MarkdownRenderContext} ctx
  */
 export function initMarkdownRenderer(ctx) {
-  Object.assign(_ctx, ctx);
+  const descriptors = Object.getOwnPropertyDescriptors(ctx);
+  Object.defineProperties(_ctx, descriptors);
 }
 
 const KATEX_MACROS = {

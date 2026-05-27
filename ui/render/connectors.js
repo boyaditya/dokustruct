@@ -29,7 +29,10 @@ const _ctx = {
  * @param {ConnectorsRenderContext} ctx
  */
 export function initConnectorsRenderer(ctx) {
-  Object.assign(_ctx, ctx);
+  // Use defineProperties to preserve getter descriptors so live references
+  // (renderedPages array, pageStack element) are always current.
+  const descriptors = Object.getOwnPropertyDescriptors(ctx);
+  Object.defineProperties(_ctx, descriptors);
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

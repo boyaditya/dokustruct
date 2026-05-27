@@ -47,7 +47,8 @@ const _ctx = {
  * @param {OverlayRenderContext} ctx
  */
 export function initOverlayRenderer(ctx) {
-  Object.assign(_ctx, ctx);
+  const descriptors = Object.getOwnPropertyDescriptors(ctx);
+  Object.defineProperties(_ctx, descriptors);
 }
 
 /**

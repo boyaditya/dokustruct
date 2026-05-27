@@ -39,7 +39,6 @@ export function pinLinkedBlock(linkId, { source = 'preview' } = {}) {
   ctx.activeGroupId = '';
   setLinkedHighlight(linkId, groupId);
 
-  // FIX L4-bis: capture local releaseFn so subsequent pin cannot orphan this handler
   const releaseFn = function onPinRelease(e) {
     const escapedId = cssEscape(linkId);
     const groupSelector = groupId ? `, [data-link-group-id="${cssEscape(groupId)}"]` : '';

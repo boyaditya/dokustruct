@@ -66,7 +66,6 @@ export function labelConnectedComponents(mask, width, height, connectivity = 4) 
  */
 export function resizeImgKeepRatio(img, targetH, targetW) {
   const _cv = typeof cv !== 'undefined' ? cv : (globalThis.cv || null);
-  // FIX T6: aspect-preserving resize with zero-pad (matches Python resize_img keep_ratio=True)
   const scale = Math.min(targetH / img.rows, targetW / img.cols);
   const newH = Math.round(img.rows * scale);
   const newW = Math.round(img.cols * scale);

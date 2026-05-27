@@ -155,7 +155,6 @@ export function plotHtmlTable(logicPoints, cellBoxMap) {
       else {
         const [i, rs, re, cs, ce] = grid[r][c];
         if (r === rs && c === cs) {
-          // FIX T20: skip empty merged cells (matches Python)
           if (!cellBoxMap[i]) continue;
           const text = (cellBoxMap[i] || []).map(t => String(t).replace(/[\r\n]+/g, "").trim()).filter(t => t.length > 0).join("<br>");
           rowH += `<td rowspan=${re - rs + 1} colspan=${ce - cs + 1}>${text}</td>`;

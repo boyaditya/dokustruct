@@ -173,7 +173,7 @@ export class PPPostProcess {
     // Sort ordered detection formats
     const colLen = boxArr[0].length;
     if (colLen === 8) {
-      // FIX L3: build sortIdx BEFORE sort, then apply to masks
+      // Build sortIdx BEFORE sort, then apply to masks
       const sortIdx = boxArr
         .map((b, i) => ({ b, i }))
         .sort((a, b) => {
@@ -514,7 +514,7 @@ export function calculatePolygonOverlapRatio(polygon1, polygon2, mode = 'union')
 
   if (p1.length < 3 || p2.length < 3) return 0;
 
-  // FIX L12: fall back to bbox IoU for concave polygons (Sutherland-Hodgman requires convex input)
+  // Fall back to bbox IoU for concave polygons (Sutherland-Hodgman requires convex input)
   if (!isPolygonConvex(p1) || !isPolygonConvex(p2)) {
     return bboxIouFromPolygons(p1, p2, mode);
   }
@@ -585,7 +585,7 @@ export function restructuredBoxes(boxes, labels, imgSize, polygonPoints = null) 
     const box = boxes[idx];
     let [, , xmin, ymin, xmax, ymax] = box;
 
-    // FIX L9: intTrunc matches Python int() truncation, not Math.round
+    // intTrunc matches Python int() truncation, not Math.round
     // Python uses bare int() which truncates toward zero (not round-half-up).
     // Math.round caused ±1 px jitter vs Python baseline on non-integer coords.
     xmin = Math.max(0, intTrunc(xmin));
@@ -967,7 +967,7 @@ export function convertPolygonToQuad(polygon) {
  * @returns {(number[][])[]}
  */
 export function extractPolygonPointsByMasks(boxes, masks, scaleRatio, layoutShapeMode, maskH = 0, maskW = 0) {
-  // FIX L10: use explicit H, W instead of Math.sqrt(mask.length) — supports rectangular masks
+  // Use explicit H, W instead of Math.sqrt(mask.length) — supports rectangular masks
   if (!maskH || !maskW) {
     // Fallback: infer assuming square (legacy square-only path)
     maskH = masks[0] ? Math.round(Math.sqrt(masks[0].length)) : 1;
@@ -1052,7 +1052,7 @@ export function extractPolygonPointsByMasks(boxes, masks, scaleRatio, layoutShap
         const iouQuad = calculatePolygonOverlapRatio(rectList, quad, 'union');
         const finalQuad = iouQuad >= 0.95 ? rect : quad;
         const polyList = offsetPoly;
-        // FIX L11: use quad_list (not finalQuad) for second IoU check (matches Python)
+        // Use quad_list (not finalQuad) for second IoU check (matches Python)
         const iouPolyQuad = calculatePolygonOverlapRatio(polyList, quad, 'union');
         const prev = polygonPoints.length > 0 ? polygonPoints[polygonPoints.length - 1] : null;
         const iouPre = prev ? calculatePolygonOverlapRatio(prev, rectList, 'small') : 0;

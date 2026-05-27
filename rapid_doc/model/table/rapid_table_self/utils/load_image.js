@@ -50,7 +50,6 @@ export class LoadImage {
   }
 
   _fromImageData(imageData) {
-    // FIX T26: alpha-aware compositing (matches Python cvt_four_to_three)
     const rgba = cv.matFromImageData(imageData);
 
     // Split channels to inspect the alpha channel.

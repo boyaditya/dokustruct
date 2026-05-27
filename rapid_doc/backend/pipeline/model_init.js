@@ -135,7 +135,8 @@ export async function tableModelInit(lang = null, ocrConfig = null, tableConfig 
  * @returns {Promise<RapidFormulaModel|LatexOCRModel>}
  */
 export async function formulaModelInit(formulaConfig = null) {
-  // INTENTIONAL F2: browser default uses S for cleaner/faster UI output; Python parity callers should pass M explicitly.
+  // Browser default uses S model for cleaner/faster UI output.
+  // Python parity callers should pass M explicitly.
   const modelType = formulaConfig?.modelType || "pp_formulanet_plus_s";
 
   if (modelType === "latex_ocr") {
@@ -154,7 +155,6 @@ export async function formulaModelInit(formulaConfig = null) {
       }));
       return RapidFormulaModel.create({
         ...formulaConfig,
-        // INTENTIONAL F2: keep browser fallback on S to minimize renderer garbage/red KaTeX output.
         modelType: "pp_formulanet_plus_s",
       });
     }
@@ -427,7 +427,6 @@ export class MineruPipelineModel {
     this.applyTable = true;
     this.lang = null;
     this.device = "cpu";
-    // FIX P10: capture detected device-tier profile for downstream config access.
     this.performanceProfile = detectProfile();
   }
 

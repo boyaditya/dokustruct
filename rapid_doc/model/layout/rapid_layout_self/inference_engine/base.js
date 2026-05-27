@@ -87,8 +87,6 @@ export async function loadEngineCfg(url) {
  * objects as needed.  Matches OmegaConf Python semantics for flat overrides
  * such as `cuda_ep_cfg.device_id`.
  *
- * FIX L14: support dotted-key paths (matches OmegaConf Python semantics)
- *
  * @param {Object} obj      - Target object (mutated in-place)
  * @param {string} dotPath  - Dot-separated key path, e.g. "cuda_ep_cfg.device_id"
  * @param {*}      value    - Value to set at the leaf
@@ -186,7 +184,7 @@ export class InferSession {
 
     const result = { ...cfg };
     for (const [k, v] of Object.entries(params)) {
-      // FIX L14: support dotted-key paths (matches OmegaConf Python semantics)
+      // Support dotted-key paths (matches OmegaConf Python semantics)
       if (k.includes('.')) {
         setNestedKey(result, k, v);
       } else if (v !== null && typeof v === 'object' && !Array.isArray(v) &&

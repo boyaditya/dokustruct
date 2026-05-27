@@ -78,8 +78,6 @@ export function applyMaskBoxesToImage(bgrMat, maskBoxes) {
     return bgrMat;
   }
 
-  // FIX N18/ST3: defer clone until first valid mask bbox confirmed — avoids
-  // unnecessary Mat allocation when all maskBoxes have null/zero-area bboxes.
   let maskedMat = null;
   const imageH = bgrMat.rows;
   const imageW = bgrMat.cols;
@@ -450,7 +448,6 @@ export async function extractTableTextFromPdf(tableResDict, pageDict, scale, det
   try {
     const ocrSpans = getOcrResultListTable(detRes, usefulList, scale) || [];
     const poly = tableResDict.table_res.poly || [0, 0, 0, 0, 0, 0, 0, 0];
-    // FIX N1: use Math.trunc to match Python's int() truncation (not Math.floor)
     const tableBboxes = [[
       Math.trunc(Number(poly[0] || 0) / scale), Math.trunc(Number(poly[1] || 0) / scale),
       Math.trunc(Number(poly[4] || 0) / scale), Math.trunc(Number(poly[5] || 0) / scale),
@@ -582,8 +579,6 @@ async function determineRotationLabel(
 ) {
   const pdfNotRotate = !["90", "180", "270"].includes(String(pageDict?.rotate_label ?? "0"));
   let rotateLabel = "0";
-  // FIX N4: track whether any PDF text angles were found, to distinguish
-  // "text at 0°" (don't use orientation model) from "no text at all" (use it).
   let hasAngles = false;
 
   if (pdfNotRotate) {
@@ -594,7 +589,6 @@ async function determineRotationLabel(
     }
   }
 
-  // FIX N4: only fall through to orientation model when NO text angles exist
   if (!hasAngles) {
     try {
       const imgOrientationClsModel = await atomModelManager.getAtomModel(
@@ -701,7 +695,6 @@ function assignTableHtml(tableResDict, htmlCode, scale, fillImageRes) {
     .map(t => t.bbox);
 
   if (formulaBoxes.length && tableResDict.table_res) {
-    // FIX N10: use Math.trunc to match Python's int() truncation
     tableResDict.table_res.formula_boxes = formulaBoxes.map(
       bbox => Array.isArray(bbox) ? bbox.map(c => Math.trunc(Number(c) / scale)) : []
     );
@@ -710,7 +703,6 @@ function assignTableHtml(tableResDict, htmlCode, scale, fillImageRes) {
   const validFillImgResArr = Array.isArray(fillImageRes) ? fillImageRes : [];
   const imgBoxes = validFillImgResArr.filter(t => t && t.bbox).map(t => t.ori_bbox);
   if (imgBoxes?.length && tableResDict.table_res) {
-    // FIX N10: use Math.trunc to match Python's int() truncation
     tableResDict.table_res.img_boxes = imgBoxes.map(
       bbox => Array.isArray(bbox) ? bbox.map(c => Math.trunc(Number(c) / scale)) : []
     );

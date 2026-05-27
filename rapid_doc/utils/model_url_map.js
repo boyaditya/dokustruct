@@ -386,7 +386,7 @@ export function getRequiredAssets(config = {}) {
 export const getRequiredModels = getRequiredAssets;
 
 export function getFormulaAssets(config = {}) {
-  // INTENTIONAL F2: browser asset resolver defaults to S; Python parity callers should pass M explicitly.
+  // Browser asset resolver defaults to S model; Python parity callers should pass M explicitly.
   const formulaType = config.formula_config?.modelType ?? config.formula_config?.model_type ?? 'pp_formulanet_plus_s';
   if (formulaType === 'latex_ocr') {
     return [

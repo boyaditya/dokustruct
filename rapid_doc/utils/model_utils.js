@@ -116,7 +116,6 @@ export function cropImg(inputRes, inputImg, cropPasteX = 0, cropPasteY = 0, opts
     ptsArr.push_back(pts);
     cv.fillPoly(mask, ptsArr, new cv.Scalar(1));
 
-    // FIX OP7: white bg + roi.copyTo(bg, mask) — single OpenCV pass, no per-pixel loop (~5× faster)
     const maskedRoi = new cv.Mat(roi.rows, roi.cols, roi.type(), new cv.Scalar(255, 255, 255, 255));
     roi.copyTo(maskedRoi, mask);
     const destRoi = returnImage.roi(new cv.Rect(destX, destY, roi.cols, roi.rows));

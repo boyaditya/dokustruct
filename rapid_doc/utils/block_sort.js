@@ -39,7 +39,6 @@ function median(arr) {
   return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-// FIX OP3: structuredClone is 2-3× faster than JSON round-trip and handles more types
 function deepCopy(obj) {
   return structuredClone(obj);
 }
@@ -125,7 +124,7 @@ export function getLineHeight(blocks) {
     if (textTypes.has(block.type)) {
       for (const line of block.lines ?? []) {
         const [, y0, , y1] = line.bbox;
-        heights.push(intTrunc(y1 - y0)); // FIX R9: int() truncation, not Math.round
+        heights.push(intTrunc(y1 - y0));
       }
     }
   }
@@ -358,8 +357,6 @@ export async function sortBlocksByXycutPlus(fixBlocks, pagePilImg) {
       const sortedIndices = _readingOrderProviders.xycutPlusSort(blockBboxes);
       const sortedBoxes = sortedIndices.map(i => blockBboxes[i]);
       for (let i = 0; i < fixBlocks.length; i++) {
-        // FIX 8.10: blockBboxes[i] is an array — reference equality always fails
-        // for re-created arrays; use value-equality deep comparison instead.
         fixBlocks[i].index = findIndexByValue(sortedBoxes, blockBboxes[i]);
       }
     } catch (e2) {

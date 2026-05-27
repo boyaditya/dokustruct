@@ -1,6 +1,6 @@
 // Copyright (c) Opendatalab. All rights reserved.
 // PORTING NOTE: table_structure/unitable/main.py → main.js
-// FIX T5: UniTable requires a two-stage autoregressive encoder/decoder with kv-cache that
+// UniTable requires a two-stage autoregressive encoder/decoder with kv-cache that
 // cannot be trivially expressed with a single ONNX graph. Deferred to a future milestone.
 // See documentation/KNOWN_ISSUES.md — T5/T23 for implementation requirements and target milestone.
 
@@ -17,7 +17,6 @@
  * See documentation/KNOWN_ISSUES.md (T5/T23) for full details.
  */
 export class UniTableStructure {
-  // FIX T5: throw immediately — do not allow accidental instantiation.
   constructor() {
     throw new Error('UniTable not yet supported in JS — see KNOWN_ISSUES.md');
   }

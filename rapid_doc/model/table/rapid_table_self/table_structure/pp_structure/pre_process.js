@@ -29,7 +29,7 @@ export class TablePreprocess {
   resizeImage(img) {
     const h = img.rows, w = img.cols;
     const ratio = this.maxLen / Math.max(h, w);
-    // FIX T10: intTrunc matches Python int() truncation
+    // intTrunc matches Python int() truncation
     const newH = intTrunc(h * ratio);
     const newW = intTrunc(w * ratio);
     const resized = new cv.Mat();

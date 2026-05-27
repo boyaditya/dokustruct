@@ -69,7 +69,6 @@ export class BatchAnalyze {
     this.useDetMode = this.ocrConfig.use_det_mode || "auto";
     this.ocrDetBaseBatchSize = this.ocrConfig["Det.rec_batch_num"];
     this.sealEnable = this.ocrConfig.seal_enable ?? true;
-    // FIX N13: default false to match Python's os.getenv("USE_DOC_ORIENTATION_CLASSIFY", "false")
     this.useDocOrientationClassify =
       this.layoutConfig.use_doc_orientation_classify ??
       this.layoutConfig.useDocOrientationClassify ??
@@ -356,8 +355,6 @@ export class BatchAnalyze {
           tableImg = new cv.Mat(0, 0, cv.CV_8UC3);
           usefulList = [];
         } else {
-          // FIX QA3: match Python's single-normalization pattern:
-          // bbox = [poly[0], poly[1], poly[4], poly[5]] → divide by scale → normalize_to_int_bbox
           const scale = 5;
           const rawBbox = [
             Number(poly[0]) / scale, Number(poly[1]) / scale,

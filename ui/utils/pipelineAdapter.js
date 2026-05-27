@@ -405,12 +405,8 @@ async function destroyPdfProxy(pdfDoc) {
 }
 
 function getDefaultPdfPagesBatch(state) {
-  // FIX P10: scale pdf_pages_batch based on device tier detected at startup.
-  // WebGPU hint: lower default because GPU memory is more constrained per batch.
-  // User config overrides this via pdf_pages_batch field.
   const ep = String(state.get('activeExecutionProvider') || '').toLowerCase();
   if (ep === 'webgpu') {
-    // WebGPU path: use half the profile's batch size (GPU memory pressure)
     return Math.max(1, Math.floor(detectProfile().PDF_PAGES_BATCH / 2));
   }
   return detectProfile().PDF_PAGES_BATCH;
@@ -567,7 +563,6 @@ export class PipelineAdapter {
    */
   async _runOcrOnly(state, file, signal) {
     const t0 = performance.now();
-    // before promise rejection when the signal fires mid-flight.
     let _pdfDoc = null;
     let _singleImageMat = null;
     try {
@@ -714,7 +709,6 @@ export class PipelineAdapter {
       };
     } catch (err) {
       if (isAbortError(err, signal)) {
-        // count reaches 0 at reject time (Requirement 4.3).
         await destroyPdfProxy(_pdfDoc);
         _pdfDoc = null;
         if (_singleImageMat?.owned) {
@@ -976,9 +970,6 @@ export class PipelineAdapter {
       };
     } catch (err) {
       if (isAbortError(err, signal)) {
-        // engine itself (releaseImageLists is called inside the docAnalyze branch
-        // on success; on abort the engine's own signal propagation cleans up).
-        // We only need to settle UI state here.
         state.failProcessing('Cancelled');
         return null;
       }

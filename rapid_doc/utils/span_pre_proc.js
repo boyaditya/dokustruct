@@ -178,7 +178,6 @@ export function removeOutsideSpans(spans, allBboxes, allDiscardedBlocks) {
 export function removeOverlapsLowConfidenceSpans(spans) {
   if (!Array.isArray(spans)) return [[], []];
 
-  // FIX OP4/OP-B: Set membership plus a spatial index avoids full O(N^2) scans on dense pages.
   const droppedSet = new Set();
   const cellSize = estimateSpanGridCellSize(spans);
   const grid = buildSpanSpatialIndex(spans, cellSize);
@@ -206,9 +205,6 @@ export function removeOverlapsLowConfidenceSpans(spans) {
 export function removeOverlapsMinSpans(spans) {
   if (!Array.isArray(spans)) return [[], []];
 
-  // FIX OP5: use Set for O(1) membership checks instead of O(N) Array.includes
-  // getMinboxIfOverlapByRatio returns a reference to one of its input arrays,
-  // so === reference comparison is safe (no need for JSON.stringify).
   const droppedSet = new Set();
   const cellSize = estimateSpanGridCellSize(spans);
   const grid = buildSpanSpatialIndex(spans, cellSize);
@@ -222,7 +218,6 @@ export function removeOverlapsMinSpans(spans) {
 
       if (spans[i].original_label === "seal" || spans[j].original_label === "seal") continue;
 
-      // FIX OP5: overlapBox is === spans[i].bbox or spans[j].bbox (reference equality)
       const toRemove = overlapBox === spans[i].bbox ? spans[i] : spans[j];
       if (toRemove.original_label !== "seal") {
         droppedSet.add(toRemove);
@@ -349,7 +344,6 @@ export function txtMostAngleExtractTable(pageDict, tableResDict, scale) {
     }
   }
 
-  // FIX N4: return both mostAngle and hasAngles to match Python's (str, angles) return
   if (!angles.length) return { mostAngle: 0, hasAngles: false };
   const counter = {};
   for (const a of angles) counter[a] = (counter[a] ?? 0) + 1;
@@ -603,8 +597,6 @@ function processNeedOcrSpans(needOcrSpans, spans, inputImg, scale) {
       continue;
     }
 
-    // FIX BF7: Convert to BGR and preserve for later batch OCR (matches Python L352-360).
-    // The Mat is owned by postProcessOcr which deletes it after OCR.
     let bgrImg;
     try {
       bgrImg = new cv.Mat();

@@ -46,9 +46,6 @@ export function isMediaOutputBlock(block) {
   if (!block) return false;
   const tagName = String(block.tagName || '').toLowerCase();
   if (tagName === 'figure' || tagName === 'table') return true;
-  // FIX FORMULA-LINK-4: KaTeX renders stretchy operators (\sqrt, \overbrace, etc.) as <svg>
-  // inside .katex / data-formula-source subtrees. Treat those as formula content, NOT media,
-  // otherwise pure formula blocks were tagged .block-shell--media and styled as figures.
   const media = block.querySelector?.('img, picture, canvas, svg');
   if (!media) return false;
   if (media.closest?.('.katex, [data-formula-source], .katex-display-placeholder, .katex-inline-placeholder')) {
@@ -198,9 +195,6 @@ export function attachBlockActions() {
   const mc = _ctx.markdownContent;
   if (!mc) return;
 
-  // FIX FORMULA-LINK-2: include display-math placeholders so each $$..$$ block becomes a
-  // hoverable shell. Without this, paragraphs that are pure display formulas had no
-  // .block-shell wrapper → no hover, no linking.
   const blocks = mc.querySelectorAll(
     'p, h1, h2, h3, h4, h5, h6, table, figure, pre, blockquote, div.katex-display-placeholder',
   );
@@ -215,10 +209,6 @@ export function attachBlockActions() {
       shell.classList.add('block-shell--media');
     }
 
-    // FIX FORMULA-LINK-2: tag formula shells for distinct CSS.
-    // FIX FORMULA-CENTER-5: only standalone display-formula blocks get the emerald highlight
-    // palette. Mixed paragraphs (text + inline math) stay neutral blue/orange like any other
-    // text block — their formula content is part of natural reading flow.
     if (isStandaloneDisplayFormulaBlock(block)) {
       shell.classList.add('block-shell--formula');
       shell.classList.add('block-shell--display-formula');

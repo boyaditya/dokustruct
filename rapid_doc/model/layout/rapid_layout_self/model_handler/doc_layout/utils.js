@@ -68,7 +68,7 @@ export class LetterBox {
     const newUnpadW = Math.round(srcW * r);
     const newUnpadH = Math.round(srcH * r);
 
-    // FIX L8: When center=true, divide padding between both sides.
+    // When center=true, divide padding between both sides.
     // When center=false, all padding goes to bottom/right (top=0, left=0).
     // Python: if self.center: dw /= 2; dh /= 2
     //         top  = int(round(dh - 0.1)) if self.center else 0

@@ -26,9 +26,7 @@ let _pendingGroupId = '';
  */
 export function setLinkedHighlight(linkId, groupId = '') {
   const normalizedGroup = groupId || '';
-  // FIX L7: short-circuit when target identity unchanged
-  if (linkId === ctx.activeLinkId && normalizedGroup === ctx.activeGroupId) return;
-  _pendingLinkId = linkId;
+  if (linkId === ctx.activeLinkId && normalizedGroup === ctx.activeGroupId) return;  _pendingLinkId = linkId;
   _pendingGroupId = normalizedGroup;
   _highlightCoalescer.schedule();
 }
@@ -77,10 +75,9 @@ function _applyHighlight() {
 }
 
 /**
- * Clear all linked highlights. Respects pin state (FIX L4/L5).
+ * Clear all linked highlights. Respects pin state.
  */
 export function clearLinkedHighlight() {
-  // FIX L5: when pinned, reassert pin paint instead of bailing
   if (ctx.pinnedLinkId != null) {
     if (ctx.activeLinkId !== ctx.pinnedLinkId || ctx.activeGroupId !== ctx.pinnedGroupId) {
       setLinkedHighlight(ctx.pinnedLinkId, ctx.pinnedGroupId);

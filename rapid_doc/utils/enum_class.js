@@ -32,7 +32,6 @@ export const BlockType = Object.freeze({
   TITLE: 'title',
   INTERLINE_EQUATION: 'interline_equation',
   EQUATION: 'equation',
-  // FIX BF6: LIST and INDEX were missing — para_split.js returns these from isListOrIndexBlock()
   LIST: 'list',
   INDEX: 'index',
   DISCARDED: 'discarded',
@@ -73,7 +72,6 @@ export const ContentType = Object.freeze({
   INLINE_EQUATION: 'inline_equation',
   EQUATION: 'equation',
   CHECKBOX: 'checkbox',
-  // FIX BF1: HYPERLINK and SEAL were missing from Python baseline
   HYPERLINK: 'hyperlink',
   SEAL: 'seal',
   CODE: 'code',

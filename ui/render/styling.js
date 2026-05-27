@@ -171,8 +171,6 @@ export function applyLayoutBasedStyling() {
   const viewportBottom = window.scrollY + window.innerHeight + 200;
 
   const applyToElement = (elem) => {
-    // FIX FORMULA-LINK-6: use source-LaTeX-aware text so formula-bearing titles/captions
-    // still receive their data-original-label tag.
     const text = _ctx.extractBlockLinkText(elem);
     if (!layoutLabelMap.has(text)) return;
     const labelInfo = layoutLabelMap.get(text);

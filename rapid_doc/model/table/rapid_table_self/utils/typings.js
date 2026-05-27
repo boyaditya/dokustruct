@@ -76,7 +76,6 @@ export class RapidTableOutput {
     predHtmls = [],
     cellBboxes = [],
     logicPoints = [],
-    // FIX T11b: per-image mean decode confidence scores (from TableLabelDecode)
     scores = [],
     elapse = 0,
   } = {}) {

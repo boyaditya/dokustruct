@@ -173,7 +173,7 @@ export class OrtInferSession extends InferSession {
           imShape[i * 2] = h;
           imShape[i * 2 + 1] = w;
         }
-        // FIX L15: im_shape always [1, 2] (matches Python — first image H/W only)
+        // im_shape always [1, 2] (matches Python — first image H/W only)
         inputFeed['im_shape'] = new ort.Tensor('float32', imShape.slice(0, 2), [1, 2]);
       }
     } else {
@@ -207,7 +207,6 @@ export class OrtInferSession extends InferSession {
         // Extract data from GPU if needed (async, overlaps with next inference)
         const rawData = typeof tensor.getData === 'function' ? await tensor.getData() : tensor.data;
 
-        // FIX L1: coerce BigInt to Number for arithmetic
         // int64 ONNX outputs arrive as BigInt64Array in onnxruntime-web; any downstream
         // arithmetic on them throws "TypeError: Cannot mix BigInt and other types".
         // tensorDataToFloat64 handles BigInt64Array safely and is a no-op for float arrays.

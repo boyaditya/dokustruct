@@ -173,25 +173,12 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
         scores        = datas.map(d => d.score);
         classNames    = datas.map(d => d.label);
 
-        // FIX L5: emit model-native sequential order for V2/V3/Plus-L (matches Python)
-        // Audit L5: V2 and Plus-L have a native reading order from the model;
-        // only S/M/L (no native order) should fall back to XY-Cut (orders = null).
+        // S/M/L models have no native reading order and fall back to XY-Cut;
+        // V2/V3/Plus-L emit model-native sequential order (matches Python baseline)
+        orders = null;
 
 
-        // INTENTIONAL - set orders = null for non-native-order models to trigger XY-Cut in post-processing;
-        // const isNativeOrderModel = [
-        //   ModelType.PP_DOCLAYOUTV2,
-        //   ModelType.PP_DOCLAYOUTV3,
-        //   ModelType.PP_DOCLAYOUT_PLUS_L,
-        // ].includes(this.modelType);
-        // orders = isNativeOrderModel
-        //   ? Array.from({ length: datas.length }, (_, i) => i)
-        //   : null; // S/M/L: no native reading order — fallback to XY-Cut
-
-        orders = null; // S/M/L: no native reading order — fallback to XY-Cut; V2/V3/Plus-L: emit model-native order (no re-sorting)
-
-
-        // FIX L4: drop polygon_points if any p is null (matches Python)
+        // Drop polygon_points if any p is null (matches Python)
         if (polygonPoints.some(p => p === null)) polygonPoints = null;
       } else {
         orders = [];
@@ -259,7 +246,7 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
     const boxNumsData   = this._tensorData(boxNumsTensor);    // [batchSize]
     const allMasksData  = hasMasks ? this._tensorData(masksTensor) : null;
 
-    // FIX L2: byte-offset slicing — determine mask H/W from tensor dims
+    // Byte-offset slicing — determine mask H/W from tensor dims
     let maskH = 0, maskW = 0;
     if (hasMasks && masksTensor) {
       if (masksTensor.dims && masksTensor.dims.length >= 2) {
@@ -281,7 +268,7 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
     let boxIdxStart = 0;
 
     for (let idx = 0; idx < boxNumsData.length; idx++) {
-      // FIX L1: coerce BigInt to Number for arithmetic
+      // Coerce BigInt to Number for arithmetic
       const np_boxes_num  = tensorToNumber(boxNumsData[idx]);
       const boxIdxEnd     = boxIdxStart + np_boxes_num;
 
@@ -294,12 +281,12 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
       }
 
       if (hasMasks) {
-        // FIX L2: byte-offset slicing, not box-count slicing
+        // Byte-offset slicing, not box-count slicing.
         // allMasksData is flat [totalBoxes * H * W]; each mask occupies H*W elements
-        const maskStride = maskH * maskW; // FIX L2: byte-offset, not box-count
+        const maskStride = maskH * maskW; // byte-offset, not box-count
         const npMasks = [];
         for (let i = 0; i < np_boxes_num; i++) {
-          const maskOffset = (boxIdxStart + i) * maskStride; // FIX L2: byte-offset
+          const maskOffset = (boxIdxStart + i) * maskStride; // byte-offset
           npMasks.push(allMasksData.slice(maskOffset, maskOffset + maskStride));
         }
         results.push({ boxes: npBoxes2D, masks: npMasks, maskH, maskW });

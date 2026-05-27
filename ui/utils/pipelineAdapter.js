@@ -567,14 +567,15 @@ export class PipelineAdapter {
    */
   async _runOcrOnly(state, file, signal) {
     const t0 = performance.now();
+    // before promise rejection when the signal fires mid-flight.
+    let _pdfDoc = null;
+    let _singleImageMat = null;
     try {
       state.beginStage('loading_models');
 
       // Lazy-import OCR dependencies.
-      const { loadImagesFromPdf } = await import('../../rapid_doc/utils/pdf_image_tools.js');
-      const { toMatBgr } = await import('../../rapid_doc/utils/model_utils.js');
-
-      if (signal.aborted) return null;
+      throwIfAborted(signal);      const { loadImagesFromPdf } = await import('../../rapid_doc/utils/pdf_image_tools.js');
+      throwIfAborted(signal);      const { toMatBgr } = await import('../../rapid_doc/utils/model_utils.js');
 
       // ── Step 1: read file bytes ─────────────────────────────────────────
       const tPre0 = performance.now();
@@ -582,9 +583,8 @@ export class PipelineAdapter {
       const imageInput = isImageFile(file);
       let rawFileBytes = null;
       if (!imageInput) {
-        rawFileBytes = new Uint8Array(await file.arrayBuffer());
+        throwIfAborted(signal);        rawFileBytes = new Uint8Array(await file.arrayBuffer());
       }
-      if (signal.aborted) return null;
 
       const tPre1 = performance.now();
       state.recordTiming('preprocessing', tPre1 - tPre0);
@@ -595,55 +595,41 @@ export class PipelineAdapter {
       state.updateMemory();
 
       let imagesList = null;
-      let pdfDoc = null;
-      let singleImageMat = null;
       if (imageInput) {
-        singleImageMat = await fileToImageMat(file, toMatBgr);
+        throwIfAborted(signal);        _singleImageMat = await fileToImageMat(file, toMatBgr);
       } else {
-        [imagesList, pdfDoc] = await loadImagesFromPdf(rawFileBytes);
-      }
-      if (signal.aborted) {
-        await destroyPdfProxy(pdfDoc);
-        if (singleImageMat?.owned) singleImageMat.mat.delete();
-        return null;
+        throwIfAborted(signal);        [imagesList, _pdfDoc] = await loadImagesFromPdf(rawFileBytes);
       }
 
       const config = this._buildConfig(state, file);
-      const engine = await getEngine();
-      await this._evictStaleModelCache(engine, config);
+      throwIfAborted(signal);      const engine = await getEngine();
+      throwIfAborted(signal);      await this._evictStaleModelCache(engine, config);
       const lang = config.language ?? 'ch';
 
       // ── Step 3: create OCR model (cached via singleton) ─────────────────
       // Use the AtomModelSingleton so the model is shared with full pipeline
-      const { AtomModelSingleton } = await import('../../rapid_doc/backend/pipeline/model_init.js');
-      const { AtomicModel } = await import('../../rapid_doc/backend/pipeline/model_list.js');
+      throwIfAborted(signal);      const { AtomModelSingleton } = await import('../../rapid_doc/backend/pipeline/model_init.js');
+      throwIfAborted(signal);      const { AtomicModel } = await import('../../rapid_doc/backend/pipeline/model_list.js');
       const atomMgr = AtomModelSingleton.getInstance();
-      const ocrModel = await atomMgr.getAtomModel(AtomicModel.OCR, {
+      throwIfAborted(signal);      const ocrModel = await atomMgr.getAtomModel(AtomicModel.OCR, {
         det_db_thresh: config.ocr_config?.["Det.det_db_thresh"] ?? config.ocr_config?.det_db_thresh ?? 0.3,
         det_db_box_thresh: 0.3,
         lang,
         ocr_config: config.ocr_config ?? null,
       });
 
-      if (signal.aborted) {
-        await destroyPdfProxy(pdfDoc);
-        if (singleImageMat?.owned) singleImageMat.mat.delete();
-        return null;
-      }
-
       // ── Step 4: run OCR on each page ────────────────────────────────────
       const allPageTexts = [];
       const allPageLines = [];
       const totalPages = imageInput ? 1 : imagesList.length;
       for (let i = 0; i < totalPages; i++) {
-        if (signal.aborted) break;
-        state.updateProgress(i + 1, totalPages);
+        throwIfAborted(signal);        state.updateProgress(i + 1, totalPages);
         state.updateMemory();
 
         let mat = null;
         let owned = false;
         if (imageInput) {
-          mat = singleImageMat.mat;
+          mat = _singleImageMat.mat;
           owned = false;
         } else {
           const imgDict = imagesList[i];
@@ -669,14 +655,14 @@ export class PipelineAdapter {
         }
       }
 
-      await destroyPdfProxy(pdfDoc);
-      if (singleImageMat?.owned) {
-        singleImageMat.mat.delete();
+      throwIfAborted(signal);      await destroyPdfProxy(_pdfDoc);
+      _pdfDoc = null;
+      if (_singleImageMat?.owned) {
+        _singleImageMat.mat.delete();
+        _singleImageMat = null;
       }
       const tOcr1 = performance.now();
       state.recordTiming('ocr', tOcr1 - tOcr0);
-
-      if (signal.aborted) return null;
 
       // ── Step 5: build result ────────────────────────────────────────────
       const tPost0 = performance.now();
@@ -727,7 +713,14 @@ export class PipelineAdapter {
         total,
       };
     } catch (err) {
-      if (signal.aborted) {
+      if (isAbortError(err, signal)) {
+        // count reaches 0 at reject time (Requirement 4.3).
+        await destroyPdfProxy(_pdfDoc);
+        _pdfDoc = null;
+        if (_singleImageMat?.owned) {
+          _singleImageMat.mat.delete();
+          _singleImageMat = null;
+        }
         state.failProcessing('Cancelled');
         return null;
       }
@@ -754,7 +747,7 @@ export class PipelineAdapter {
     try {
       // ── Step 1: ensure models present ─────────────────────────────────────
       if (!this.isPrepared(state, file)) {
-        await this.prepare(state, file, signal);
+        throwIfAborted(signal);        await this.prepare(state, file, signal);
       }
       if (signal.aborted) return null;
 
@@ -763,7 +756,7 @@ export class PipelineAdapter {
       // ── Step 2: read file bytes ────────────────────────────────────────────
       const tPre0 = performance.now();
       state.beginStage('preprocessing');
-      const rawFileBytes = isImageFile(file)
+      throwIfAborted(signal);      const rawFileBytes = isImageFile(file)
         ? await imageFileToPdfBytes(file)
         : new Uint8Array(await file.arrayBuffer());
       if (signal.aborted) return null;
@@ -777,7 +770,7 @@ export class PipelineAdapter {
       const config = this._buildConfig(state, file);
 
       // ── Step 4: load engine ────────────────────────────────────────────────
-      const engine = await getEngine();
+      throwIfAborted(signal);      const engine = await getEngine();
       if (!engine) throw new Error('Document engine could not be loaded.');
       if (signal.aborted) return null;
 
@@ -803,7 +796,7 @@ export class PipelineAdapter {
         // .slice(0) makes a fresh copy so the original fileBytes is never detached
         // by PDF.js's postMessage/structuredClone transfer semantics
         // docAnalyze returns [inferResults, allImageLists, allPdfDocs, langList, ocrEnabledList]
-        const docResult = await engine.docAnalyze(
+        throwIfAborted(signal);        const docResult = await engine.docAnalyze(
           [new Uint8Array(fileBytes.slice(0))],
           {
             lang_list:      [config.language ?? 'ch'],
@@ -841,7 +834,7 @@ export class PipelineAdapter {
             : { files: {}, write(path, bytes) { this.files[path] = bytes; } };
 
           const tMiddle0 = performance.now();
-          const middleJson = await engine.resultToMiddleJson(
+          throwIfAborted(signal);          const middleJson = await engine.resultToMiddleJson(
             modelList,
             imagesList,
             pageDictList,
@@ -882,7 +875,7 @@ export class PipelineAdapter {
             || config.dump_md_html
             || config.dump_md_docx
           );
-          const images = shouldKeepImages ? await this._collectImageMap(imageWriter) : {};
+          throwIfAborted(signal);          const images = shouldKeepImages ? await this._collectImageMap(imageWriter) : {};
 
           rawResult = {
             markdown,
@@ -910,11 +903,11 @@ export class PipelineAdapter {
         const doc = engine[engineApiName]?.create
           ? engine[engineApiName].create(config)
           : new engine[engineApiName](config);
-        rawResult = await doc.parse(new Uint8Array(fileBytes.slice(0)), { onProgress, signal });
+        throwIfAborted(signal);        rawResult = await doc.parse(new Uint8Array(fileBytes.slice(0)), { onProgress, signal });
       } else if (typeof engine.parse === 'function') {
-        rawResult = await engine.parse(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
+        throwIfAborted(signal);        rawResult = await engine.parse(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
       } else if (typeof engine.default === 'function') {
-        rawResult = await engine.default(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
+        throwIfAborted(signal);        rawResult = await engine.default(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
       } else {
         throw new Error('Unknown engine API shape — cannot call parse.');
       }
@@ -982,7 +975,10 @@ export class PipelineAdapter {
         total,
       };
     } catch (err) {
-      if (signal.aborted) {
+      if (isAbortError(err, signal)) {
+        // engine itself (releaseImageLists is called inside the docAnalyze branch
+        // on success; on abort the engine's own signal propagation cleans up).
+        // We only need to settle UI state here.
         state.failProcessing('Cancelled');
         return null;
       }

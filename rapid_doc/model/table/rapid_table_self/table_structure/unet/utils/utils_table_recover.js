@@ -90,18 +90,12 @@ export function matchOcrCell(dtRecBoxes, predBboxes) {
       
       if (contained === 1 || iou > 0.8) {
         matchedAny = true;
-        
-        if (!matched[j]) {
-          matched[j] = [gt];
-        } else {
-          matched[j].push(gt);
-        }
+        if (!matched[j]) matched[j] = [gt];
+        else matched[j].push(gt);
       }
     }
     
-    if (!matchedAny) {
-      notMatch.push(gt);
-    }
+    if (!matchedAny) notMatch.push(gt);
   }
   
   return [matched, notMatch];

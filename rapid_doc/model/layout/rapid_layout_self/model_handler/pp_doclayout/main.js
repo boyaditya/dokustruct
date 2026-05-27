@@ -175,8 +175,19 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
 
         // S/M/L models have no native reading order and fall back to XY-Cut;
         // V2/V3/Plus-L emit model-native sequential order (matches Python baseline)
-        orders = null;
 
+        // const isNativeOrderModel = [
+        //   ModelType.PP_DOCLAYOUTV2,
+        //   ModelType.PP_DOCLAYOUTV3,
+        //   ModelType.PP_DOCLAYOUT_PLUS_L,
+        // ].includes(this.modelType);
+        // orders = isNativeOrderModel
+        //   ? Array.from({ length: datas.length }, (_, i) => i)
+        //   : null; // S/M/L: no native reading order — fallback to XY-Cut
+
+        // INTENTIONAL - set orders = null for non-native-order models to trigger XY-Cut in post-processing;
+  
+        orders = null;
 
         // Drop polygon_points if any p is null (matches Python)
         if (polygonPoints.some(p => p === null)) polygonPoints = null;

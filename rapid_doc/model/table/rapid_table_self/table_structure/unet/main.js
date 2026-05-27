@@ -6,7 +6,7 @@ import * as ort from "onnxruntime-web";
 import { OrtInferSession } from "../../inference_engine/onnxruntime/main.js";
 import { ModelProcessor } from "../../model_processor/main.js";
 import { ModelType } from "../../utils/typings.js";
-import { labelConnectedComponents, resizeImgKeepRatio } from "./utils/utils.js";
+import { labelConnectedComponents } from "./utils/utils.js";
 import { getTableLine, adjustLines, finalAdjustLines, drawLines, imageLocationSortBox } from "./utils/utils_table_line_rec.js";
 import { box42PolyToBox41, sortedOcrBoxes } from "./utils/utils_table_recover.js";
 
@@ -47,20 +47,29 @@ export class TSRUnetStructurer {
 
   _preprocess(img) {
     const _cv = typeof cv !== "undefined" ? cv : (globalThis.cv || null);
-    // Aspect-preserving resize with zero-pad (matches Python resize_img keep_ratio=True)
-    const padded = resizeImgKeepRatio(img, this.inp_height, this.inp_width);
-    let rgb = new _cv.Mat(), f32 = new _cv.Mat();
+    // Parity with Python resize_img(img, (1024,1024), keep_ratio=True):
+    // Python uses imrescale which resizes the longest side to 1024 WITHOUT padding.
+    // The UNet ONNX model has dynamic input shapes and accepts any (H, W).
+    // Padding to 1024x1024 causes the padded zeros to affect model predictions
+    // (e.g. via batch norm statistics), producing different cell boundaries than Python.
+    const scale = Math.min(this.inp_height / img.rows, this.inp_width / img.cols);
+    const newH = Math.round(img.rows * scale);
+    const newW = Math.round(img.cols * scale);
+    const interp = scale < 1 ? _cv.INTER_AREA : _cv.INTER_CUBIC;
+    let resized = new _cv.Mat(), rgb = new _cv.Mat(), f32 = new _cv.Mat();
     try {
-      _cv.cvtColor(padded, rgb, _cv.COLOR_BGR2RGB);
+      _cv.resize(img, resized, new _cv.Size(newW, newH), 0, 0, interp);
+      _cv.cvtColor(resized, rgb, _cv.COLOR_BGR2RGB);
       rgb.convertTo(f32, _cv.CV_32F);
-      const src = f32.data32F, chw = new Float32Array(3 * 1024 * 1024);
+      const HW = newH * newW;
+      const src = f32.data32F, chw = new Float32Array(3 * HW);
       for (let c = 0; c < 3; c++) {
         const m = this.mean[c], s = this.std[c];
-        for (let i = 0; i < 1024 * 1024; i++) chw[c * 1024 * 1024 + i] = (src[i * 3 + c] - m) / s;
+        for (let i = 0; i < HW; i++) chw[c * HW + i] = (src[i * 3 + c] - m) / s;
       }
-      return { data: chw, dims: [1, 3, 1024, 1024] };
+      return { data: chw, dims: [1, 3, newH, newW] };
     } finally {
-      padded.delete(); rgb.delete(); f32.delete();
+      resized.delete(); rgb.delete(); f32.delete();
     }
   }
 
@@ -70,16 +79,16 @@ export class TSRUnetStructurer {
    * @param {cv.Mat} img - Original BGR image
    * @param {ort.Tensor} pred - Raw model output tensor
    * @param {object} [opts={}] - Optional kwargs forwarded from caller chain
-   * @param {number} [opts.row] - Expected number of rows (hint, not enforced)
-   * @param {number} [opts.col] - Expected number of columns (hint, not enforced)
-   * @param {number} [opts.h_lines_threshold=50] - Minimum pixel size for horizontal line segments in getTableLine
-   * @param {number} [opts.v_lines_threshold=30] - Minimum pixel size for vertical line segments in getTableLine
+   * @param {number} [opts.row=50] - Minimum pixel size for horizontal line segments in getTableLine (Python `row`)
+   * @param {number} [opts.col=30] - Minimum pixel size for vertical line segments in getTableLine (Python `col`)
+   * @param {number} [opts.h_lines_threshold=100] - Alpha distance threshold for adjustLines on horizontal lines (Python `h_lines_threshold`)
+   * @param {number} [opts.v_lines_threshold=15] - Alpha distance threshold for adjustLines on vertical lines (Python `v_lines_threshold`)
    * @param {number} [opts.angle=50] - Angle tolerance (degrees) passed to adjustLines for both row and col lines
    * @param {boolean} [opts.enhance_box_line=false] - Whether to enhance box-border lines (reserved for future use)
    * @param {boolean} [opts.morph_close=true] - Whether to apply MORPH_CLOSE on hPred (unconditional on vPred); see task 10.7
-   * @param {number} [opts.more_h_lines=100] - Alpha distance threshold passed to adjustLines for horizontal (row) lines
-   * @param {number} [opts.more_v_lines=15] - Alpha distance threshold passed to adjustLines for vertical (col) lines
-   * @param {boolean} [opts.extend_line=false] - Whether to extend line endpoints to table boundary (reserved for future use)
+   * @param {boolean} [opts.more_h_lines=true] - Gate: whether to run adjustLines for horizontal lines (Python `more_h_lines`, default true via enhance_box_line)
+   * @param {boolean} [opts.more_v_lines=true] - Gate: whether to run adjustLines for vertical lines (Python `more_v_lines`, default true via enhance_box_line)
+   * @param {boolean} [opts.extend_line=true] - Gate: whether to run finalAdjustLines (Python `extend_line`, default true via enhance_box_line)
    * @param {boolean} [opts.rotated_fix=true] - Whether to apply rotation correction via cal_rotate_angle + rotate_image + unrotate_polygons
    * @returns {{ polygons: Array|null, rotatedPolygons: Array|null }}
    */
@@ -126,14 +135,23 @@ export class TSRUnetStructurer {
     _cv.morphologyEx(vPred, vPred, _cv.MORPH_CLOSE, vKernel);
     hKernel.delete(); vKernel.delete();
 
-    const rowBoxes = getTableLine(hPred.data, oriW, oriH, 0, opts.h_lines_threshold ?? 50);
-    const colBoxes = getTableLine(vPred.data, oriW, oriH, 1, opts.v_lines_threshold ?? 30);
+    const rowBoxes = getTableLine(hPred.data, oriW, oriH, 0, opts.row ?? 50);
+    const colBoxes = getTableLine(vPred.data, oriW, oriH, 1, opts.col ?? 30);
     hPred.delete(); vPred.delete();
 
-    const moreRow = adjustLines(rowBoxes, opts.more_h_lines ?? 100, opts.angle ?? 50);
-    const moreCol = adjustLines(colBoxes, opts.more_v_lines ?? 15, opts.angle ?? 50);
+    // Python parity: more_h_lines / more_v_lines are boolean gates (default true via
+    // enhance_box_line=True); the actual alph comes from h_lines_threshold / v_lines_threshold.
+    const hLinesThreshold = opts.h_lines_threshold ?? 100;
+    const vLinesThreshold = opts.v_lines_threshold ?? 15;
+    const moreHLines = opts.more_h_lines !== false;  // default true
+    const moreVLines = opts.more_v_lines !== false;  // default true
+    const moreRow = moreHLines ? adjustLines(rowBoxes, hLinesThreshold, opts.angle ?? 50) : [];
+    const moreCol = moreVLines ? adjustLines(colBoxes, vLinesThreshold, opts.angle ?? 50) : [];
     let finalRow = rowBoxes.concat(moreRow), finalCol = colBoxes.concat(moreCol);
-    finalAdjustLines(finalRow, finalCol);
+    // Python parity: extend_line is a boolean gate (default true via enhance_box_line=True)
+    if (opts.extend_line !== false) {
+      finalAdjustLines(finalRow, finalCol);
+    }
 
     let lineImg = _cv.Mat.zeros(oriH, oriW, _cv.CV_8UC1);
     drawLines(lineImg, finalRow.concat(finalCol));
@@ -143,7 +161,7 @@ export class TSRUnetStructurer {
     const rotatedAngle = this._calRotateAngle(lineImg);
 
     let polygons, rotatedPolygons;
-    if (rotatedFix && Math.abs(rotatedAngle) > 0.5) {
+    if (rotatedFix && Math.abs(rotatedAngle) > 0.3) {
       const rotatedLineImg = this._rotateImage(lineImg, rotatedAngle);
       rotatedPolygons = this.calRegionBoxes(rotatedLineImg);
       rotatedLineImg.delete();
@@ -186,6 +204,21 @@ export class TSRUnetStructurer {
     for (let l = 1; l <= numComponents; l++) {
       const coords = coordsByLabel[l];
       if (coords.length < 6) continue;
+
+      // Compute axis-aligned bbox area (matches Python component.bbox_area = width * height)
+      // Used for the large-region skip filter (Python: bbox_area > H*W*3/4)
+      let axMinX = Infinity, axMinY = Infinity, axMaxX = -Infinity, axMaxY = -Infinity;
+      for (let k = 0; k < coords.length; k += 2) {
+        const cx = coords[k], cy = coords[k + 1];
+        if (cx < axMinX) axMinX = cx;
+        if (cy < axMinY) axMinY = cy;
+        if (cx > axMaxX) axMaxX = cx;
+        if (cy > axMaxY) axMaxY = cy;
+      }
+      const axisAlignedArea = (axMaxX - axMinX + 1) * (axMaxY - axMinY + 1);
+      // Skip outer-table-border region using axis-aligned area (Python parity)
+      if (axisAlignedArea > maxArea * 0.75) continue;
+
       let mat = _cv.matFromArray(coords.length / 2, 1, _cv.CV_32SC2, coords);
       let rect = _cv.minAreaRect(mat);
       mat.delete();
@@ -215,8 +248,6 @@ export class TSRUnetStructurer {
       const h = (Math.sqrt((box[3][0]-box[0][0])**2 + (box[3][1]-box[0][1])**2)
                + Math.sqrt((box[2][0]-box[1][0])**2 + (box[2][1]-box[1][1])**2)) / 2;
       const bboxArea = w * h;
-      // Skip outer-table-border region (bbox area > 75% of image)
-      if (bboxArea > maxArea * 0.75) continue;
       if (bboxArea < maxArea * 0.5 && w >= 15 && h >= 15) boxes.push(box);
     }
     return boxes;

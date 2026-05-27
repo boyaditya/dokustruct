@@ -102,6 +102,25 @@ export async function sortBlocksByBbox(blocks, pageW, pageH, footnoteBlocks, pag
       block.blocks = [...block.blocks].sort((a, b) => a.index - b.index);
     }
   }
+
+  // Correction pass: fix adjacent (TABLE, TITLE) pairs where the TITLE is
+  // spatially above the TABLE but was sorted after it. This can happen when
+  // xycut-plus-v3 places a wide table block before a narrow heading that sits
+  // just above it. A single bubble-sort pass is sufficient for the common case.
+  for (let i = 0; i < sortedBlocks.length - 1; i++) {
+    const cur = sortedBlocks[i];
+    const nxt = sortedBlocks[i + 1];
+    if (
+      cur.type === BlockType.TABLE &&
+      nxt.type === BlockType.TITLE &&
+      Array.isArray(nxt.bbox) && Array.isArray(cur.bbox) &&
+      nxt.bbox[1] < cur.bbox[1]  // TITLE y0 < TABLE y0 → TITLE is above TABLE
+    ) {
+      sortedBlocks[i] = nxt;
+      sortedBlocks[i + 1] = cur;
+    }
+  }
+
   return sortedBlocks;
 }
 

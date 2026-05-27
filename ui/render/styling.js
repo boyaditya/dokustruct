@@ -158,8 +158,10 @@ export function applyLayoutBasedStyling() {
   }
 
   if (layoutLabelMap.size === 0) {
-    console.warn(
-      `${_ctx.UI_LOG_PREFIX} No text content found in layout data. Using middle_json is required for text-based styling.`,
+    // Image-only pages (tables, figures with no text spans) legitimately produce
+    // an empty layout map — this is expected, not an error.
+    console.info(
+      `${_ctx.UI_LOG_PREFIX} No text content found in layout data — page may be image-only. Skipping text-based styling.`,
     );
     centerAlignVisuals();
     return;

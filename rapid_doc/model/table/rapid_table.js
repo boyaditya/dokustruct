@@ -337,14 +337,17 @@ export class RapidTableModel {
 
   /**
    * Wired model prediction with optional compare-table fallback.
+   * When the wired model produces no HTML (e.g. image-only table where UNet
+   * finds no line segments), automatically falls back to the wireless model
+   * so the table is still recognised rather than silently dropped.
    * @private
    */
   async _predictWired(image, ocrResult, opts) {
     const wiredResult = await this._wiredModel.run([image], ocrResult ? [ocrResult] : null);
+    const wiredHtml = wiredResult.predHtmls?.[0] ?? "";
 
     if (opts?.useCompareTable) {
       const wirelessResult = await this._wirelessModel.run([image], ocrResult ? [ocrResult] : null);
-      const wiredHtml = wiredResult.predHtmls?.[0] ?? "";
       const wirelessHtml = wirelessResult.predHtmls?.[0] ?? "";
       const selected = selectBestTableModel(ocrResult, wiredHtml, wirelessHtml);
       logger.info(`compare-table selected '${selected.modelType}'`);
@@ -357,8 +360,21 @@ export class RapidTableModel {
       };
     }
 
+    // Wired model returned no HTML (UNet found no line segments — common for
+    // image-only or low-contrast tables). Fall back to wireless model so the
+    // table is still processed instead of producing an empty result.
+    if (!wiredHtml && this._wirelessModel) {
+      logger.info("wired model produced no HTML — falling back to wireless model");
+      const wirelessResult = await this._wirelessModel.run([image], ocrResult ? [ocrResult] : null);
+      return {
+        html: wirelessResult.predHtmls?.[0] ?? "",
+        cellBboxes: wirelessResult.cellBboxes?.[0] ?? [],
+        elapse: Number(wiredResult.elapse || 0) + Number(wirelessResult.elapse || 0),
+      };
+    }
+
     return {
-      html: wiredResult.predHtmls[0] ?? "",
+      html: wiredHtml,
       cellBboxes: wiredResult.cellBboxes[0] ?? [],
       elapse: wiredResult.elapse,
     };

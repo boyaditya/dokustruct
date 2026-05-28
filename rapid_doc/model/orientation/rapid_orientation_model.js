@@ -161,7 +161,12 @@ export class RapidOrientationEngine {
     this.session = null;
     this.labels = FALLBACK_LABELS;
     this.loader = new LoadImage();
-    this.batchSize = 3;
+    // Single-image inference. The previous batchSize=3 replicated the same
+    // image into a 3-batch tensor (1.8 MB instead of 600 KB per page) and
+    // contributed disproportionately to GPU buffer churn — the failing
+    // `mappedAtCreation` allocation in error #2 is exactly this 1.8 MB.
+    // The downstream majorityVote remains valid for batch=1 (single sample).
+    this.batchSize = 1;
     this.useWebGpu = false;
   }
 
@@ -175,7 +180,9 @@ export class RapidOrientationEngine {
       executionProviders,
       logSeverityLevel: 4,
       graphOptimizationLevel: "all",
-      ...(inst.useWebGpu ? { preferredOutputLocation: "gpu-buffer" } : {}),
+      // Keep outputs on CPU. Orientation output is a single small logits row
+      // (4-class softmax); 'gpu-buffer' here pinned a small GPU buffer per
+      // page that ORT-Web's pool reused across runs, contributing to leak.
     });
     inst.labels = getLabels(inst.session);
     return inst;

@@ -6,6 +6,7 @@ import * as ort from "onnxruntime-web";
 import { OrtInferSession } from "../../inference_engine/onnxruntime/main.js";
 import { ModelProcessor } from "../../model_processor/main.js";
 import { ModelType } from "../../utils/typings.js";
+import { disposeOutputMap } from "../../../../../utils/resource_utils.js";
 import { labelConnectedComponents } from "./utils/utils.js";
 import { getTableLine, adjustLines, finalAdjustLines, drawLines, imageLocationSortBox } from "./utils/utils_table_line_rec.js";
 import { box42PolyToBox41, sortedOcrBoxes } from "./utils/utils_table_recover.js";
@@ -36,13 +37,30 @@ export class TSRUnetStructurer {
       const { data, dims } = this._preprocess(img);
       const inputName = this.session.getInputNames()[0];
       const inputTensor = new ort.Tensor("float32", data, dims);
-      const outputMap = await this.session.run({ [inputName]: inputTensor });
-      const outputName = this.session.getOutputNames()[0];
-      const pred = outputMap[outputName];
-      const res = this.postprocess(img, pred, opts);
-      results.push(res);
+      let outputMap = null;
+      try {
+        outputMap = await this.session.run({ [inputName]: inputTensor });
+        const outputName = this.session.getOutputNames()[0];
+        const pred = outputMap[outputName];
+        const res = this.postprocess(img, pred, opts);
+        results.push(res);
+      } finally {
+        if (inputTensor?.dispose) inputTensor.dispose();
+        disposeOutputMap(outputMap);
+      }
     }
     return results;
+  }
+
+  /**
+   * Release the underlying ORT session.
+   * @returns {Promise<void>}
+   */
+  async dispose() {
+    if (this.session && typeof this.session.dispose === 'function') {
+      await this.session.dispose();
+    }
+    this.session = null;
   }
 
   _preprocess(img) {

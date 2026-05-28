@@ -261,7 +261,10 @@ export async function resultToMiddleJson(
   crossPageTableMerge(middleJson.pdf_info);
 
   if (modelList.length >= 10) {
-    cleanMemory(getDevice());
+    // Awaited so transient WebGPU work has chance to flush before the next
+    // batch in a multi-batch run begins. Use { releaseGpu: false } to keep
+    // warm sessions alive — full reset is engineReset()'s job.
+    await cleanMemory(getDevice(), { releaseGpu: false });
   }
 
   return middleJson;

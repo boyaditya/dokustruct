@@ -10,6 +10,7 @@ import { ModelType } from "../../utils/typings.js";
 import { TablePreprocess } from "./pre_process.js";
 import { TableLabelDecode } from "./post_process.js";
 import { fetchAssetText } from "../../../../../utils/download_file.js";
+import { disposeOutputMap } from "../../../../../utils/resource_utils.js";
 
 /**
  * PP-Structure table structure recognizer.
@@ -93,26 +94,45 @@ export class PPTableStructurer {
       inputFeed = { [inputNames[0]]: inputTensor, [inputNames[1]]: shapeTensor };
     }
 
-    // Inference
-    const outputMap = await this.session.run(inputFeed);
-    const outputNames = this.session.getOutputNames();
+    let outputMap = null;
+    try {
+      // Inference
+      outputMap = await this.session.run(inputFeed);
+      const outputNames = this.session.getOutputNames();
 
-    // Python: bbox_preds, struct_probs = self.session(imgs)
-    // Order: bbox_preds FIRST, struct_probs SECOND
-    let structureProbs, bboxPreds = null;
-    if (outputNames.length >= 2) {
-      const out0 = outputMap[outputNames[0]];
-      const out1 = outputMap[outputNames[1]];
-      
-      // Python order: bbox_preds, struct_probs
-      bboxPreds = out0;
-      structureProbs = out1;
-    } else {
-      structureProbs = outputMap[outputNames[0]];
+      // Python: bbox_preds, struct_probs = self.session(imgs)
+      // Order: bbox_preds FIRST, struct_probs SECOND
+      let structureProbs, bboxPreds = null;
+      if (outputNames.length >= 2) {
+        const out0 = outputMap[outputNames[0]];
+        const out1 = outputMap[outputNames[1]];
+
+        // Python order: bbox_preds, struct_probs
+        bboxPreds = out0;
+        structureProbs = out1;
+      } else {
+        structureProbs = outputMap[outputNames[0]];
+      }
+
+      // Postprocess
+      return this.postProcessor.decode(bboxPreds, structureProbs, shapes, oriImgs);
+    } finally {
+      for (const t of Object.values(inputFeed)) {
+        if (t?.dispose) t.dispose();
+      }
+      disposeOutputMap(outputMap);
     }
+  }
 
-    // Postprocess
-    return this.postProcessor.decode(bboxPreds, structureProbs, shapes, oriImgs);
+  /**
+   * Release the underlying ORT session.
+   * @returns {Promise<void>}
+   */
+  async dispose() {
+    if (this.session && typeof this.session.dispose === 'function') {
+      await this.session.dispose();
+    }
+    this.session = null;
   }
 }
 

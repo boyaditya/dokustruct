@@ -532,8 +532,13 @@ export class AppState {
       execution_provider: executionProvider,
       executionProviders: executionProvider === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
       use_det_mode: s.useDetMode,
+      // Conservative WebGPU rec batch: 24 was tuned for high-end GPUs but on
+      // 8 GB-class GPUs (e.g. RX 580) the per-batch input + output GPU
+      // buffers (≈ 30 MB at batch 24 for PaddleOCR rec mobile) trigger
+      // driver-level OOM that surfaces as a lost device. 6 is a safe default;
+      // users on >12 GB GPUs can raise it via the OCR config UI.
       "Det.rec_batch_num": executionProvider === 'webgpu' ? 4 : 1,
-      "Rec.rec_batch_num": executionProvider === 'webgpu' ? 24 : 6,
+      "Rec.rec_batch_num": executionProvider === 'webgpu' ? 6 : 6,
     };
   }
 

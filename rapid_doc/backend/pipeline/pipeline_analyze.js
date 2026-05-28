@@ -127,7 +127,8 @@ export class ModelSingleton {
     if (keepKey === null) {
       await AtomModelSingleton.getInstance().clear();
     }
-    cleanMemory();
+    // Light-weight GC trigger; full GPU drain happens in engineReset().
+    await cleanMemory();
   }
 
   async clearByConfig(config = null) {
@@ -657,7 +658,10 @@ export async function batchImageAnalyze(
   results._stageTimings = { ...(batchModel.lastStageTimings || {}) };
 
   const device = getDevice();
-  cleanMemory(device);
+  // Best-effort drain of transient inference allocations between batches.
+  // Use { releaseGpu: false } to keep warm sessions alive — full device
+  // teardown happens on engineReset() at the end of a run.
+  await cleanMemory(device, { releaseGpu: false });
 
   return results;
 }
@@ -698,5 +702,63 @@ async function imageBytesToPdfBytes(bytes) {
     return await pdfDoc.save();
   } finally {
     releaseImageBitmap(bitmap);
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// engineReset — full per-run teardown for VRAM hygiene
+// ---------------------------------------------------------------------------
+
+/**
+ * Drop every cached model, release every ONNX session, flush WebGPU, and
+ * destroy the shared WebGPU device. Use this between runs (especially in
+ * the UI's run-failure handler) to guarantee VRAM is returned to the driver.
+ *
+ * Without this, ORT-Web's WebGPU JSEP buffer pool grows unbounded across
+ * runs, eventually exceeding the driver's per-allocation limit and producing
+ * "createBuffer failed, size too large for the implementation" errors on
+ * later runs.
+ *
+ * Pass `{ keepDevice: true }` to keep the WebGPU device alive (useful when
+ * the same model configuration will run again immediately).
+ *
+ * @param {{ keepDevice?: boolean }} [opts]
+ * @returns {Promise<void>}
+ */
+export async function engineReset(opts = {}) {
+  const keepDevice = opts.keepDevice === true;
+
+  // 1) Drop pipeline-level cache and dispose every cached MineruPipelineModel.
+  try {
+    await ModelSingleton.getInstance().clear();
+  } catch (err) {
+    console.warn(formatPipelineError({
+      stage: 'dispose',
+      module: 'engineReset',
+      message: `ModelSingleton.clear failed: ${err?.message ?? err}`,
+      recoverable: true,
+    }));
+  }
+
+  // 2) Drop atomic model cache (which owns the actual ORT sessions).
+  try {
+    await AtomModelSingleton.getInstance().clear();
+  } catch (err) {
+    console.warn(formatPipelineError({
+      stage: 'dispose',
+      module: 'engineReset',
+      message: `AtomModelSingleton.clear failed: ${err?.message ?? err}`,
+      recoverable: true,
+    }));
+  }
+
+  // 3) Flush + drop the shared WebGPU device. This is the only mechanism
+  //    that returns ORT-Web's pooled GPU buffers to the driver.
+  const device = getDevice();
+  if (!keepDevice) {
+    await cleanMemory(device, { releaseGpu: true });
+  } else {
+    await cleanMemory(device, { releaseGpu: false });
   }
 }

@@ -50,6 +50,12 @@ export const BrowserPerformanceProfile = Object.freeze({
  *  - HIGH_END: deviceMemory ≥ 16 GB
  *  - DESKTOP:  everything else (including unknown / API not available)
  *
+ * Note: this detects *system RAM*, not VRAM. The HIGH_END tier's batch
+ * sizes target a 16 GB+ desktop where the GPU is also high-end. On systems
+ * with high RAM but mid-range GPUs (e.g. RX 580 8 GB with 32 GB RAM), the
+ * caller should clamp REC_BATCH_NUM further. WebGPU paths typically halve
+ * REC_BATCH_NUM via UI config to stay within driver buffer limits.
+ *
  * @returns {typeof BrowserPerformanceProfile[keyof typeof BrowserPerformanceProfile]}
  */
 export function detectProfile() {

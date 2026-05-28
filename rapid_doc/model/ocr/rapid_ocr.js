@@ -448,6 +448,57 @@ export class RapidOcrModel {
     if (onProgress) onProgress(imgList.length, imgList.length);
     return res;
   }
+
+  // ── Disposal ────────────────────────────────────────────────────────────────
+
+  /**
+   * Release the three ONNX sessions (det, rec, optional seal det).
+   * After this call the wrapper is unusable. Idempotent.
+   *
+   * Important: ORT-Web's WebGPU JSEP only returns pooled buffers to the driver
+   * when the underlying `ort.InferenceSession.release()` is awaited. Without
+   * this, repeat runs accumulate VRAM and eventually trip
+   * `createBuffer ... too large for the implementation`.
+   *
+   * If the WebGPU device is already lost, `release()` will throw
+   * "cannot release session, invalid session id" because the session handles
+   * are invalidated when the device dies. In that case we just null the
+   * references and rely on JS GC.
+   * @returns {Promise<void>}
+   */
+  async dispose() {
+    let skipRelease = false;
+    try {
+      const mod = await import('../../utils/ort_runtime.js');
+      skipRelease = mod.isGpuDeviceLost?.() === true;
+    } catch { /* ignore */ }
+
+    const sessions = [
+      this.textDetector?.session,
+      this.textRecognizer?.session,
+      this._sealDetector?.session,
+    ];
+    for (const session of sessions) {
+      if (!session) continue;
+      if (skipRelease) continue;
+      try {
+        if (typeof session.release === 'function') {
+          await session.release();
+        } else if (typeof session.dispose === 'function') {
+          await session.dispose();
+        }
+      } catch (err) {
+        // Treat invalid-session-id as expected when the device was lost mid-run.
+        const msg = String(err?.message ?? err);
+        if (!msg.includes('invalid session id')) {
+          logger.warning(`Failed to release OCR session: ${msg}`);
+        }
+      }
+    }
+    this.textDetector = null;
+    this.textRecognizer = null;
+    this._sealDetector = null;
+  }
 }
 
 // ─── Private module-level helpers ─────────────────────────────────────────────
@@ -464,15 +515,24 @@ function resolveExecutionProviders(params, cfg) {
 
 /**
  * Builds ONNX session options.
+ *
+ * Note: we explicitly do NOT request `preferredOutputLocation: 'gpu-buffer'`
+ * for OCR det/rec on WebGPU. Both detector and recognizer call `getData()`
+ * on every output and immediately convert to CPU `Float32Array`, so the GPU
+ * residency just adds buffer-pool pressure without speedup. With gpu-buffer
+ * outputs, on RX 580 (8 GB shared with desktop compositor) the rec batch
+ * pool grew across runs and tripped a `createBuffer ... too large for the
+ * implementation` device-lost — see ort_runtime.js / fix notes.
+ *
+ * If a future profiling pass shows download cost dominates, this can be
+ * re-enabled with explicit `tensor.toCpuBuffer()` + immediate `dispose()`.
  */
-function buildSessionOptions(epList, useWebGpu) {
-  const sessOpts = {
+function buildSessionOptions(epList, _useWebGpu) {
+  return {
     executionProviders: epList,
     logSeverityLevel: 4,
     graphOptimizationLevel: 'all',
   };
-  if (useWebGpu) sessOpts.preferredOutputLocation = 'gpu-buffer';
-  return sessOpts;
 }
 
 /**

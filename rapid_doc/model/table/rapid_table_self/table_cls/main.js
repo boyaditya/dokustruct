@@ -5,6 +5,7 @@ import { OrtInferSession } from "../inference_engine/onnxruntime/main.js";
 import { ModelProcessor } from "../model_processor/main.js";
 import { ModelType } from "../utils/typings.js";
 import { getLogger } from "./utils/logger.js";
+import { disposeOutputMap } from "../../../../utils/resource_utils.js";
 
 const logger = getLogger("TableCls");
 
@@ -150,13 +151,19 @@ export class PaddleCls {
     const data = paddleClsPreprocess(img, 256, 224);
     const inputTensor = new ort.Tensor("float32", data, [1, 3, 224, 224]);
     const inputName = this.session.getInputNames()[0];
-    const result = await this.session.run({ [inputName]: inputTensor });
-    const outputName = this.session.getOutputNames()[0];
-    const outputData = Array.from(result[outputName].cpuData ?? result[outputName].data);
-    const softmax = _softmax(outputData);
-    const maxIdx = softmax.indexOf(Math.max(...softmax));
-    const labels = ["wired", "wireless"];
-    return [labels[maxIdx] ?? String(maxIdx), softmax[maxIdx]];
+    let result = null;
+    try {
+      result = await this.session.run({ [inputName]: inputTensor });
+      const outputName = this.session.getOutputNames()[0];
+      const outputData = Array.from(result[outputName].cpuData ?? result[outputName].data);
+      const softmax = _softmax(outputData);
+      const maxIdx = softmax.indexOf(Math.max(...softmax));
+      const labels = ["wired", "wireless"];
+      return [labels[maxIdx] ?? String(maxIdx), softmax[maxIdx]];
+    } finally {
+      if (inputTensor?.dispose) inputTensor.dispose();
+      disposeOutputMap(result);
+    }
   }
 
   async dispose() {
@@ -197,13 +204,19 @@ export class QanythingCls {
     const data = qanythingClsPreprocess(img, 224);
     const inputTensor = new ort.Tensor("float32", data, [1, 3, 224, 224]);
     const inputName = this.session.getInputNames()[0];
-    const result = await this.session.run({ [inputName]: inputTensor });
-    const outputName = this.session.getOutputNames()[0];
-    const outputData = Array.from(result[outputName].cpuData ?? result[outputName].data);
-    const softmax = _softmax(outputData);
-    const maxIdx = softmax.indexOf(Math.max(...softmax));
-    const labels = ["wired", "wireless"];
-    return [labels[maxIdx] ?? String(maxIdx), softmax[maxIdx]];
+    let result = null;
+    try {
+      result = await this.session.run({ [inputName]: inputTensor });
+      const outputName = this.session.getOutputNames()[0];
+      const outputData = Array.from(result[outputName].cpuData ?? result[outputName].data);
+      const softmax = _softmax(outputData);
+      const maxIdx = softmax.indexOf(Math.max(...softmax));
+      const labels = ["wired", "wireless"];
+      return [labels[maxIdx] ?? String(maxIdx), softmax[maxIdx]];
+    } finally {
+      if (inputTensor?.dispose) inputTensor.dispose();
+      disposeOutputMap(result);
+    }
   }
 
   async dispose() {

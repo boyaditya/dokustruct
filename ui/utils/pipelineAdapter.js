@@ -738,6 +738,13 @@ export class PipelineAdapter {
       total_ms: 0,
     };
 
+    // Resources tracked across success/error/finally so VRAM and PNG byte
+    // arrays are reliably released even when the pipeline throws.
+    let _allImageLists = null;
+    let _imageWriter = null;
+    let _engineRef = null;
+    let _runFailedFatally = false;
+
     try {
       // ── Step 1: ensure models present ─────────────────────────────────────
       if (!this.isPrepared(state, file)) {
@@ -766,6 +773,7 @@ export class PipelineAdapter {
       // ── Step 4: load engine ────────────────────────────────────────────────
       throwIfAborted(signal);      const engine = await getEngine();
       if (!engine) throw new Error('Document engine could not be loaded.');
+      _engineRef = engine;
       if (signal.aborted) return null;
 
       const tPre1 = performance.now();
@@ -816,6 +824,7 @@ export class PipelineAdapter {
             typeof engine.unionMake === 'function') {
           // ── Post-process: model output → middle JSON → markdown ──
           const [inferResults, allImageLists, allPdfDocs, langList, ocrEnabledList, stageTimings = null] = docResult;
+          _allImageLists = allImageLists;
           const modelList    = inferResults[0];   // first (only) PDF
           const imagesList   = allImageLists[0];
           const pageDictList = allPdfDocs[0];
@@ -826,6 +835,7 @@ export class PipelineAdapter {
           const imageWriter = (typeof engine.MemoryDataWriter === 'function')
             ? new engine.MemoryDataWriter()
             : { files: {}, write(path, bytes) { this.files[path] = bytes; } };
+          _imageWriter = imageWriter;
 
           const tMiddle0 = performance.now();
           throwIfAborted(signal);          const middleJson = await engine.resultToMiddleJson(
@@ -884,7 +894,11 @@ export class PipelineAdapter {
             _timings:      stageTimings,
           };
 
+          // Release immediately so the OffscreenCanvas backing stores are
+          // freed before downstream postprocessing (the finally also covers
+          // the error path; calling it twice is safe due to the null guard).
           releaseImageLists(allImageLists);
+          _allImageLists = null;
         } else if (Array.isArray(docResult)) {
           // Fallback: unwrap first element
           rawResult = docResult[0];
@@ -977,7 +991,64 @@ export class PipelineAdapter {
       console.error('[pipelineAdapter] Run failed:', message, err);
       state.failProcessing(message);
       this._toast(`Processing failed: ${message}`, 'error');
+      // Heuristic: any GPU buffer / WebGPU lost-device error indicates the
+      // pool is in a bad state. Force a full engine + GPU teardown so the
+      // next run starts from a clean device.
+      const errMsg = String(err?.message ?? err ?? '');
+      if (
+        errMsg.includes('createBuffer')
+        || errMsg.includes('mapAsync')
+        || errMsg.includes('external Instance')
+        || errMsg.includes('GPUDevice')
+        || errMsg.includes('WebGPU')
+      ) {
+        _runFailedFatally = true;
+      }
       return null;
+    } finally {
+      // Per-run cleanup: always run even on success / abort / error so
+      // OffscreenCanvas backing stores and PNG byte arrays are released
+      // without waiting for GC. Previously these were only freed on the
+      // success path, leaving ~4 GB stuck in VRAM after a run.
+      try {
+        if (_allImageLists) {
+          releaseImageLists(_allImageLists);
+          _allImageLists = null;
+        }
+      } catch (e) {
+        console.warn('[pipelineAdapter] releaseImageLists failed in finally:', e?.message ?? e);
+      }
+      try {
+        if (_imageWriter && _imageWriter.files && typeof _imageWriter.files === 'object') {
+          // Drop references to PNG byte arrays so JS GC can reclaim them.
+          // The downstream `state.results.images` already holds data URLs
+          // for the images we want to keep.
+          for (const k of Object.keys(_imageWriter.files)) delete _imageWriter.files[k];
+          _imageWriter = null;
+        }
+      } catch (e) {
+        console.warn('[pipelineAdapter] imageWriter cleanup failed:', e?.message ?? e);
+      }
+      // GPU drain: best-effort flush of pending WebGPU work. On fatal failure,
+      // also tear down the entire engine + WebGPU device. The next run will
+      // re-create the device and reload sessions — slower but guarantees
+      // VRAM is returned to the driver.
+      try {
+        if (_runFailedFatally && _engineRef && typeof _engineRef.engineReset === 'function') {
+          await _engineRef.engineReset();
+          console.warn('[pipelineAdapter] engineReset() called after fatal GPU error.');
+        } else if (_engineRef) {
+          // Light-weight drain. Do NOT release the device on success — that
+          // would force a 60s reload on next run with no benefit when the
+          // pool is healthy. cleanMemory below is async but we don't await
+          // it, since the run is already complete.
+          const ortRuntime = await import('../../rapid_doc/utils/ort_runtime.js');
+          ortRuntime.flushGpuQueue?.();
+        }
+      } catch (e) {
+        console.warn('[pipelineAdapter] post-run GPU drain failed:', e?.message ?? e);
+      }
+      _engineRef = null;
     }
   }
 

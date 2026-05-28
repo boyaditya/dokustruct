@@ -57,6 +57,22 @@ export class OrtInferSession extends InferSession {
     return await this.session.run(inputContent);
   }
 
+  /**
+   * Release the underlying ORT session.
+   * The wrapper had no dispose method previously; callers (table_cls,
+   * unet structurer, pp_structure) called `session.dispose()` which is
+   * not implemented on `ort.InferenceSession` (only `release` is). Result:
+   * sessions were never freed and their WebGPU buffer pools accumulated.
+   * @returns {Promise<void>}
+   */
+  async dispose() {
+    const inner = this.session;
+    this.session = null;
+    if (inner && typeof inner.release === 'function') {
+      try { await inner.release(); } catch { /* already released */ }
+    }
+  }
+
   getInputNames() { return this.session.inputNames; }
   getOutputNames() { return this.session.outputNames; }
 

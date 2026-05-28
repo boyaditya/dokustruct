@@ -14,7 +14,7 @@
 // Pipeline — main entry points
 // ---------------------------------------------------------------------------
 
-export { docAnalyze, ModelSingleton } from './backend/pipeline/pipeline_analyze.js';
+export { docAnalyze, ModelSingleton, engineReset } from './backend/pipeline/pipeline_analyze.js';
 export { unionMake } from './backend/pipeline/pipeline_middle_json_mkcontent.js';
 export { resultToMiddleJson } from './backend/pipeline/model_json_to_middle_json.js';
 export { BatchAnalyze } from './backend/pipeline/batch_analyze.js';

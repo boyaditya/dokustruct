@@ -51,10 +51,24 @@ export async function disposeModelResource(resource, seen = new WeakSet()) {
   if (resource[DISPOSED_MARK]) return;
   try { resource[DISPOSED_MARK] = true; } catch { /* non-extensible objects */ }
 
+  // If the WebGPU device is already lost, every ORT session referencing it
+  // is invalid. Calling release() throws "invalid session id" which is just
+  // noise. Skip release calls; JS GC will clean up the wrappers.
+  let deviceLost = false;
+  try {
+    const mod = await import("../../utils/ort_runtime.js");
+    deviceLost = mod.isGpuDeviceLost?.() === true;
+  } catch { /* ignore */ }
+
   for (const key of DISPOSABLE_KEYS) {
     if (resource[key] && resource[key] !== resource) {
       await disposeModelResource(resource[key], seen);
     }
+  }
+
+  if (deviceLost) {
+    // Skip method calls. Only null out fields so JS heap is released.
+    return;
   }
 
   for (const method of ["release", "dispose", "close"]) {
@@ -62,10 +76,13 @@ export async function disposeModelResource(resource, seen = new WeakSet()) {
       try {
         await resource[method]();
       } catch (err) {
+        const msg = String(err?.message ?? err);
+        // Suppress known invalid-session noise; surface everything else.
+        if (msg.includes("invalid session id")) continue;
         console.warn(formatPipelineError({
           stage: "dispose",
           module: "disposeModelResource",
-          message: `${method}() failed: ${err?.message ?? err}`,
+          message: `${method}() failed: ${msg}`,
           recoverable: true,
         }));
       }

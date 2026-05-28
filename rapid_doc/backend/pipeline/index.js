@@ -1,6 +1,6 @@
 // Copyright (c) RapidAI. All rights reserved.
 
-export { docAnalyze, batchImageAnalyze, ModelSingleton } from "./pipeline_analyze.js";
+export { docAnalyze, batchImageAnalyze, ModelSingleton, engineReset } from "./pipeline_analyze.js";
 export { resultToMiddleJson } from "./model_json_to_middle_json.js";
 export { unionMake } from "./pipeline_middle_json_mkcontent.js";
 export { BatchAnalyze } from "./batch_analyze.js";

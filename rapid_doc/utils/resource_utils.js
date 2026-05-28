@@ -74,6 +74,27 @@ export function releaseImageBitmap(bitmap) {
 }
 
 /**
+ * Dispose every tensor inside an ORT result map (returned by session.run).
+ * Safely handles both Map instances and plain object outputs.
+ * Without this, gpu-buffer-located output tensors keep their backing GPU
+ * buffer pinned in ORT-Web's pool until the wrapper is GC'd, which can be
+ * many seconds after the run completes.
+ *
+ * @param {Map<string, any>|Record<string, any>|null|undefined} outputMap
+ */
+export function disposeOutputMap(outputMap) {
+  if (!outputMap) return;
+  const tensors = outputMap instanceof Map
+    ? outputMap.values()
+    : Object.values(outputMap);
+  for (const tensor of tensors) {
+    if (tensor && typeof tensor.dispose === 'function') {
+      try { tensor.dispose(); } catch { /* already disposed */ }
+    }
+  }
+}
+
+/**
  * RAII-style resource guard for Mat operations.
  * Calls factory() to create Mats, passes them to operation(), and ensures
  * all Mats are deleted in a finally block even if operation throws.

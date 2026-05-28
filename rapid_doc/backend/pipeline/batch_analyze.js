@@ -242,7 +242,15 @@ export class BatchAnalyze {
       const rotateLabel = await imgOrientationClsModel.predict(npImg);
       if (rotateLabel === "90" || rotateLabel === "270") {
         const rotated = getRotateImage(npImg, rotateLabel);
-        if (rotated !== npImg && ownedMats[i]) npImg.delete();
+        if (rotated !== npImg) {
+          // The rotated Mat is always a fresh allocation (never aliased
+          // to the input Mat). We must delete it in the outer finally,
+          // so flag it as owned regardless of whether the original was.
+          // Previous code left ownedMats[i] unchanged when the original
+          // was not owned, leaking the rotated Mat across runs.
+          if (ownedMats[i]) npImg.delete();
+          ownedMats[i] = true;
+        }
         npImages[i] = rotated;
       }
       pdfDictList[i].rotate_label = rotateLabel;

@@ -14,7 +14,19 @@ import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 
 // FIX P10: scale MAX_CONCURRENT_BATCHES based on detected device tier.
 // User-provided recBatchNum config overrides this at the recognizer level.
-const MAX_CONCURRENT_BATCHES = detectProfile().MAX_CONCURRENT_BATCHES;
+//
+// Note: tier is detected from system RAM (deviceMemory API), not VRAM.
+// On WebGPU we conservatively cap concurrency at 2 — running many in-flight
+// session.run promises means many simultaneous GPU buffer allocations,
+// which on mid-tier discrete GPUs (RX 580 8 GB) blows past
+// `maxBufferSize` and surfaces as a lost device. The serialized
+// global GPU mutex (see ort_runtime.js acquireGlobalGpu) only serializes
+// the run *itself*; queueing the next inputs can still allocate.
+const _profile = detectProfile();
+function getMaxConcurrentBatches(useWebGpu) {
+  if (useWebGpu) return Math.min(2, _profile.MAX_CONCURRENT_BATCHES);
+  return _profile.MAX_CONCURRENT_BATCHES;
+}
 
 /**
  * Yield execution to the browser's idle callback mechanism.
@@ -186,10 +198,11 @@ export class TextRecognizer {
   async _runWithConcurrency(tasks, processFn) {
     const inFlight = new Set();
     let isFirstBatch = true;
+    const cap = getMaxConcurrentBatches(this.useWebGpu);
     for (const task of tasks) {
       const p = processFn(task).finally(() => inFlight.delete(p));
       inFlight.add(p);
-      if (inFlight.size >= MAX_CONCURRENT_BATCHES) {
+      if (inFlight.size >= cap) {
         await Promise.race(inFlight);
       }
       // FIX P11: first batch is critical — start immediately without yielding.

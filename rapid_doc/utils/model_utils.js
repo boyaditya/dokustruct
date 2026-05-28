@@ -228,11 +228,36 @@ export function getResListFromLayoutRes(layoutRes, npImg, overlapThreshold = 0.8
 
 /**
  * Clean GPU/device memory.
- * @param {string} [_device='wasm']
+ * - WASM: triggers JS GC if exposed (rare in production browsers).
+ * - WebGPU: flushes pending work and releases the shared device, which is the
+ *   only mechanism that returns ORT-Web's pooled GPU buffers to the driver.
+ *   The next configureOrtRuntime call requests a fresh device + adapter.
+ *
+ * Pass `{ releaseGpu: false }` to flush only without destroying the device
+ * (useful between batches that share the same warm session pool).
+ *
+ * @param {string} [device='wasm']
+ * @param {{ releaseGpu?: boolean }} [opts]
+ * @returns {Promise<void>}
  */
-export function cleanMemory(_device = 'wasm') {
+export async function cleanMemory(device = 'wasm', opts = {}) {
   if (typeof globalThis.gc === 'function') {
     try { globalThis.gc(); } catch { /* ignore */ }
+  }
+
+  // Drain WebGPU work and optionally release the device.
+  // Imported dynamically to avoid a hard dependency cycle with ort_runtime.
+  if (device === 'webgpu' || device === 'gpu') {
+    try {
+      const mod = await import('./ort_runtime.js');
+      if (opts.releaseGpu === false) {
+        await mod.flushGpuQueue?.();
+      } else {
+        await mod.resetGpuRuntime?.();
+      }
+    } catch (err) {
+      console.warn('[cleanMemory] GPU drain failed:', err?.message ?? err);
+    }
   }
 }
 
@@ -240,11 +265,12 @@ export function cleanMemory(_device = 'wasm') {
  * Clean VRAM if below threshold.
  * @param {string} _device
  * @param {number} [_vramThreshold=8]
+ * @returns {Promise<void>}
  */
-export function cleanVram(_device, _vramThreshold = 8) {
+export async function cleanVram(_device, _vramThreshold = 8) {
   const vram = getVramCached();
   if (vram !== null && vram <= _vramThreshold) {
-    cleanMemory(_device);
+    await cleanMemory(_device);
   }
 }
 

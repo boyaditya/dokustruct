@@ -36,6 +36,11 @@ function csvRow(values) {
   return values.map(csvCell).join(',');
 }
 
+/** Round to 4 decimal places */
+function round4(v) {
+  return Math.round(v * 10000) / 10000;
+}
+
 /** Build the standard benchmark header row */
 const BENCHMARK_HEADERS = [
   'file_name',
@@ -54,9 +59,6 @@ const BENCHMARK_HEADERS = [
   'browser',
   'user_agent',
 ];
-
-/** Research-run CSV headers (includes run index) */
-const RESEARCH_HEADERS = ['run', ...BENCHMARK_HEADERS];
 
 // ---------------------------------------------------------------------------
 // ExportUtils class
@@ -80,72 +82,105 @@ export class ExportUtils {
     this._download(csv, fname, 'text/csv;charset=utf-8;');
   }
 
-  // ── Research batch CSV ────────────────────────────────────────────────────
+  // ── Benchmark JSON (unified format for evaluate.py) ─────────────────────
 
   /**
-   * Export all N research runs + aggregate statistics.
+   * Export a unified timing JSON for one run, compatible with the Python
+   * batch runner output. Both JS and Python produce the same schema so
+   * benchmark/evaluate.py can read them without conversion.
+   *
+   * Schema (all time values in seconds AND milliseconds for compatibility):
+   *   filename, page_count,
+   *   total_s, model_init_s, layout_s, ocr_s, formula_s, table_s,
+   *   postprocess_s, total_inference_s,
+   *   total_ms, layout_ms, ocr_ms, formula_ms, table_ms, postprocessing_ms
+   *
    * @param {import('../state/appState.js').AppState} state
    * @param {string} [filenameOverride]
    */
-  exportResearchCsv(state, filenameOverride) {
-    const history  = state.get('researchRunHistory');
-    if (!history || history.length === 0) {
-      console.warn('[exportUtils] No research run history to export.');
+  exportBenchmarkJson(state, filenameOverride) {
+    const file    = state.currentFile;
+    const results = state.get('results');
+    const t       = state.get('timings');
+    const meta    = this._staticMeta(state);
+
+    const totalMs       = t.total ?? 0;
+    const layoutMs      = t.layout ?? 0;
+    const modelInitMs   = t.model_init ?? 0;
+    const ocrMs         = t.ocr ?? 0;
+    const formulaMs     = t.formula ?? 0;
+    const tableMs       = t.table ?? 0;
+    const postMs        = t.postprocessing ?? 0;
+    const inferenceMs   = layoutMs + ocrMs + formulaMs + tableMs;
+
+    const unified = {
+      filename:            file?.name ?? results?.fileName ?? '',
+      page_count:          results?.page_count ?? meta.page_count ?? 0,
+      // Seconds (primary — matches Python output)
+      total_s:             round4(totalMs / 1000),
+      model_init_s:        round4(modelInitMs / 1000),
+      layout_s:            round4(layoutMs / 1000),
+      ocr_s:               round4(ocrMs / 1000),
+      formula_s:           round4(formulaMs / 1000),
+      table_s:             round4(tableMs / 1000),
+      postprocess_s:       round4(postMs / 1000),
+      total_inference_s:   round4(inferenceMs / 1000),
+      // Milliseconds (secondary — for compatibility with existing CSV exports)
+      total_ms:            Math.round(totalMs),
+      model_init_ms:       Math.round(modelInitMs),
+      layout_ms:           Math.round(layoutMs),
+      ocr_ms:              Math.round(ocrMs),
+      formula_ms:          Math.round(formulaMs),
+      table_ms:            Math.round(tableMs),
+      postprocessing_ms:   Math.round(postMs),
+      // Metadata
+      execution_provider:  meta.execution_provider,
+      formula_enable:      meta.formula_enable,
+      table_enable:        meta.table_enable,
+      parse_method:        meta.parse_method,
+      browser:             meta.browser,
+      user_agent:          meta.user_agent,
+    };
+
+    const stem  = (file?.name || 'output').replace(/\.[^.]+$/, '');
+    const fname = filenameOverride ?? `${stem}_timing.json`;
+    this._download(
+      JSON.stringify(unified, null, 2),
+      fname,
+      'application/json',
+    );
+  }
+
+  /**
+   * Export content_list JSON for one run (for benchmark/evaluate.py).
+   * @param {import('../state/appState.js').AppState} state
+   * @param {string} [filenameOverride]
+   */
+  exportContentListJson(state, filenameOverride) {
+    const results     = state.get('results');
+    const contentList = resultArtifact(results, 'content_list', 'contentList', 'content_list_json');
+    if (!contentList) {
+      console.warn('[exportUtils] No content_list available to export.');
       return;
     }
+    const file  = state.currentFile;
+    const stem  = (file?.name || 'output').replace(/\.[^.]+$/, '');
+    const fname = filenameOverride ?? `${stem}_content_list.json`;
+    this._download(
+      JSON.stringify(contentList, null, 2),
+      fname,
+      'application/json',
+    );
+  }
 
-    const file = state.currentFile;
-    const meta = this._staticMeta(state);
-
-    const runRows = history.map((t, i) => {
-      const total = t.total
-        || (t.preprocessing + t.layoutAnalysis + t.ocr + t.postprocessing);
-      return csvRow([
-        i + 1,
-        meta.file_name,
-        meta.file_size_bytes,
-        meta.page_count,
-        meta.parse_method,
-        meta.formula_enable,
-        meta.table_enable,
-        Math.round(total),
-        Math.round(t.preprocessing  ?? 0),
-        Math.round(t.layoutAnalysis ?? 0),
-        Math.round(t.ocr            ?? 0),
-        Math.round(t.postprocessing ?? 0),
-        meta.execution_provider,
-        meta.peak_memory_mb,
-        meta.browser,
-        meta.user_agent,
-      ]);
-    });
-
-    const lines = [RESEARCH_HEADERS.join(','), ...runRows, ''];
-
-    // ── Aggregate block ────────────────────────────────────────────────────
-    const agg = state.researchAggregates;
-    if (agg) {
-      lines.push('# Aggregate Statistics');
-      lines.push(csvRow(['metric', 'value', 'unit']));
-      lines.push(csvRow(['N',              agg.n,      'runs']));
-      lines.push(csvRow(['mean_total',     agg.mean,   'ms']));
-      lines.push(csvRow(['sd_total',       agg.sd,     'ms']));
-      lines.push(csvRow(['median_total',   agg.median, 'ms']));
-      lines.push(csvRow(['iqr_total',      agg.iqr,    'ms']));
-      lines.push(csvRow(['cv_total',       agg.cv,     '%']));
-      lines.push(csvRow(['min_total',      agg.min,    'ms']));
-      lines.push(csvRow(['max_total',      agg.max,    'ms']));
-
-      // Per-stage means
-      const stageMeans = this._stageMeans(history);
-      for (const [stage, mean] of Object.entries(stageMeans)) {
-        lines.push(csvRow([`mean_${stage}`, Math.round(mean), 'ms']));
-      }
-    }
-
-    const stem  = file ? file.name.replace(/\.[^.]+$/, '') : 'research';
-    const fname = filenameOverride ?? `${stem}_research_runs.csv`;
-    this._download(lines.join('\n'), fname, 'text/csv;charset=utf-8;');
+  /**
+   * Export both timing JSON and content_list JSON in one call.
+   * Convenience wrapper for the benchmark workflow.
+   * @param {import('../state/appState.js').AppState} state
+   */
+  exportBenchmarkPair(state) {
+    this.exportBenchmarkJson(state);
+    this.exportContentListJson(state);
   }
 
   // ── ZIP bundle ────────────────────────────────────────────────────────────
@@ -201,27 +236,6 @@ export class ExportUtils {
     const csv = [BENCHMARK_HEADERS.join(','), csvRow(csvRow_)].join('\n');
     zip.file(`${stem}_benchmark.csv`, csv);
 
-    // Research CSV if applicable
-    const history = state.get('researchRunHistory');
-    if (history && history.length > 0) {
-      // Re-use exportResearchCsv but capture string instead of downloading
-      // Build inline
-      const meta = this._staticMeta(state);
-      const runRows = history.map((t, i) => {
-        const total = t.total || (t.preprocessing + t.layoutAnalysis + t.ocr + t.postprocessing);
-        return csvRow([
-          i + 1, meta.file_name, meta.file_size_bytes, meta.page_count,
-          meta.parse_method, meta.formula_enable, meta.table_enable,
-          Math.round(total), Math.round(t.preprocessing ?? 0),
-          Math.round(t.layoutAnalysis ?? 0), Math.round(t.ocr ?? 0),
-          Math.round(t.postprocessing ?? 0),
-          meta.execution_provider, meta.peak_memory_mb, meta.browser, meta.user_agent,
-        ]);
-      });
-      zip.file(`${stem}_research_runs.csv`,
-        [RESEARCH_HEADERS.join(','), ...runRows].join('\n'));
-    }
-
     // Generate and download
     const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
     const url  = URL.createObjectURL(blob);
@@ -275,7 +289,7 @@ export class ExportUtils {
   _buildBenchmarkRow(state) {
     const meta    = this._staticMeta(state);
     const t       = state.get('timings');
-    const total   = t.total || (t.preprocessing + t.layoutAnalysis + t.ocr + t.postprocessing);
+    const total   = t.total || (t.preprocessing + t.layout + t.ocr + t.postprocessing);
     const results = state.get('results');
     const pages   = results?.page_count ?? state.get('progress').total ?? 1;
 
@@ -288,7 +302,7 @@ export class ExportUtils {
       meta.table_enable,
       Math.round(total),
       Math.round(t.preprocessing  ?? 0),
-      Math.round(t.layoutAnalysis ?? 0),
+      Math.round(t.layout ?? 0),
       Math.round(t.ocr            ?? 0),
       Math.round(t.postprocessing ?? 0),
       meta.execution_provider,
@@ -317,21 +331,6 @@ export class ExportUtils {
       browser:           navigator.appName,
       user_agent:        navigator.userAgent,
     };
-  }
-
-  /**
-   * Calculate per-stage means across a research run history array.
-   * @param {import('../state/appState.js').Timings[]} history
-   * @returns {Object.<string, number>}
-   */
-  _stageMeans(history) {
-    const stages = ['preprocessing', 'layoutAnalysis', 'ocr', 'postprocessing'];
-    const result = {};
-    for (const stage of stages) {
-      const values = history.map(t => t[stage] ?? 0);
-      result[stage] = values.reduce((a, b) => a + b, 0) / values.length;
-    }
-    return result;
   }
 
   /**

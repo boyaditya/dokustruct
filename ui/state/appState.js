@@ -42,11 +42,13 @@
 /**
  * @typedef {object} Timings
  * @property {number} preprocessing
- * @property {number} layoutAnalysis
+ * @property {number} model_init
+ * @property {number} layout
  * @property {number} ocr
  * @property {number} formula
  * @property {number} table
- * @property {number} readingOrder
+ * @property {number} reading_order
+ * @property {number} model_init
  * @property {number} postprocessing
  * @property {number} total
  */
@@ -126,12 +128,6 @@
  * @property {Timings}       timings
  * @property {string|null}   activeExecutionProvider
  * @property {number}        peakMemoryMb
- *
- * — Research mode —
- * @property {boolean}       researchMode
- * @property {number}        researchRepeatCount
- * @property {number}        researchCurrentRun
- * @property {Timings[]}     researchRunHistory
  *
  * — Model management —
  * @property {Object.<string, ModelStatusValue>} modelStatus
@@ -229,22 +225,17 @@ function createInitialState() {
     // ── Benchmarks ─────────────────────────────────────────────────────────
     timings: {
       preprocessing: 0,
-      layoutAnalysis: 0,
+      model_init: 0,
+      layout: 0,
       ocr: 0,
       formula: 0,
       table: 0,
-      readingOrder: 0,
+      reading_order: 0,
       postprocessing: 0,
       total: 0,
     },
     activeExecutionProvider: null,
     peakMemoryMb: 0,
-
-    // ── Research mode ──────────────────────────────────────────────────────
-    researchMode: false,
-    researchRepeatCount: 10,
-    researchCurrentRun: 0,
-    researchRunHistory: [],    // Array<Timings>
 
     // ── Model management ───────────────────────────────────────────────────
     modelStatus: {},           // { [modelId]: 'not_downloaded'|'downloading'|'cached'|'error'|'cancelled' }
@@ -257,11 +248,12 @@ function createInitialState() {
     warmupConfigKey: null,
     startupTimings: {
       preprocessing: 0,
-      layoutAnalysis: 0,
+      model_init: 0,
+      layout: 0,
       ocr: 0,
       formula: 0,
       table: 0,
-      readingOrder: 0,
+      reading_order: 0,
       postprocessing: 0,
       total: 0,
     },
@@ -301,7 +293,6 @@ export class AppState {
 
   constructor() {
     this.#state = createInitialState();
-    this._detectResearchMode();
     this._detectExecutionProvider();
   }
 
@@ -404,7 +395,7 @@ export class AppState {
   /**
    * Reset state to initial values and notify all subscribers.
    * Preserves: modelStatus, modelProgress, modelSizeMb, assetStatus,
-   *            assetProgress, researchMode,
+   *            assetProgress,
    *            activeExecutionProvider (hardware detection — not user config).
    */
   reset() {
@@ -414,7 +405,6 @@ export class AppState {
       modelSizeMb:            { ...this.#state.modelSizeMb },
       assetStatus:            { ...this.#state.assetStatus },
       assetProgress:          this.#state.assetProgress,
-      researchMode:           this.#state.researchMode,
       activeExecutionProvider: this.#state.activeExecutionProvider,
     };
 
@@ -622,40 +612,6 @@ export class AppState {
     return { inline, display };
   }
 
-  /**
-   * Aggregate research run statistics from researchRunHistory.
-   * @returns {{ mean: number, sd: number, median: number, iqr: number, cv: number, min: number, max: number }|null}
-   */
-  get researchAggregates() {
-    const history = this.#state.researchRunHistory;
-    if (!history || history.length === 0) return null;
-
-    const totals = history.map(t => t.total);
-    const n = totals.length;
-    const mean = totals.reduce((a, b) => a + b, 0) / n;
-    const variance = totals.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
-    const sd = Math.sqrt(variance);
-    const sorted = [...totals].sort((a, b) => a - b);
-    const median = n % 2 === 0
-      ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2
-      : sorted[Math.floor(n / 2)];
-    const q1 = sorted[Math.floor(n / 4)];
-    const q3 = sorted[Math.floor(3 * n / 4)];
-    const iqr = q3 - q1;
-    const cv = mean > 0 ? (sd / mean) * 100 : 0;
-
-    return {
-      mean: Math.round(mean),
-      sd: Math.round(sd),
-      median: Math.round(median),
-      iqr: Math.round(iqr),
-      cv: parseFloat(cv.toFixed(1)),
-      min: sorted[0],
-      max: sorted[n - 1],
-      n,
-    };
-  }
-
   // ── Pipeline helpers ──────────────────────────────────────────────────────
 
   /**
@@ -685,7 +641,7 @@ export class AppState {
 
   /**
    * Record timing for a single pipeline stage.
-    * @param {'preprocessing'|'layoutAnalysis'|'ocr'|'formula'|'table'|'readingOrder'|'postprocessing'|'total'} stage
+    * @param {'preprocessing'|'layout'|'ocr'|'formula'|'table'|'reading_order'|'postprocessing'|'total'} stage
    * @param {number} ms
    */
   recordTiming(stage, ms) {
@@ -694,7 +650,7 @@ export class AppState {
 
   /**
    * Record timing for startup/runtime/model preparation.
-   * @param {'preprocessing'|'layoutAnalysis'|'ocr'|'formula'|'table'|'readingOrder'|'postprocessing'|'total'} stage
+   * @param {'preprocessing'|'layout'|'ocr'|'formula'|'table'|'reading_order'|'postprocessing'|'total'} stage
    * @param {number} ms
    */
   recordStartupTiming(stage, ms) {
@@ -820,30 +776,6 @@ export class AppState {
     });
   }
 
-  // ── Research mode helpers ─────────────────────────────────────────────────
-
-  /**
-   * Append a completed run's timings to the research history.
-   * @param {Timings} timings
-   */
-  recordResearchRun(timings) {
-    const history = [...this.#state.researchRunHistory, { ...timings }];
-    this.patch({
-      researchRunHistory: history,
-      researchCurrentRun: this.#state.researchCurrentRun + 1,
-    });
-  }
-
-  /**
-   * Clear the research run history.
-   */
-  clearResearchHistory() {
-    this.patch({
-      researchRunHistory: [],
-      researchCurrentRun: 0,
-    });
-  }
-
   // ── Internal notification ─────────────────────────────────────────────────
 
   /**
@@ -876,18 +808,6 @@ export class AppState {
   }
 
   // ── Internal: auto-detect ─────────────────────────────────────────────────
-
-  /**
-   * Check for ?research=1 URL parameter and activate research mode.
-   */
-  _detectResearchMode() {
-    if (typeof location !== 'undefined') {
-      const params = new URLSearchParams(location.search);
-      if (params.get('research') === '1') {
-        this.#state.researchMode = true;
-      }
-    }
-  }
 
   /**
    * Detect WebGPU or WASM execution provider availability.

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RapidDoc — Benchmark</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      background: #f5f5f5;
+      color: #222;
+      min-height: 100vh;
+    }
+    header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 16px; font-weight: 600; }
+    header span { font-size: 12px; opacity: 0.6; }
+    .container { max-width: 960px; margin: 0 auto; padding: 20px; }
+
+    /* Config panel */
+    .panel {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .panel h2 { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+    .field label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+    .field input, .field select {
+      width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;
+      font-size: 13px; background: #fafafa;
+    }
+    .field input[type=checkbox] { width: auto; }
+    .field-row { display: flex; align-items: center; gap: 8px; }
+
+    /* File list */
+    .file-list { list-style: none; }
+    .file-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 4px; margin-bottom: 4px;
+      background: #fafafa; border: 1px solid #eee;
+    }
+    .file-item .name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-item .pages { font-size: 11px; color: #888; min-width: 50px; text-align: right; }
+    .file-item .status { font-size: 11px; min-width: 80px; text-align: right; }
+    .status-pending  { color: #888; }
+    .status-running  { color: #1976d2; font-weight: 600; }
+    .status-done     { color: #388e3c; font-weight: 600; }
+    .status-error    { color: #d32f2f; font-weight: 600; }
+
+    /* Progress bar */
+    .progress-bar { height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden; margin-top: 4px; }
+    .progress-fill { height: 100%; background: #1976d2; transition: width 0.2s; }
+
+    /* Run table */
+    .run-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .run-table th { background: #f0f0f0; padding: 6px 8px; text-align: left; font-weight: 600; border-bottom: 1px solid #ddd; }
+    .run-table td { padding: 5px 8px; border-bottom: 1px solid #f0f0f0; }
+    .run-table tr:hover td { background: #fafafa; }
+    .run-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* Buttons */
+    .btn {
+      padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer;
+      font-size: 13px; font-weight: 500; transition: opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #1976d2; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #1565c0; }
+    .btn-danger  { background: #d32f2f; color: #fff; }
+    .btn-danger:hover:not(:disabled)  { background: #b71c1c; }
+    .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-secondary:hover:not(:disabled) { background: #d0d0d0; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* Log */
+    .log {
+      background: #1a1a1a; color: #ccc; font-family: monospace; font-size: 11px;
+      padding: 10px; border-radius: 4px; height: 140px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .log .info  { color: #90caf9; }
+    .log .ok    { color: #a5d6a7; }
+    .log .warn  { color: #ffe082; }
+    .log .err   { color: #ef9a9a; }
+
+    /* Drop zone */
+    .drop-zone {
+      border: 2px dashed #ccc; border-radius: 6px; padding: 24px;
+      text-align: center; color: #888; cursor: pointer; transition: border-color 0.15s;
+    }
+    .drop-zone.drag-over { border-color: #1976d2; background: #e3f2fd; }
+    .drop-zone input { display: none; }
+
+    /* Summary stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+    .stat-card { background: #f9f9f9; border: 1px solid #e8e8e8; border-radius: 6px; padding: 10px; }
+    .stat-card .label { font-size: 11px; color: #888; margin-bottom: 4px; }
+    .stat-card .value { font-size: 18px; font-weight: 700; color: #1a1a2e; }
+    .stat-card .unit  { font-size: 11px; color: #aaa; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RapidDoc Benchmark</h1>
+    <span>JS pipeline — multi-file batch evaluation</span>
+  </header>
+
+  <div class="container">
+
+    <!-- Config -->
+    <div class="panel">
+      <h2>Configuration</h2>
+      <div class="config-grid">
+        <div class="field">
+          <label>Execution Provider</label>
+          <select id="cfgEp">
+            <option value="webgpu">WebGPU</option>
+            <option value="wasm">WASM (CPU)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Repeat per file</label>
+          <input type="number" id="cfgRepeat" value="3" min="1" max="20" />
+        </div>
+        <div class="field">
+          <label>Parse method</label>
+          <select id="cfgParse">
+            <option value="auto">auto</option>
+            <option value="ocr">ocr</option>
+            <option value="txt">txt</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Formula recognition</label>
+          <div class="field-row">
+            <input type="checkbox" id="cfgFormula" />
+            <span>Enable</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Table recognition</label>
+          <div class="field-row">
+            <input type="checkbox" id="cfgTable" />
+            <span>Enable</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Warm-up run</label>
+          <div class="field-row">
+            <input type="checkbox" id="cfgWarmup" checked />
+            <span>Run 1 warm-up (excluded from stats)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- File queue -->
+    <div class="panel">
+      <h2>File Queue</h2>
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" multiple />
+        <div>Drop PDF / image files here, or <strong>click to browse</strong></div>
+        <div style="font-size:11px;margin-top:4px;color:#aaa">Multiple files supported</div>
+      </div>
+      <ul class="file-list" id="fileList" style="margin-top:10px"></ul>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-primary" id="btnStart">▶ Start Benchmark</button>
+        <button class="btn btn-danger" id="btnStop" disabled>■ Stop</button>
+        <button class="btn btn-secondary" id="btnClear">Clear Queue</button>
+        <button class="btn btn-secondary" id="btnExport" disabled>⬇ Export Results JSON</button>
+      </div>
+    </div>
+
+    <!-- Overall progress -->
+    <div class="panel" id="progressPanel" style="display:none">
+      <h2>Progress</h2>
+      <div id="progressLabel" style="font-size:12px;color:#555;margin-bottom:6px">Idle</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    </div>
+
+    <!-- Summary stats -->
+    <div class="panel" id="summaryPanel" style="display:none">
+      <h2>Summary (inference time only, warm-up excluded)</h2>
+      <div class="stats-grid" id="statsGrid"></div>
+    </div>
+
+    <!-- Results table -->
+    <div class="panel" id="resultsPanel" style="display:none">
+      <h2>Per-file Results</h2>
+      <div style="overflow-x:auto">
+        <table class="run-table" id="resultsTable">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Pages</th>
+              <th>Run</th>
+              <th class="num">Total (s)</th>
+              <th class="num">Model Init (s)</th>
+              <th class="num">Layout (s)</th>
+              <th class="num">OCR (s)</th>
+              <th class="num">Formula (s)</th>
+              <th class="num">Table (s)</th>
+              <th class="num">Post (s)</th>
+              <th class="num">Inference (s)*</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+        <p style="font-size:11px;color:#888;margin-top:6px">* Inference = Layout + OCR + Formula + Table (model init excluded)</p>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="panel">
+      <h2>Log</h2>
+      <div class="log" id="logEl"></div>
+    </div>
+
+  </div>
+
+  <script type="module" src="/benchmark.js"></script>
+</body>
+</html>

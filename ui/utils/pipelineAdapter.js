@@ -504,37 +504,11 @@ export class PipelineAdapter {
       return;
     }
 
-    const researchMode  = state.get('researchMode');
-    const repeatCount   = researchMode ? state.get('researchRepeatCount') : 1;
+    const abortCtrl = new AbortController();
+    this._abortController = abortCtrl;
+    state.set('abortController', abortCtrl);
 
-    // Clear previous research history when starting a new batch
-    if (researchMode) state.clearResearchHistory();
-
-    for (let run = 0; run < repeatCount; run++) {
-      if (researchMode) {
-        state.patch({ researchCurrentRun: run });
-      }
-
-      const abortCtrl = new AbortController();
-      this._abortController = abortCtrl;
-      state.set('abortController', abortCtrl);
-
-      const timings = await this._runSingle(state, file, abortCtrl.signal);
-
-      if (abortCtrl.signal.aborted) break;
-
-      if (researchMode && timings) {
-        state.recordResearchRun(timings);
-
-        // Auto-export after last run
-        if (run === repeatCount - 1) {
-          try {
-            const exportUtils = await getExportUtils();
-            exportUtils.exportResearchCsv(state);
-          } catch { /* non-critical */ }
-        }
-      }
-    }
+    await this._runSingle(state, file, abortCtrl.signal);
   }
 
   // ── Single-document run ───────────────────────────────────────────────────
@@ -688,10 +662,11 @@ export class PipelineAdapter {
 
       const total = performance.now() - t0;
       state.recordTiming('total', total);
-      state.recordTiming('layoutAnalysis', 0); // no layout in OCR-only mode
+      state.recordTiming('layout', 0); // no layout in OCR-only mode
       state.recordTiming('formula', 0);
       state.recordTiming('table', 0);
-      state.recordTiming('readingOrder', 0);
+      state.recordTiming('reading_order', 0);
+      state.recordTiming('model_init', 0);
       state.updateMemory();
 
       state.finishProcessing(results);
@@ -699,11 +674,12 @@ export class PipelineAdapter {
 
       return {
         preprocessing:  tPre1 - tPre0,
-        layoutAnalysis: 0,
+        layout:         0,
         ocr:            tOcr1 - tOcr0,
         formula:        0,
         table:          0,
-        readingOrder:   0,
+        reading_order:  0,
+        model_init:     0,
         postprocessing: tPost1 - tPost0,
         total,
       };
@@ -924,18 +900,22 @@ export class PipelineAdapter {
       const measuredLayout = tLay1 - tLay0;
       const stageTimings = rawResult?._timings ?? null;
 
-      const layoutMs = Number(stageTimings?.layout ?? measuredLayout);
-      const formulaMs = Number(stageTimings?.formula ?? 0);
-      const tableMs = Number(stageTimings?.table ?? 0);
-      const readingOrderMs = Number(stageTimings?.reading_order ?? 0);
-      const postCoreMs = Number(stageTimings?.postprocessing ?? 0);
-      const ocrMs = Number(stageTimings?.ocr ?? rawResult?._timings?.ocr ?? 0);
+      const layoutMs      = Number(stageTimings?.layout        ?? measuredLayout);
+      const formulaMs     = Number(stageTimings?.formula       ?? 0);
+      const tableMs       = Number(stageTimings?.table         ?? 0);
+      const readingOrderMs= Number(stageTimings?.reading_order ?? 0);
+      const postCoreMs    = Number(stageTimings?.postprocessing ?? 0);
+      const ocrMs         = Number(stageTimings?.ocr           ?? rawResult?._timings?.ocr ?? 0);
+      // model_init: time spent loading/initialising models inside the engine.
+      // Reported separately so it can be excluded from inference totals.
+      const modelInitMs   = Number(stageTimings?.model_init    ?? 0);
       postBreakdown.engine_postprocessing_ms = toFiniteMs(postCoreMs);
 
-      state.recordTiming('layoutAnalysis', layoutMs);
+      state.recordTiming('layout', layoutMs);
       state.recordTiming('formula', formulaMs);
       state.recordTiming('table', tableMs);
-      state.recordTiming('readingOrder', readingOrderMs);
+      state.recordTiming('reading_order', readingOrderMs);
+      state.recordTiming('model_init', modelInitMs);
 
       if (signal.aborted) return null;
 
@@ -974,11 +954,12 @@ export class PipelineAdapter {
 
       return {
         preprocessing:  state.get('timings').preprocessing,
-        layoutAnalysis: layoutMs,
+        layout: layoutMs,
         ocr:            ocrMs,
         formula:        formulaMs,
         table:          tableMs,
-        readingOrder:   readingOrderMs,
+        reading_order:   readingOrderMs,
+        model_init:     modelInitMs,
         postprocessing: postprocessingTotal,
         total,
       };
@@ -1095,11 +1076,11 @@ export class PipelineAdapter {
   async _prepare(state, file, signal, key) {
     const startupTimings = {
       preprocessing: 0,
-      layoutAnalysis: 0,
+      layout: 0,
       ocr: 0,
       formula: 0,
       table: 0,
-      readingOrder: 0,
+      reading_order: 0,
       postprocessing: 0,
       total: 0,
     };
@@ -1130,7 +1111,7 @@ export class PipelineAdapter {
       if (!engine) throw new Error('Document engine could not be loaded.');
       await this._ensureModels(state, signal);
       await this._warmModelSessions(engine, state, file, signal);
-      state.recordStartupTiming('layoutAnalysis', performance.now() - modelStart);
+      state.recordStartupTiming('layout', performance.now() - modelStart);
 
       const total = performance.now() - t0;
       state.recordStartupTiming('total', total);

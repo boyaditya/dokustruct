@@ -100,6 +100,7 @@ export class BatchAnalyze {
       table: 0,
       reading_order: 0,
       postprocessing: 0,
+      model_init: 0,
     };
   }
 
@@ -120,8 +121,10 @@ export class BatchAnalyze {
       table: 0,
       reading_order: 0,
       postprocessing: 0,
+      model_init: 0,  // time spent loading/initialising models (excluded from inference total)
     };
 
+    const tModelInit0 = performance.now();
     this.model = await this.modelManager.getModel({
       lang: this.lang,
       formula_enable: this.formulaEnable,
@@ -132,6 +135,7 @@ export class BatchAnalyze {
       table_config: this.tableConfig,
       orientation_config: this.orientationConfig,
     });
+    stageTimings.model_init = performance.now() - tModelInit0;
 
     this.useCustomOcr = typeof this.model.ocrModel?.batchPredict === "function" &&
                         !("ocr" in this.model.ocrModel);

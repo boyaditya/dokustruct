@@ -518,11 +518,11 @@ function resolveExecutionProviders(params, cfg) {
  *
  * Note: we explicitly do NOT request `preferredOutputLocation: 'gpu-buffer'`
  * for OCR det/rec on WebGPU. Both detector and recognizer call `getData()`
- * on every output and immediately convert to CPU `Float32Array`, so the GPU
- * residency just adds buffer-pool pressure without speedup. With gpu-buffer
- * outputs, on RX 580 (8 GB shared with desktop compositor) the rec batch
- * pool grew across runs and tripped a `createBuffer ... too large for the
- * implementation` device-lost — see ort_runtime.js / fix notes.
+ * on every output and immediately convert to CPU `Float32Array`, so keeping
+ * outputs on the GPU just adds buffer-pool pressure without speedup. With
+ * gpu-buffer outputs the rec batch pool grew across runs and tripped a
+ * `createBuffer ... too large for the implementation` device-lost on
+ * mid-tier hardware — see ort_runtime.js for adapter limit handling.
  *
  * If a future profiling pass shows download cost dominates, this can be
  * re-enabled with explicit `tensor.toCpuBuffer()` + immediate `dispose()`.

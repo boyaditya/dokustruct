@@ -15,13 +15,13 @@ import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 // FIX P10: scale MAX_CONCURRENT_BATCHES based on detected device tier.
 // User-provided recBatchNum config overrides this at the recognizer level.
 //
-// Note: tier is detected from system RAM (deviceMemory API), not VRAM.
-// On WebGPU we conservatively cap concurrency at 2 — running many in-flight
-// session.run promises means many simultaneous GPU buffer allocations,
-// which on mid-tier discrete GPUs (RX 580 8 GB) blows past
-// `maxBufferSize` and surfaces as a lost device. The serialized
-// global GPU mutex (see ort_runtime.js acquireGlobalGpu) only serializes
-// the run *itself*; queueing the next inputs can still allocate.
+// Note: the device tier is derived from system RAM (deviceMemory API), not
+// VRAM. On WebGPU we conservatively cap concurrency at 2 — running many
+// in-flight session.run promises means many simultaneous GPU buffer
+// allocations, which on lower-end discrete GPUs can blow past the device's
+// `maxBufferSize` and surface as a lost-device. The serialized global GPU
+// mutex (see ort_runtime.js acquireGlobalGpu) only serializes the run
+// itself; queueing the next inputs can still allocate.
 const _profile = detectProfile();
 function getMaxConcurrentBatches(useWebGpu) {
   if (useWebGpu) return Math.min(2, _profile.MAX_CONCURRENT_BATCHES);

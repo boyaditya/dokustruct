@@ -5,6 +5,26 @@ let configured = false;
 let gpuDevice = null;
 let gpuDeviceLostListenerAttached = false;
 /**
+ * Diagnostic metadata captured when the shared WebGPU device is initialised.
+ * Consumers can use this to size batches adaptively based on the adapter's
+ * actual reported limits rather than guessing from system RAM.
+ *
+ * Shape:
+ *   {
+ *     label:           string  // "vendor / arch / description" or "unknown"
+ *     looksIntegrated: boolean // heuristic match against integrated GPU names
+ *     limits: {                // promoted device limits (when supported)
+ *       maxBufferSize?:                 number
+ *       maxStorageBufferBindingSize?:   number
+ *       maxComputeWorkgroupStorageSize?:number
+ *       maxComputeInvocationsPerWorkgroup?:number
+ *     }
+ *   }
+ *
+ * @type {{label:string,looksIntegrated:boolean,limits:object}|null}
+ */
+let adapterMetadata = null;
+/**
  * Set when the WebGPU device has been lost (driver-killed or destroyed).
  * Code that releases sessions/tensors must check this and SKIP `release()`
  * because session IDs are invalid once the device is gone — calling release
@@ -46,11 +66,13 @@ export async function configureOrtRuntime(opts = {}) {
   if (opts.useWebGpu && navigator.gpu) {
     try {
       if (!gpuDevice) {
-        // Request high-performance adapter explicitly so the browser does not
-        // pick the integrated/low-power GPU when a discrete GPU is available.
-        // Without this, the same RX 580 host can fall through to the iGPU,
-        // which has a tiny VRAM budget and trips
-        // "createBuffer ... too large for the implementation" on small models.
+        // Request a high-performance adapter explicitly. On systems with
+        // both an integrated and a discrete GPU, the browser may otherwise
+        // bind to the lower-power adapter, which has a much smaller VRAM
+        // budget and tighter buffer-size limits. Asking for high-performance
+        // does NOT guarantee the discrete GPU is selected — that ultimately
+        // depends on the OS-level GPU preference for the browser process —
+        // but it is the strongest hint the WebGPU API supports.
         const adapter = await navigator.gpu.requestAdapter({
           powerPreference: 'high-performance',
         });
@@ -71,27 +93,28 @@ export async function configureOrtRuntime(opts = {}) {
           const adapterLabel = [adapterDesc, adapterVendor, adapterArch]
             .filter(Boolean).join(' / ') || 'unknown';
 
-          // Heuristic: warn if the chosen adapter looks integrated even
-          // though we asked for high-performance. On Intel iGPU + AMD/Nvidia
-          // dGPU systems, Chrome can still bind to the iGPU when the user
-          // hasn't enabled the "High performance" GPU preference at the OS
-          // level. The user-facing fix is in Windows: Settings → Display →
-          // Graphics → choose Chrome → set to High performance.
+          // Heuristic: warn when the bound adapter looks like an integrated
+          // GPU. If a discrete GPU is also present on the system, the user
+          // may be able to switch to it via the OS GPU preference panel.
+          // This is informational only; the pipeline still runs on whatever
+          // adapter the browser provides.
           const looksIntegrated = /intel|hd graphics|uhd graphics|iris/i.test(adapterLabel);
           if (looksIntegrated) {
             console.warn(
-              '[ORT] WebGPU bound to what appears to be an integrated GPU ' +
-              `("${adapterLabel}"). PaddleOCR rec on iGPU + RX 580 systems ` +
-              'can OOM. Open Windows Settings → System → Display → Graphics → ' +
-              'add Chrome → choose "High performance" to force the discrete GPU. ' +
-              'Then restart the browser. WASM fallback is still available.',
+              `[ORT] WebGPU bound to what appears to be an integrated GPU ` +
+              `("${adapterLabel}"). If a discrete GPU is available, set the ` +
+              `browser's GPU preference to "High performance" at the OS level ` +
+              `(e.g. Windows Settings → Display → Graphics) and restart the ` +
+              `browser. The WASM fallback is always available as an alternative.`,
             );
           }
 
-          // Request the largest buffer + storage limits the adapter supports.
-          // ORT-Web's WebGPU JSEP allocates one big buffer per kernel; the
-          // default limits are conservative and trip on PaddleOCR rec
-          // (rec batch tensor approaches the per-buffer cap on RX 580 8 GB).
+          // Promote the adapter's reported limits into the requested device
+          // limits. ORT-Web's WebGPU backend allocates large kernel-internal
+          // buffers per session; the default device limits are conservative
+          // and reject buffer requests that the underlying adapter actually
+          // supports. Promoting `maxBufferSize` and the storage-binding cap
+          // is what unlocks PaddleOCR rec on mid-tier GPUs.
           const limits = adapter.limits ?? {};
           const requiredLimits = {};
           for (const key of [
@@ -109,6 +132,11 @@ export async function configureOrtRuntime(opts = {}) {
           gpuDevice = await adapter.requestDevice({ requiredLimits });
           runtime.env.webgpu.device = gpuDevice;
           deviceLost = false;
+          adapterMetadata = {
+            label: adapterLabel,
+            looksIntegrated,
+            limits: { ...requiredLimits },
+          };
           attachDeviceLostListener(gpuDevice);
           console.info(
             `[ORT] WebGPU device initialized — adapter: ${adapterLabel}, ` +
@@ -141,6 +169,19 @@ export function isOrtRuntimeConfigured() {
  */
 export function getGpuDevice() {
   return gpuDevice;
+}
+
+/**
+ * Returns adapter metadata captured during the most recent device init,
+ * or null when WebGPU is unavailable / not yet initialised.
+ *
+ * Useful for adaptive batch-size selection: callers can read
+ * `getAdapterMetadata()?.limits.maxStorageBufferBindingSize` to scale the
+ * per-batch tensor size to the actual hardware capability.
+ * @returns {{label:string,looksIntegrated:boolean,limits:object}|null}
+ */
+export function getAdapterMetadata() {
+  return adapterMetadata;
 }
 
 /**
@@ -194,6 +235,7 @@ export async function releaseGpuDevice() {
   gpuDevice = null;
   gpuDeviceLostListenerAttached = false;
   configured = false;
+  adapterMetadata = null;
   // Mark device as lost so any pending dispose() calls skip release().
   deviceLost = true;
 
@@ -245,6 +287,7 @@ function attachDeviceLostListener(device) {
       gpuDevice = null;
       gpuDeviceLostListenerAttached = false;
       configured = false;
+      adapterMetadata = null;
       // Mark device as lost so dispose paths skip session.release() (calling
       // release on a dead device throws "cannot release session, invalid
       // session id" which masks the real WebGPU failure).

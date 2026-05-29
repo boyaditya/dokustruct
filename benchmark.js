@@ -10,12 +10,13 @@
  * that can be fed directly into benchmark/evaluate.py.
  */
 
-import { configureOrtRuntime } from './rapid_doc/utils/ort_runtime.js';
+import { configureOrtRuntime, getAdapterMetadata } from './rapid_doc/utils/ort_runtime.js';
 import { docAnalyze } from './rapid_doc/backend/pipeline/pipeline_analyze.js';
 import { resultToMiddleJson } from './rapid_doc/backend/pipeline/model_json_to_middle_json.js';
 import { unionMake } from './rapid_doc/backend/pipeline/pipeline_middle_json_mkcontent.js';
 import { MemoryDataWriter } from './rapid_doc/data/data_reader_writer/index.js';
 import { MakeMode } from './rapid_doc/utils/enum_class.js';
+import { buildXlsxBlob } from './ui/utils/xlsxWriter.js';
 
 const PDF_PAGES_BATCH = 64; // default batch size
 
@@ -114,6 +115,9 @@ const fileEls = new Map();
 let allResults = [];
 let abortCtrl = null;
 let running = false;
+/** Reproducibility metadata + run config captured at the start of a benchmark. */
+let lastEnvironment = null;
+let lastRunConfig = null;
 
 // ---------------------------------------------------------------------------
 // Logging
@@ -247,6 +251,97 @@ function buildUnifiedTiming(filename, pageCount, totalMs, stageTimings, postMs) 
 function round4(v) { return Math.round(v * 10000) / 10000; }
 
 // ---------------------------------------------------------------------------
+// Reproducibility metadata + run-config provenance
+// ---------------------------------------------------------------------------
+
+async function collectEnvironment(ep) {
+  const env = {
+    timestamp: new Date().toISOString(),
+    user_agent: navigator.userAgent,
+    platform: navigator.platform || null,
+    hardware_concurrency: navigator.hardwareConcurrency || null,
+    device_memory_gb: navigator.deviceMemory || null,
+    cross_origin_isolated: typeof crossOriginIsolated !== 'undefined' ? crossOriginIsolated : null,
+    shared_array_buffer: typeof SharedArrayBuffer !== 'undefined',
+    webgpu_available: !!(navigator.gpu),
+    execution_provider: ep,
+    wasm_threads: null,
+    ort_version: null,
+    gpu_adapter: null,
+    gpu_limits: null,
+  };
+
+  // ORT version + thread count (best-effort; ort is a global after config)
+  try {
+    const ort = globalThis.ort;
+    if (ort?.env) {
+      env.wasm_threads = ort.env.wasm?.numThreads ?? null;
+      env.ort_version = ort.version ?? ort.env.versions?.common ?? null;
+    }
+  } catch { /* ignore */ }
+
+  // GPU adapter info captured during ORT WebGPU device init
+  try {
+    const meta = getAdapterMetadata?.();
+    if (meta) {
+      env.gpu_adapter = meta.label ?? null;
+      env.gpu_limits = meta.limits ?? null;
+    }
+    // Direct query as fallback (some browsers expose info here)
+    if (!env.gpu_adapter && navigator.gpu?.requestAdapter) {
+      const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+      if (adapter) {
+        try {
+          const info = typeof adapter.requestAdapterInfo === 'function'
+            ? await adapter.requestAdapterInfo() : (adapter.info ?? {});
+          env.gpu_adapter = [info?.description, info?.vendor, info?.architecture]
+            .filter(Boolean).join(' / ') || null;
+        } catch { /* ignore */ }
+      }
+    }
+  } catch { /* ignore */ }
+
+  return env;
+}
+
+function buildRunConfig(config, ep) {
+  // Real EPs per model, mirroring the Python real_eps shape for parity checks.
+  const gpu = ep === 'wasm' ? 'wasm' : 'webgpu';
+  return {
+    parse_method: config.parse_method,
+    formula_enable: config.formula_enable,
+    table_enable: config.table_enable,
+    repeat: config.repeat,
+    warmup_excluded: config.warmup,
+    execution_provider: ep,
+    real_eps: {
+      layout: gpu,
+      ocr: gpu,
+      formula: 'wasm',  // pinned to WASM for parity with Python CPU
+      table: 'wasm',
+    },
+  };
+}
+
+// Cross-run content stability check (verifies the "all runs identical" assumption)
+function contentStability(runsContent) {
+  if (!runsContent || !runsContent.length) {
+    return { n_runs_with_content: 0, identical: true, distinct_outputs: 0 };
+  }
+  const typeSeq = (cl) => (cl || [])
+    .filter((it) => it?.type !== 'discarded')
+    .map((it) => it?.type ?? '?').join('|');
+  const seqs = new Set(runsContent.map(typeSeq));
+  const serialized = new Set(runsContent.map((cl) => JSON.stringify(cl)));
+  return {
+    n_runs_with_content: runsContent.length,
+    identical: serialized.size === 1,
+    distinct_type_sequences: seqs.size,
+    distinct_outputs: serialized.size,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Single-file single-run pipeline
 // ---------------------------------------------------------------------------
 
@@ -348,6 +443,18 @@ async function runBenchmark() {
     el.btnStop.disabled = true;
     el.btnClear.disabled = false;
     return;
+  }
+
+  // Capture reproducibility metadata now that ORT/WebGPU is initialised.
+  lastRunConfig = buildRunConfig(config, config.execution_provider);
+  try {
+    lastEnvironment = await collectEnvironment(config.execution_provider);
+    log(`Environment: GPU=${lastEnvironment.gpu_adapter ?? 'n/a'}, ` +
+        `COI=${lastEnvironment.cross_origin_isolated}, ` +
+        `threads=${lastEnvironment.wasm_threads ?? 'n/a'}, ` +
+        `ORT=${lastEnvironment.ort_version ?? 'n/a'}`, 'info');
+  } catch (e) {
+    lastEnvironment = { error: String(e?.message ?? e) };
   }
 
   for (const file of queue) {
@@ -500,21 +607,23 @@ async function exportResults() {
   // Build per-file aggregated timing JSONs (mean over runs)
   const byFile = {};
   for (const r of allResults) {
-    if (!byFile[r.filename]) byFile[r.filename] = { runs: [], content_list: r.content_list };
+    if (!byFile[r.filename]) byFile[r.filename] = { runs: [], content_list: r.content_list, run_contents: [] };
     byFile[r.filename].runs.push(r.timing);
+    byFile[r.filename].run_contents.push(r.content_list);
+    byFile[r.filename].content_list = r.content_list; // last run wins for export
   }
 
   const exportData = {
     metadata: {
-      timestamp: new Date().toISOString(),
+      ...(lastEnvironment || {}),
       execution_provider: el.cfgEp.value,
       formula_enable: el.cfgFormula.checked,
       table_enable: el.cfgTable.checked,
       parse_method: el.cfgParse.value,
       repeat: parseInt(el.cfgRepeat.value, 10),
       warmup_excluded: el.cfgWarmup.checked,
-      user_agent: navigator.userAgent,
     },
+    run_config: lastRunConfig || buildRunConfig(getConfig(), el.cfgEp.value),
     files: {},
   };
 
@@ -527,7 +636,7 @@ async function exportResults() {
       filename,
       page_count: runs[0]?.page_count ?? 0,
       total_s:          round4(mean(runs.map(r => r.total_s))),
-      model_init_s:     0,
+      model_init_s:     round4(mean(runs.map(r => r.model_init_s))),
       layout_s:         round4(mean(runs.map(r => r.layout_s))),
       ocr_s:            round4(mean(runs.map(r => r.ocr_s))),
       formula_s:        round4(mean(runs.map(r => r.formula_s))),
@@ -535,7 +644,7 @@ async function exportResults() {
       postprocess_s:    round4(mean(runs.map(r => r.postprocess_s))),
       total_inference_s: round4(mean(runs.map(r => r.total_inference_s))),
       total_ms:         Math.round(mean(runs.map(r => r.total_ms))),
-      model_init_ms:    0,
+      model_init_ms:    Math.round(mean(runs.map(r => r.model_init_ms))),
       layout_ms:        Math.round(mean(runs.map(r => r.layout_ms))),
       ocr_ms:           Math.round(mean(runs.map(r => r.ocr_ms))),
       formula_ms:       Math.round(mean(runs.map(r => r.formula_ms))),
@@ -556,7 +665,16 @@ async function exportResults() {
         min_inference_s:  round4(Math.min(...runs.map(r => r.total_inference_s))),
         max_inference_s:  round4(Math.max(...runs.map(r => r.total_inference_s))),
       },
+      // Reproducibility + parity provenance (consumed by evaluate.py)
+      run_config: exportData.run_config,
+      metadata: exportData.metadata,
+      content_stability: contentStability(data.run_contents),
     };
+
+    if (!meanTiming.content_stability.identical) {
+      log(`  ⚠ ${stem}: content differs across runs ` +
+          `(distinct_outputs=${meanTiming.content_stability.distinct_outputs})`, 'warn');
+    }
 
     exportData.files[stem] = {
       timing: meanTiming,
@@ -564,38 +682,109 @@ async function exportResults() {
     };
   }
 
-  // Download as JSON
-  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = Object.assign(document.createElement('a'), {
-    href: url,
-    download: `benchmark_js_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`,
-  });
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  const tsStamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
 
-  log('Results exported as JSON. Place individual <stem>_timing.json and <stem>_content_list.json in benchmark/js_results/ for evaluate.py.', 'ok');
+  // 1) Combined JSON (evaluate.py can explode this directly)
+  downloadBlob(
+    new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' }),
+    `benchmark_js_${tsStamp}.json`);
 
-  // Also trigger individual file downloads for evaluate.py compatibility
+  log('Combined JSON exported. evaluate.py can read it via --js-dir (auto-explodes benchmark_js_*.json).', 'ok');
+
+  // 2) Individual <stem>_timing.json + <stem>_content_list.json for evaluate.py
   for (const [filename, data] of Object.entries(byFile)) {
     const stem = filename.replace(/\.[^.]+$/, '');
-    const runs = data.runs;
     const meanTiming = exportData.files[stem].timing;
-
-    // _timing.json (mean over runs)
-    const timingBlob = new Blob([JSON.stringify(meanTiming, null, 2)], { type: 'application/json' });
-    const timingUrl = URL.createObjectURL(timingBlob);
-    const ta = Object.assign(document.createElement('a'), { href: timingUrl, download: `${stem}_timing.json` });
-    ta.click();
-    setTimeout(() => URL.revokeObjectURL(timingUrl), 10_000);
-
-    // _content_list.json
-    const clBlob = new Blob([JSON.stringify(data.content_list, null, 2)], { type: 'application/json' });
-    const clUrl = URL.createObjectURL(clBlob);
-    const ca = Object.assign(document.createElement('a'), { href: clUrl, download: `${stem}_content_list.json` });
-    ca.click();
-    setTimeout(() => URL.revokeObjectURL(clUrl), 10_000);
+    downloadBlob(new Blob([JSON.stringify(meanTiming, null, 2)], { type: 'application/json' }),
+      `${stem}_timing.json`);
+    downloadBlob(new Blob([JSON.stringify(data.content_list, null, 2)], { type: 'application/json' }),
+      `${stem}_content_list.json`);
   }
+
+  // 3) Standalone Excel of the JS-side data (ready immediately, no Python needed)
+  try {
+    const xlsxBlob = await buildJsExcel(exportData);
+    downloadBlob(xlsxBlob, `benchmark_js_${tsStamp}.xlsx`);
+    log('JS benchmark Excel exported (benchmark_js_*.xlsx). For the full JS↔Python comparison, run benchmark/evaluate.py.', 'ok');
+  } catch (e) {
+    log(`Excel export failed: ${e?.message ?? e}`, 'err');
+  }
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+// ---------------------------------------------------------------------------
+// Standalone JS-side Excel (per-document + per-run + environment)
+// ---------------------------------------------------------------------------
+
+async function buildJsExcel(exportData) {
+  const HDR = '4472C4';
+  const GRP_JS = '70AD47';
+  const h = (v) => ({ v, bold: true, fill: HDR });
+
+  // Sheet 1: Per Dokumen (mean timings)
+  const perDoc = [];
+  perDoc.push([
+    h('Dokumen'), h('Halaman'), h('Inferensi (s)'), h('Inf/Halaman (s)'),
+    h('Layout (s)'), h('OCR (s)'), h('Formula (s)'), h('Tabel (s)'),
+    h('Postprocess (s)'), h('Model Init (s)'), h('Cold Start (s)'),
+    h('N Run'), h('Std'), h('CV'), h('Median'), h('Min'), h('Max'),
+    h('Konten Stabil'),
+  ]);
+  for (const [stem, payload] of Object.entries(exportData.files)) {
+    const t = payload.timing;
+    const pages = t.page_count || 0;
+    const infer = t.total_inference_s || 0;
+    const std = t.stats?.std_inference_s || 0;
+    const cold = round4((t.model_init_s || 0) + infer);
+    perDoc.push([
+      stem, pages, infer, pages ? round4(infer / pages) : 0,
+      t.layout_s, t.ocr_s, t.formula_s, t.table_s, t.postprocess_s,
+      t.model_init_s, cold,
+      t.stats?.n || 1, std, infer > 0 ? round4(std / infer) : 0,
+      t.stats?.median_inference_s, t.stats?.min_inference_s, t.stats?.max_inference_s,
+      t.content_stability?.identical ? 'ya' : 'TIDAK',
+    ]);
+  }
+
+  // Sheet 2: Per Run (variance analysis)
+  const perRun = [];
+  perRun.push([h('Dokumen'), h('Run'), h('Total (s)'), h('Inferensi (s)'),
+    h('Layout (s)'), h('OCR (s)'), h('Formula (s)'), h('Tabel (s)'),
+    h('Postprocess (s)'), h('Model Init (s)')]);
+  for (const [stem, payload] of Object.entries(exportData.files)) {
+    for (const r of payload.timing.runs || []) {
+      perRun.push([stem, r.run, r.total_s, r.total_inference_s,
+        r.layout_s, r.ocr_s, r.formula_s, r.table_s, r.postprocess_s, r.model_init_s]);
+    }
+  }
+
+  // Sheet 3: Environment + run config (reproducibility)
+  const envRows = [[h('Kunci'), h('Nilai')]];
+  const flat = { ...exportData.metadata, ...flattenRunConfig(exportData.run_config) };
+  for (const [k, v] of Object.entries(flat)) {
+    envRows.push([k, typeof v === 'object' && v !== null ? JSON.stringify(v) : v]);
+  }
+
+  return buildXlsxBlob([
+    { name: 'Per Dokumen', rows: perDoc },
+    { name: 'Per Run', rows: perRun },
+    { name: 'Environment', rows: envRows },
+  ]);
+}
+
+function flattenRunConfig(rc) {
+  if (!rc) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(rc)) {
+    out[`run_config.${k}`] = typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

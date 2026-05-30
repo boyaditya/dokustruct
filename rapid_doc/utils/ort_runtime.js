@@ -1,5 +1,11 @@
 import * as ort from 'onnxruntime-web';
-import { getAssetRuntimeUrl } from './download_file.js';
+// Resolve the ORT WASM loader + binary through Vite's `?url` mechanism (same
+// pattern as pdfjs_loader.js). This routes the assets through Vite's transform
+// pipeline so the dev server does not block them. Importing the `/public/ort/*`
+// copies as source strings triggers Vite's "should not be imported from source
+// code" guard in dev. The `/public` files remain a build-time/debug fallback.
+import ortJsepMjsUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url';
+import ortJsepWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
 
 let configured = false;
 let gpuDevice = null;
@@ -45,13 +51,12 @@ export async function configureOrtRuntime(opts = {}) {
 
   // WASM Config
   if (runtime.env.wasm) {
-    const [mjsUrl, wasmUrl] = await Promise.all([
-      getAssetRuntimeUrl('runtime_ort_jsep_mjs'),
-      getAssetRuntimeUrl('runtime_ort_jsep_wasm'),
-    ]);
+    // Primary source: Vite-resolved `?url` paths (dev-server safe). An optional
+    // global override is honored for debugging against the /public copies.
+    const override = (typeof window !== 'undefined' && window.__RAPIDDOC_ORT_WASM_PATHS__) || null;
     runtime.env.wasm.wasmPaths = {
-      mjs: mjsUrl,
-      wasm: wasmUrl,
+      mjs: override?.mjs ?? ortJsepMjsUrl,
+      wasm: override?.wasm ?? ortJsepWasmUrl,
     };
 
     const fallbackThreads = typeof SharedArrayBuffer === 'undefined' ? 1 : 2;

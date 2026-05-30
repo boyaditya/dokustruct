@@ -278,9 +278,11 @@ export async function docAnalyze(
 
   if (!lang_list) lang_list = new Array(slicedPdfBytesList.length).fill('ch');
 
+  const tPdfLoad0 = performance.now();
   const { allPagesInfo, allImageLists, allPdfDocs, ocrEnabledList } = await _loadAllPdfPages(
     slicedPdfBytesList, lang_list, parse_method, force_ocr
   );
+  const pdfLoadMs = performance.now() - tPdfLoad0;
 
   // Build batch input
   const imagesWithExtraInfo = allPagesInfo.map(info =>
@@ -294,6 +296,7 @@ export async function docAnalyze(
 
   // Build return value
   const pipelineTimings = results.timings;
+  pipelineTimings.pdf_load = (pipelineTimings.pdf_load || 0) + pdfLoadMs;
   const inferResults = _buildInferResults(slicedPdfBytesList, allPagesInfo, results.pageResults);
 
   return [inferResults, allImageLists, allPdfDocs, lang_list, ocrEnabledList, pipelineTimings];
@@ -423,7 +426,7 @@ async function _runBatchProcessing(imagesWithExtraInfo, opts) {
     formula_config, table_config, orientation_config, checkbox_config, on_progress,
   } = opts;
 
-  const pipelineTimings = { layout: 0, formula: 0, ocr: 0, table: 0, reading_order: 0, postprocessing: 0 };
+  const pipelineTimings = _newTimings();
   const batchImages = [];
   for (let i = 0; i < imagesWithExtraInfo.length; i += MIN_BATCH_INFERENCE_SIZE) {
     batchImages.push(imagesWithExtraInfo.slice(i, i + MIN_BATCH_INFERENCE_SIZE));
@@ -454,6 +457,19 @@ async function _runBatchProcessing(imagesWithExtraInfo, opts) {
   }
 
   return { pageResults: allResults, timings: pipelineTimings };
+}
+
+/**
+ * Create a fresh pipeline-timings accumulator (all stages, milliseconds).
+ * Keys must match BatchAnalyze.lastStageTimings plus pipeline-level stages
+ * (pdf_load) so nothing is silently dropped during accumulation.
+ */
+function _newTimings() {
+  return {
+    layout: 0, formula: 0, ocr_det: 0, ocr_rec: 0, table: 0, reading_order: 0,
+    orientation: 0, region_collect: 0,
+    model_init: 0, pdf_load: 0,
+  };
 }
 
 /**
@@ -495,7 +511,7 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   } = opts;
 
   const langList = langListOpt || new Array(pdfBytesList.length).fill('ch');
-  const pipelineTimings = { layout: 0, formula: 0, ocr: 0, table: 0, reading_order: 0, postprocessing: 0 };
+  const pipelineTimings = _newTimings();
 
   const slicedPdfBytesList = await _sliceAllPdfsForWindow(pdfBytesList, start_page_id, end_page_id);
 
@@ -583,14 +599,17 @@ async function _docAnalyzeSingleWindow(pdfBytesList, opts) {
     start_page_id = 0, end_page_id = null, on_progress = null,
   } = opts;
 
-  const pipelineTimings = { layout: 0, formula: 0, ocr: 0, table: 0, reading_order: 0, postprocessing: 0 };
+  const pipelineTimings = _newTimings();
   const langList = lang_list || new Array(pdfBytesList.length).fill('ch');
 
   const slicedList = await _sliceAllPdfsForWindow(pdfBytesList, start_page_id, end_page_id);
 
+  const tPdfLoad0 = performance.now();
   const { allPagesInfo, allImageLists, allPdfDocs, ocrEnabledList } = await _loadAllPdfPages(
     slicedList, langList, parse_method, force_ocr
   );
+  // stage timings are tracked in milliseconds (consistent with batch _stageTimings)
+  pipelineTimings.pdf_load = performance.now() - tPdfLoad0;
 
   if (!allPagesInfo.length) {
     return [pdfBytesList.map(() => []), allImageLists, allPdfDocs, langList, ocrEnabledList, pipelineTimings];

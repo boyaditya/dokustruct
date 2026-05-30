@@ -96,10 +96,12 @@ export class BatchAnalyze {
     this.lastStageTimings = {
       layout: 0,
       formula: 0,
-      ocr: 0,
+      ocr_det: 0,
+      ocr_rec: 0,
       table: 0,
       reading_order: 0,
-      postprocessing: 0,
+      orientation: 0,
+      region_collect: 0,
       model_init: 0,
     };
   }
@@ -117,10 +119,12 @@ export class BatchAnalyze {
     const stageTimings = {
       layout: 0,
       formula: 0,
-      ocr: 0,
+      ocr_det: 0,         // OCR text DETECTION (inference)
+      ocr_rec: 0,         // OCR text RECOGNITION (inference) — was mislabeled "postprocessing"
       table: 0,
       reading_order: 0,
-      postprocessing: 0,
+      orientation: 0,     // document-orientation classification
+      region_collect: 0,  // collecting OCR/table/formula detection regions
       model_init: 0,  // time spent loading/initialising models (excluded from inference total)
     };
 
@@ -152,7 +156,9 @@ export class BatchAnalyze {
     const ownedMats = matResults.map(r => r.owned);
 
     try {
+      const tOri0 = performance.now();
       const imgOriOrientationList = await this._runOrientationClassify(npImages, pdfDictList, ownedMats);
+      stageTimings.orientation = performance.now() - tOri0;
 
       // 1. Layout detection
       const tLayout0 = performance.now();
@@ -161,8 +167,10 @@ export class BatchAnalyze {
       await yieldToBrowser();
 
       // 2. Collect detection regions
+      const tRegion0 = performance.now();
       const [ocrResAllPage, tableResAllPage, formulaResAllPage] =
         await this._collectDetectionRegions(imagesLayoutRes, npImages, imagesWithExtraInfo);
+      stageTimings.region_collect = performance.now() - tRegion0;
 
       // 3. Formula recognition
       if (this.formulaEnable) {
@@ -172,15 +180,15 @@ export class BatchAnalyze {
         await yieldToBrowser();
       }
 
-      // 4. OCR
+      // 4. OCR detection
       if (this.useCustomOcr) {
         const tOcr0 = performance.now();
         await this._runCustomOcr(ocrResAllPage);
-        stageTimings.ocr = performance.now() - tOcr0;
+        stageTimings.ocr_det = performance.now() - tOcr0;
       } else {
         const tOcr0 = performance.now();
         await this._runTraditionalOcr(ocrResAllPage, pdfDictList, scaleList);
-        stageTimings.ocr = performance.now() - tOcr0;
+        stageTimings.ocr_det = performance.now() - tOcr0;
       }
       await yieldToBrowser();
 
@@ -192,10 +200,11 @@ export class BatchAnalyze {
       }
       await yieldToBrowser();
 
-      // 6. Post-process OCR rec results
-      const tPost0 = performance.now();
+      // 6. OCR text recognition (rec inference) — this is real model inference,
+      // historically mislabeled "postprocessing".
+      const tRec0 = performance.now();
       await runOcrRecPostprocess(imagesLayoutRes, this.ocrConfig);
-      stageTimings.postprocessing = performance.now() - tPost0;
+      stageTimings.ocr_rec = performance.now() - tRec0;
       await yieldToBrowser();
 
       if (this.sealEnable) {

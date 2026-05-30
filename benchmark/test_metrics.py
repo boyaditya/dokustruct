@@ -17,10 +17,16 @@ from benchmark.metrics import (
     cer,
     edit_distance,
     geometric_mean,
+    geometric_mean_ci,
+    holm_bonferroni,
+    latex_ned,
+    latex_tokens,
     ned,
+    normalize_latex,
     normalize_text,
     rank_correlation,
     teds,
+    teds_struct,
     wer,
     wilcoxon_signed_rank,
 )
@@ -100,6 +106,77 @@ def test_teds_cell_text_matters():
     a = "<table><tr><td>hello</td></tr></table>"
     b = "<table><tr><td>world</td></tr></table>"
     assert teds(a, b) < 1.0
+
+
+# ---------------------------------------------------------------------------
+# TEDS-Struct (structure-only)
+# ---------------------------------------------------------------------------
+
+def test_teds_struct_ignores_text():
+    # Same structure, different cell text -> TEDS-Struct == 1.0 but TEDS < 1.0
+    a = "<table><tr><td>hello</td><td>x</td></tr></table>"
+    b = "<table><tr><td>world</td><td>y</td></tr></table>"
+    assert teds_struct(a, b) == 1.0
+    assert teds(a, b) < 1.0
+
+
+def test_teds_struct_detects_shape_diff():
+    a = "<table><tr><td>a</td><td>b</td></tr></table>"
+    b = "<table><tr><td>a</td></tr></table>"
+    assert teds_struct(a, b) < 1.0
+
+
+# ---------------------------------------------------------------------------
+# LaTeX normalization / formula-aware edit distance
+# ---------------------------------------------------------------------------
+
+def test_normalize_latex_drops_cosmetic_macros():
+    # \dfrac and \frac are semantically equal; spacing macros are cosmetic.
+    assert normalize_latex(r"\dfrac{a}{b}") == normalize_latex(r"\frac{a}{b}")
+    assert normalize_latex(r"a \, + \; b") == normalize_latex("a+b")
+    assert normalize_latex(r"\left( x \right)") == normalize_latex("(x)")
+
+
+def test_latex_ned_zero_for_cosmetic_diff():
+    assert latex_ned(r"\dfrac{a}{b}", r"\frac{a}{b}") == 0.0
+    assert latex_ned(r"$E=mc^2$", r"E = m c ^ 2") == 0.0
+
+
+def test_latex_ned_nonzero_for_real_diff():
+    assert latex_ned(r"x^2 + y^2", r"x^2 - y^2") > 0.0
+
+
+def test_latex_tokens_basic():
+    toks = latex_tokens(r"\frac{a}{b}")
+    assert r"\frac" in toks
+    assert "{" in toks and "}" in toks
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap CI + Holm-Bonferroni
+# ---------------------------------------------------------------------------
+
+def test_geometric_mean_ci_brackets_point():
+    ci = geometric_mean_ci([0.5, 2.0, 1.0, 1.5, 0.8, 1.2])
+    assert ci["ci_low"] <= ci["gm"] <= ci["ci_high"]
+    assert ci["n"] == 6
+
+
+def test_geometric_mean_ci_single_value():
+    ci = geometric_mean_ci([1.5])
+    assert ci["gm"] == 1.5
+    assert ci["ci_low"] == 1.5 and ci["ci_high"] == 1.5
+
+
+def test_holm_bonferroni_order_and_flags():
+    # Three p-values; Holm is step-down, more conservative than raw 0.05.
+    res = holm_bonferroni([0.001, 0.04, 0.5])
+    assert res[0]["significant"] is True       # 0.001 < 0.05/3
+    assert res[2]["significant"] is False      # 0.5 never significant
+    # None passes through untouched
+    res2 = holm_bonferroni([None, 0.001])
+    assert res2[0]["significant"] is None
+    assert res2[1]["significant"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +263,36 @@ def test_alignment_content_aware_text():
     res = align_content_lists(a, b)
     assert res["n_matched"] == 1
     assert res["mean_ned_norm"] > 0.0
+
+
+def test_alignment_latex_aware_formula():
+    # Cosmetic LaTeX difference should NOT inflate the formula metric.
+    a = [{"type": "equation", "text": r"\dfrac{a}{b}", "page_idx": 0, "text_format": "latex"}]
+    b = [{"type": "equation", "text": r"\frac{a}{b}", "page_idx": 0, "text_format": "latex"}]
+    res = align_content_lists(a, b)
+    assert res["n_formula_pairs"] == 1
+    assert res["mean_latex_ned"] == 0.0
+
+
+def test_alignment_teds_struct_present_for_tables():
+    a = _doc([("table", "<table><tr><td>hello</td></tr></table>")])
+    b = _doc([("table", "<table><tr><td>world</td></tr></table>")])
+    res = align_content_lists(a, b)
+    assert res["n_table_pairs"] == 1
+    assert res["mean_teds_struct"] == 1.0   # same structure
+    assert res["mean_teds"] < 1.0           # different text
+
+
+def test_reading_order_detects_swap():
+    # Two systems emit the same two text blocks in OPPOSITE order on one page.
+    a = _doc([("text", "alpha block one"), ("text", "beta block two")], page=0)
+    b = _doc([("text", "beta block two"), ("text", "alpha block one")], page=0)
+    res = align_content_lists(a, b)
+    # Order-independent matching should pair alpha<->alpha, beta<->beta, and
+    # detect the order disagreement (tau < 1 when it can be computed).
+    assert res["n_reading_order_items"] == 2
+    tau = res["reading_order_kendall_tau"]
+    assert tau is None or tau < 1.0
 
 
 # ---------------------------------------------------------------------------

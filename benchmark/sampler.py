@@ -182,6 +182,10 @@ def main() -> None:
                         help="Timing corpus size (repeats/system), subset of accuracy. Default 30.")
     parser.add_argument("--by", type=str, default="data_source,language",
                         help="Stratify keys, comma-separated. Default: data_source,language")
+    parser.add_argument("--timing-by", type=str, default="complexity",
+                        help="Stratify keys for the TIMING corpus. Timing is driven by "
+                             "content complexity, so default stratifies by 'complexity' "
+                             "(simple/medium/complex). Comma-separated.")
     parser.add_argument("--min-per-stratum", type=int, default=3,
                         help="Minimum samples per stratum so rare types are kept. Default 3.")
     parser.add_argument("--seed", type=int, default=42)
@@ -193,19 +197,22 @@ def main() -> None:
         raise SystemExit(f"Index not found: {args.index}")
     index = json.loads(args.index.read_text(encoding="utf-8"))
     by = [k.strip() for k in args.by.split(",") if k.strip()]
+    timing_by = [k.strip() for k in args.timing_by.split(",") if k.strip()] or by
 
     # Accuracy corpus
     acc_stems, acc_counts = stratified_sample(
         index, args.accuracy_n, by, args.seed, args.min_per_stratum)
-    # Timing corpus = stratified subset of the accuracy corpus
+    # Timing corpus = stratified subset of the accuracy corpus, stratified by
+    # CONTENT COMPLEXITY (the real driver of runtime) when available.
     tim_stems, tim_counts = stratified_sample(
-        index, args.timing_n, by, args.seed + 1, max(1, args.min_per_stratum // 2),
+        index, args.timing_n, timing_by, args.seed + 1, max(1, args.min_per_stratum // 2),
         restrict_to=acc_stems)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "seed": args.seed,
         "stratify_by": by,
+        "timing_stratify_by": timing_by,
         "min_per_stratum": args.min_per_stratum,
         "population_size": len(index),
         "accuracy": {

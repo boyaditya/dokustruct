@@ -132,6 +132,98 @@ def bbox_iou(a: Optional[Sequence[float]], b: Optional[Sequence[float]]) -> Opti
 
 
 # ---------------------------------------------------------------------------
+# LaTeX normalization (formula construct validity)
+# ---------------------------------------------------------------------------
+#
+# Raw-string NED on LaTeX is sensitive to non-semantic differences (\dfrac vs
+# \frac, spacing macros, redundant braces, \left/\right). We normalize and
+# tokenize before measuring edit distance so the formula metric reflects
+# content rather than cosmetic markup. This remains a PROXY for the official
+# OmniDocBench CDM metric (documented deviation), not CDM itself.
+
+# Spacing / sizing macros that carry no semantic content.
+_LATEX_DROP = [
+    r"\left", r"\right", r"\bigl", r"\bigr", r"\Bigl", r"\Bigr",
+    r"\big", r"\Big", r"\bigg", r"\Bigg", r"\,", r"\;", r"\:", r"\!",
+    r"\quad", r"\qquad", r"\displaystyle", r"\textstyle", r"\scriptstyle",
+    r"\limits", r"\nolimits", r"\mathrm", r"\mathbf", r"\boldsymbol",
+]
+# Synonymous commands collapsed to a canonical form.
+_LATEX_CANON = {
+    r"\dfrac": r"\frac", r"\tfrac": r"\frac", r"\cfrac": r"\frac",
+    r"\rightarrow": r"\to", r"\longrightarrow": r"\to",
+    r"\ge": r"\geq", r"\le": r"\leq", r"\ne": r"\neq",
+    r"\cdot": r"*", r"\times": r"*", r"\ast": r"*",
+}
+_LATEX_TOKEN_RE = re.compile(r"\\[a-zA-Z]+|\\.|[{}]|[a-zA-Z0-9]|[^\s]")
+
+
+def normalize_latex(s: Optional[str]) -> str:
+    """Canonicalize a LaTeX string for semantic-ish comparison.
+
+    Strips math-mode delimiters, drops spacing/sizing macros, collapses
+    synonymous commands, and removes whitespace. Substitutions operate on whole
+    command TOKENS (not raw substrings) so prefixes like ``\\le`` do not corrupt
+    longer commands like ``\\left``. Returns the canonical string.
+    """
+    if not s:
+        return ""
+    out = unicodedata.normalize("NFC", s).strip()
+    # strip surrounding math delimiters
+    for delim in ("$$", "$", r"\(", r"\)", r"\[", r"\]"):
+        out = out.replace(delim, "")
+
+    drop = set(_LATEX_DROP)
+    canon = dict(_LATEX_CANON)
+    pieces: List[str] = []
+    # Walk the string, treating \command as an atomic token.
+    i = 0
+    n = len(out)
+    cmd_re = re.compile(r"\\[a-zA-Z]+")
+    while i < n:
+        ch = out[i]
+        if ch == "\\":
+            m = cmd_re.match(out, i)
+            if m:
+                tok = m.group(0)
+                if tok in drop:
+                    pass  # cosmetic macro, drop it
+                elif tok in canon:
+                    pieces.append(canon[tok])
+                else:
+                    pieces.append(tok)
+                i = m.end()
+                continue
+            # escaped non-letter (e.g. \{ \} \,)
+            two = out[i:i + 2]
+            if two not in drop:   # drop cosmetic \, \; \: \!
+                pieces.append(two)
+            i += 2
+            continue
+        pieces.append(ch)
+        i += 1
+
+    joined = "".join(pieces)
+    # remove all whitespace (LaTeX is whitespace-insensitive in math mode)
+    return re.sub(r"\s+", "", joined)
+
+
+def latex_tokens(s: Optional[str]) -> List[str]:
+    """Tokenize LaTeX into commands, braces, and single symbols after
+    normalization, so edit distance counts semantic units not characters."""
+    norm = normalize_latex(s)
+    if not norm:
+        return []
+    return _LATEX_TOKEN_RE.findall(norm)
+
+
+def latex_ned(a: Optional[str], b: Optional[str]) -> float:
+    """Normalized token-level edit distance between two LaTeX strings in [0,1]."""
+    ta, tb = latex_tokens(a), latex_tokens(b)
+    return ned(ta, tb)
+
+
+# ---------------------------------------------------------------------------
 # TEDS — Tree Edit Distance Similarity for HTML tables
 # ---------------------------------------------------------------------------
 
@@ -301,6 +393,31 @@ def teds(html_a: str, html_b: str) -> float:
     return max(0.0, min(1.0, sim))
 
 
+def _strip_text(node: "_Node") -> None:
+    """Recursively blank out cell text so only structure remains."""
+    node.text = ""
+    for c in node.children:
+        _strip_text(c)
+
+
+def teds_struct(html_a: str, html_b: str) -> float:
+    """Structure-only TEDS (TEDS-Struct): ignores cell text, compares the
+    table tree shape (rows/cells/headers) alone. Reported alongside TEDS so the
+    thesis can separate STRUCTURE parity from CONTENT parity."""
+    ta = _build_table_tree(html_a)
+    tb = _build_table_tree(html_b)
+    _strip_text(ta)
+    _strip_text(tb)
+    size_a = _tree_size(ta)
+    size_b = _tree_size(tb)
+    denom = max(size_a, size_b)
+    if denom <= 1:
+        return 1.0 if (html_a or "") == (html_b or "") else 0.0
+    dist = _zhang_shasha(ta, tb)
+    sim = 1.0 - dist / denom
+    return max(0.0, min(1.0, sim))
+
+
 # ---------------------------------------------------------------------------
 # Aggregate / statistical helpers
 # ---------------------------------------------------------------------------
@@ -312,6 +429,84 @@ def geometric_mean(vals: Sequence[float]) -> float:
         return 0.0
     log_sum = sum(math.log(v) for v in pos)
     return math.exp(log_sum / len(pos))
+
+
+def geometric_mean_ci(vals: Sequence[float], confidence: float = 0.95,
+                      n_boot: int = 5000, seed: int = 42) -> Dict[str, Any]:
+    """Bootstrap confidence interval for the geometric mean of ratios.
+
+    Resamples the log-ratios with replacement (percentile bootstrap) so the
+    headline ratio comes with an interval, not just a point estimate. Returns
+    {gm, ci_low, ci_high, n}. Falls back to a log-normal analytic CI when the
+    sample is tiny.
+    """
+    pos = [v for v in vals if v is not None and v > 0]
+    n = len(pos)
+    out: Dict[str, Any] = {"gm": None, "ci_low": None, "ci_high": None, "n": n}
+    if n == 0:
+        return out
+    gm = geometric_mean(pos)
+    out["gm"] = round(gm, 4)
+    if n == 1:
+        out["ci_low"] = out["ci_high"] = round(gm, 4)
+        return out
+
+    logs = [math.log(v) for v in pos]
+    import random as _random
+    rng = _random.Random(seed)
+    alpha = 1.0 - confidence
+    try:
+        boots: List[float] = []
+        for _ in range(n_boot):
+            sample = [logs[rng.randrange(n)] for _ in range(n)]
+            boots.append(math.exp(sum(sample) / n))
+        boots.sort()
+        lo_idx = max(0, int(math.floor((alpha / 2.0) * len(boots))))
+        hi_idx = min(len(boots) - 1, int(math.ceil((1.0 - alpha / 2.0) * len(boots)) - 1))
+        out["ci_low"] = round(boots[lo_idx], 4)
+        out["ci_high"] = round(boots[hi_idx], 4)
+    except Exception:
+        # analytic log-normal fallback
+        import statistics as _st
+        mean_log = _st.mean(logs)
+        sd_log = _st.stdev(logs)
+        z = Z.get(confidence, 1.96)
+        half = z * sd_log / math.sqrt(n)
+        out["ci_low"] = round(math.exp(mean_log - half), 4)
+        out["ci_high"] = round(math.exp(mean_log + half), 4)
+    return out
+
+
+def holm_bonferroni(pvals: Sequence[Optional[float]], alpha: float = 0.05) -> List[Dict[str, Any]]:
+    """Holm-Bonferroni step-down correction for a family of p-values.
+
+    Controls family-wise error rate across the multiple Wilcoxon tests run in
+    one report. Returns, in the ORIGINAL order, per-test dicts with the
+    adjusted threshold and a reject (significant) flag. None p-values pass
+    through untouched.
+    """
+    indexed = [(i, p) for i, p in enumerate(pvals) if p is not None]
+    m = len(indexed)
+    results: List[Dict[str, Any]] = [
+        {"p_value": p, "adjusted_alpha": None, "significant": None}
+        for p in pvals
+    ]
+    if m == 0:
+        return results
+    indexed.sort(key=lambda t: t[1])
+    still_rejecting = True
+    for rank, (orig_i, p) in enumerate(indexed):
+        adj_alpha = alpha / (m - rank)
+        reject = still_rejecting and (p < adj_alpha)
+        if not reject:
+            still_rejecting = False  # once we fail, all larger p's fail too
+        results[orig_i]["adjusted_alpha"] = round(adj_alpha, 6)
+        results[orig_i]["significant"] = bool(reject)
+    return results
+
+
+# Z-scores for confidence levels (shared with sample_size semantics).
+Z = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
 
 
 def wilcoxon_signed_rank(a: Sequence[float], b: Sequence[float]) -> Dict[str, Any]:
@@ -371,8 +566,11 @@ def rank_correlation(seq_a: Sequence[int], seq_b: Sequence[int]) -> Dict[str, An
         return out
     try:
         from scipy import stats  # type: ignore
-        tau, _ = stats.kendalltau(seq_a, seq_b)
-        rho, _ = stats.spearmanr(seq_a, seq_b)
+        import warnings as _warnings
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore")
+            tau, _ = stats.kendalltau(seq_a, seq_b)
+            rho, _ = stats.spearmanr(seq_a, seq_b)
         out["kendall_tau"] = None if tau is None or math.isnan(tau) else round(float(tau), 4)
         out["spearman_rho"] = None if rho is None or math.isnan(rho) else round(float(rho), 4)
     except Exception:
@@ -382,5 +580,7 @@ def rank_correlation(seq_a: Sequence[int], seq_b: Sequence[int]) -> Dict[str, An
 
 __all__ = [
     "edit_distance", "ned", "normalize_text", "cer", "wer", "bbox_iou",
-    "teds", "geometric_mean", "wilcoxon_signed_rank", "rank_correlation",
+    "normalize_latex", "latex_tokens", "latex_ned",
+    "teds", "teds_struct", "geometric_mean", "geometric_mean_ci",
+    "holm_bonferroni", "wilcoxon_signed_rank", "rank_correlation",
 ]

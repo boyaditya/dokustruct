@@ -125,13 +125,13 @@
         <div class="field">
           <label>Execution Provider</label>
           <select id="cfgEp">
-            <option value="webgpu">WebGPU</option>
-            <option value="wasm">WASM (CPU)</option>
+            <option value="webgpu">WebGPU (accelerated)</option>
+            <option value="wasm">WASM (CPU — EP-identical control)</option>
           </select>
         </div>
         <div class="field">
           <label>Repeat per file</label>
-          <input type="number" id="cfgRepeat" value="3" min="1" max="20" />
+          <input type="number" id="cfgRepeat" value="10" min="1" max="50" />
         </div>
         <div class="field">
           <label>Parse method</label>
@@ -156,11 +156,9 @@
           </div>
         </div>
         <div class="field">
-          <label>Warm-up run</label>
-          <div class="field-row">
-            <input type="checkbox" id="cfgWarmup" checked />
-            <span>Run 1 warm-up (excluded from stats)</span>
-          </div>
+          <label>Warm-up runs</label>
+          <input type="number" id="cfgWarmup" value="2" min="0" max="10" />
+          <span class="hint">Excluded from steady-state stats; 1st kept as cold-start</span>
         </div>
       </div>
     </div>
@@ -207,17 +205,22 @@
               <th>Run</th>
               <th class="num">Total (s)</th>
               <th class="num">Model Init (s)</th>
+              <th class="num">PDF Load (s)</th>
+              <th class="num">Orient. (s)</th>
               <th class="num">Layout (s)</th>
-              <th class="num">OCR (s)</th>
+              <th class="num">Region (s)</th>
+              <th class="num">OCR Det (s)</th>
+              <th class="num">OCR Rec (s)</th>
               <th class="num">Formula (s)</th>
               <th class="num">Table (s)</th>
               <th class="num">Post (s)</th>
+              <th class="num">Other (s)</th>
               <th class="num">Inference (s)*</th>
             </tr>
           </thead>
           <tbody id="resultsBody"></tbody>
         </table>
-        <p style="font-size:11px;color:#888;margin-top:6px">* Inference = Layout + OCR + Formula + Table (model init excluded)</p>
+        <p style="font-size:11px;color:#888;margin-top:6px">* Inference = Layout + OCR Det + OCR Rec + Formula + Table (pure inference; OCR Rec adalah inferensi rekognisi teks). Total = Model Init + PDF Load + Orient. + Layout + Region + OCR Det + OCR Rec + Formula + Table + Post + Other. Post = build middle-json/content-list (ringan).</p>
       </div>
     </div>
 

@@ -23,34 +23,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from .alignment import align_content_lists
-from .metrics import edit_distance, normalize_text, ned
-
-
-def _reading_order_edit(diff_items: List[Dict[str, Any]]) -> Optional[float]:
-    """Normalized edit distance between the matched reading-order sequences.
-
-    The alignment walks GT in its native (reading) order, so for matched pairs
-    the GT sequence is monotonic 0..n-1. We recover the prediction-side order
-    from each matched item's (page_a, original prediction index) and measure how
-    far that order deviates from GT order. Identity => 0.
-    """
-    matched = [d for d in diff_items if d.get("status") == "matched"]
-    n = len(matched)
-    if n < 2:
-        return None
-    # GT order is the encounter order (already reading-order sorted upstream).
-    gt_order = list(range(n))
-    # Prediction order: sort matched items by their position on the prediction
-    # side. We approximate prediction position with (page_a, vertical bbox top)
-    # when available, else fall back to encounter order.
-    def pred_key(idx_item):
-        i, d = idx_item
-        page = d.get("page_a", 0) or 0
-        return (page, i)
-    pred_sorted = sorted(enumerate(matched), key=pred_key)
-    # The rank of each GT-encounter index within the prediction ordering.
-    pred_order = [orig_i for orig_i, _ in pred_sorted]
-    return round(edit_distance(pred_order, gt_order) / n, 4)
+from .metrics import edit_distance, normalize_text, ned, latex_ned
 
 
 def score_against_gt(pred_cl: List[Dict], gt_cl: List[Dict]) -> Dict[str, Any]:
@@ -60,18 +33,23 @@ def score_against_gt(pred_cl: List[Dict], gt_cl: List[Dict]) -> Dict[str, Any]:
     text_edit = align["mean_ned_norm"]      # may be None
     text_cer = align["mean_cer"]            # may be None
     table_teds = align["mean_teds"]         # may be None
+    table_teds_struct = align["mean_teds_struct"]  # may be None
 
-    # Formula: NED over LaTeX of matched equation pairs (proxy for CDM).
+    # Formula: LaTeX-aware (normalized + tokenized) NED over matched equation
+    # pairs. This is a recognized PROXY for the official CDM metric (documented
+    # deviation), and is robust to cosmetic markup (\dfrac vs \frac, spacing).
     formula_vals: List[float] = []
     for d in align["diff_items"]:
         if d.get("status") == "matched" and d.get("type_a") == "equation" \
                 and d.get("type_b") == "equation":
-            a = normalize_text(d.get("text_a", ""))
-            b = normalize_text(d.get("text_b", ""))
-            formula_vals.append(ned(a, b))
+            formula_vals.append(latex_ned(d.get("text_a", ""), d.get("text_b", "")))
     formula_edit = round(sum(formula_vals) / len(formula_vals), 4) if formula_vals else None
 
-    reading_order_edit = _reading_order_edit(align["diff_items"])
+    # Reading order: use the order-INDEPENDENT correlation from alignment, then
+    # express it as an edit-like cost in [0,1] (0 = identical order). Kendall's
+    # tau in [-1,1] -> (1 - tau) / 2.
+    tau = align.get("reading_order_kendall_tau")
+    reading_order_edit = round((1.0 - tau) / 2.0, 4) if tau is not None else None
 
     # OmniDocBench-style Overall (0..100). Missing modalities are dropped from
     # the average rather than scored as zero, so a text-only page is not
@@ -90,6 +68,7 @@ def score_against_gt(pred_cl: List[Dict], gt_cl: List[Dict]) -> Dict[str, Any]:
         "text_cer": text_cer,
         "formula_edit": formula_edit,
         "table_teds": table_teds,
+        "table_teds_struct": table_teds_struct,
         "reading_order_edit": reading_order_edit,
         "overall": overall,
         "coverage_f1": align["coverage_f1"],

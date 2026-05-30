@@ -4,16 +4,28 @@ Evaluasi empiris Sistem A (JS/browser) vs Sistem B (Python). Setelah run,
 data **langsung diproses menjadi Excel** (`results.xlsx`) plus dump diff
 per-item untuk audit — baik untuk JS maupun Python.
 
+> **Baru menyiapkan eksperimen?** Mulai dari **`SETUP_SKRIPSI.md`** — panduan
+> setup langkah-demi-langkah khusus penelitian skripsi (prasyarat, dataset,
+> ukuran sampel, menjalankan kedua sistem, evaluasi, checklist, limitasi).
+> Dokumen ini (`README.md`) adalah referensi metrik & alur kerja umum;
+> rasional metodologi lengkap ada di `BENCHMARK_CONTEXT.md`.
+
 ## Metrik
 
 ### Waktu
 - `total_inference_s` (layout+ocr+formula+table), `model_init` DIKECUALIKAN dari inferensi
 - Rasio T_A / T_B per dokumen + **geometric mean** agregat (hindari bias mean-of-ratios)
+  dengan **selang kepercayaan 95% bootstrap**
 - **Inferensi per halaman** (s/halaman) untuk kontrol panjang dokumen
-- **Cold start** = model_init + inferensi, dilaporkan sebagai metrik headline terpisah
-  (biaya nyata browser: download bobot + kompilasi shader)
+- **Cold start SEJATI** = first-call latency dari run warm-up pertama (JIT/shader
+  compile; di browser dengan cache dingin termasuk download bobot), dilaporkan
+  sebagai metrik headline terpisah — bukan lagi proksi `model_init + inferensi` warm
 - Coefficient of Variation (CV = std/mean) sebagai indikator stabilitas
 - **Uji Wilcoxon signed-rank** (paired, JS vs Python) + effect size (rank-biserial)
+  + **koreksi Holm-Bonferroni** untuk multiple comparisons
+- **Dua deployment-config** yang dibandingkan setara antar sistem:
+  `accelerated` (WebGPU↔DirectML) dan `cpu` (WASM↔CPU). Dibingkai sebagai
+  "Sistem A vs Sistem B sebagaimana di-deploy", bukan isolasi runtime/EP
 
 ### Kesepadanan Output (alignment per-halaman, content-aware)
 - **Type Sequence Difference** — perbedaan struktur urutan tipe
@@ -35,9 +47,9 @@ Input: demo/pdfs/*.pdf (file yang sama untuk kedua sistem)
 
 Sistem A (JS)                          Sistem B (Python)
 ─────────────────────────────         ─────────────────────────────
-1. Buka /benchmark.html                1. rtk python -m demo.demo_batch --repeat 5
+1. Buka /benchmark.html                1. rtk python -m demo.demo_batch --repeat 10
 2. Drop semua PDF                         → tulis ke benchmark/py_results/
-3. Set repeat (≥5 disarankan)             → JIKA hasil JS sudah ada di
+3. Set repeat (≥10 disarankan)            → JIKA hasil JS sudah ada di
 4. Start Benchmark                          benchmark/js_results/, evaluate
 5. Export Results:                          OTOMATIS jalan → results.xlsx
    - benchmark_js_*.json (gabungan)
@@ -59,11 +71,14 @@ Python batch — `demo_batch` akan otomatis memanggil evaluator dan menghasilkan
 ## Perintah
 
 ```bash
-# Python batch — 5 run + 1 warm-up, formula+tabel ON, auto-evaluate di akhir
-rtk python -m demo.demo_batch --repeat 5 --formula --table
+# Python batch — 10 run + 2 warm-up (accelerated/DirectML), auto-evaluate
+rtk python -m demo.demo_batch --repeat 10 --warmup 2 --formula --table
+
+# Deployment-config CPU-only (semua model CPU), dipasangkan dengan JS WASM
+rtk python -m demo.demo_batch --repeat 10 --ep-mode cpu --formula --table
 
 # Tanpa auto-evaluate
-rtk python -m demo.demo_batch --repeat 5 --no-evaluate
+rtk python -m demo.demo_batch --repeat 10 --no-evaluate
 
 # Evaluasi manual
 rtk python -m benchmark.evaluate --js-dir benchmark/js_results --py-dir benchmark/py_results
@@ -232,12 +247,17 @@ dari variance terukur, bukan ditetapkan sembarang.
 
 ## Catatan Metodologi (untuk bab metode skripsi)
 
-- **Confound EP vs runtime**: perbandingan ini adalah *konfigurasi deployment
-  end-to-end* (browser-native WebGPU/WASM vs Python-native DirectML/CPU), BUKAN
-  isolasi bahasa. WebGPU≠DirectML dan WASM≠CPU-native. Nyatakan ini eksplisit.
-  Untuk isolasi, jalankan juga sel terkontrol: JS-WASM vs Python-CPU (CPU↔CPU).
-- **Model init dikecualikan** dari inferensi karena JS warm-cache vs Python reload;
-  tapi cold-start tetap dilaporkan terpisah sebagai biaya nyata browser.
+- **Kerangka deployment-config (bukan isolasi variabel)**: perbandingan default
+  (`accelerated`) adalah *konfigurasi deployment end-to-end* (browser-native
+  WebGPU/WASM vs Python-native DirectML/CPU). Dibingkai sebagai "Sistem A vs B
+  sebagaimana di-deploy", BUKAN isolasi bahasa/runtime/EP. Tersedia juga
+  deployment CPU-only: `--ep-mode cpu` (Python) + WASM (JS) → WASM↔CPU.
+  `evaluate.py` menandai bila JS & Python dijalankan pada ep_mode berbeda
+  (bukan pasangan deployment setara).
+- **Model init dikecualikan** dari inferensi karena setelah warm-up KEDUA sistem
+  memakai cache model (`ModelSingleton._models` persist lintas run di Python;
+  cache VRAM di JS). **BUKAN** karena "Python reload tiap run" (klaim itu salah).
+  Cold-start sejati dilaporkan terpisah dari run warm-up pertama.
 - **Warm-up run** dikecualikan dari statistik (JIT, cache miss, init driver).
 - **Geometric mean** untuk rasio; mean-of-ratios bias secara statistik.
 - **n ≥ 5** disarankan; laporkan CV + uji Wilcoxon, bukan hanya mean.

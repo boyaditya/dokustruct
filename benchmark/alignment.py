@@ -24,9 +24,11 @@ from .metrics import (
     bbox_iou,
     cer,
     ned,
+    latex_ned,
     normalize_text,
     rank_correlation,
     teds,
+    teds_struct,
     wer,
 )
 
@@ -42,6 +44,25 @@ def item_text(item: Dict) -> str:
     if t == "table":
         return item.get("table_body") or item.get("html") or ""
     return item.get("text") or item.get("content") or ""
+
+
+def _is_latex(item: Dict) -> bool:
+    return item_type(item) == "equation" or item.get("text_format") == "latex"
+
+
+def _text_distance(a: Dict, b: Dict) -> float:
+    """Normalized distance in [0,1] between two same-type items' content.
+
+    Uses LaTeX-aware token edit distance for equations, char NED for text,
+    and (1 - TEDS) for tables, so the matching cost reflects real content
+    similarity rather than raw-string noise.
+    """
+    ta, tb = item_type(a), item_type(b)
+    if ta == "table" and tb == "table":
+        return 1.0 - teds(item_text(a), item_text(b))
+    if _is_latex(a) and _is_latex(b):
+        return latex_ned(item_text(a), item_text(b))
+    return ned(normalize_text(item_text(a)), normalize_text(item_text(b)))
 
 
 def extract_type_sequence(content_list: List[Dict]) -> List[str]:
@@ -92,8 +113,10 @@ def _align_one_page(
         for j in range(1, n + 1):
             tb = items_b[j - 1][1]
             if item_type(ta) == item_type(tb):
-                if item_type(ta) in COMPARABLE_TYPES:
-                    sub = ned(normalize_text(item_text(ta)), normalize_text(item_text(tb)))
+                # Content-aware substitution cost in [0,1]: text/equation use
+                # (LaTeX-aware) NED, tables use 1-TEDS, other same-type items 0.
+                if item_type(ta) in COMPARABLE_TYPES or item_type(ta) == "table":
+                    sub = _text_distance(ta, tb)
                 else:
                     sub = 0.0
             else:
@@ -128,6 +151,62 @@ def _align_one_page(
     return pairs, only_a, only_b
 
 
+def _reading_order_correlation(
+    pages_a: Dict[int, List[Tuple[int, Dict]]],
+    pages_b: Dict[int, List[Tuple[int, Dict]]],
+) -> Dict[str, Any]:
+    """Order-INDEPENDENT reading-order correlation.
+
+    The main page DP alignment is monotonic by construction, so correlating its
+    matched indices is tautological (always ~1.0). Here we instead match items
+    across systems WITHOUT any positional constraint — greedily by content
+    similarity (and bbox IoU as tie-break) within a page — then measure how the
+    two systems ORDER those same items. Only if the systems disagree on reading
+    order will tau/rho drop below 1, so the metric is now meaningful.
+
+    Returns kendall_tau, spearman_rho, and the number of items compared.
+    """
+    order_a: List[int] = []
+    order_b: List[int] = []
+    all_pages = sorted(set(pages_a) | set(pages_b))
+
+    for p in all_pages:
+        pa = pages_a.get(p, [])
+        pb = pages_b.get(p, [])
+        # positions within the page = encounter rank in each system
+        used_b = set()
+        candidates: List[Tuple[int, int]] = []  # (rank_a, rank_b)
+        for rank_a, (_, a) in enumerate(pa):
+            best_j = -1
+            best_cost = float("inf")
+            for rank_b, (_, b) in enumerate(pb):
+                if rank_b in used_b:
+                    continue
+                if item_type(a) != item_type(b):
+                    continue
+                # content distance, with bbox IoU as a tie-breaker
+                if item_type(a) in COMPARABLE_TYPES or item_type(a) == "table":
+                    cost = _text_distance(a, b)
+                else:
+                    iou = bbox_iou(a.get("bbox"), b.get("bbox"))
+                    cost = 1.0 - (iou if iou is not None else 0.0)
+                if cost < best_cost:
+                    best_cost = cost
+                    best_j = rank_b
+            # only accept reasonably confident matches
+            if best_j >= 0 and best_cost <= 0.6:
+                used_b.add(best_j)
+                candidates.append((rank_a, best_j))
+        # the matched pairs' ranks form the two order sequences for this page
+        for ra, rb in candidates:
+            order_a.append(ra)
+            order_b.append(rb)
+
+    corr = rank_correlation(order_a, order_b)
+    corr["n_order_items"] = len(order_a)
+    return corr
+
+
 def align_content_lists(cl_a: List[Dict], cl_b: List[Dict]) -> Dict[str, Any]:
     """Align two content lists page-by-page and compute equivalence metrics.
 
@@ -154,7 +233,9 @@ def align_content_lists(cl_a: List[Dict], cl_b: List[Dict]) -> Dict[str, Any]:
     ned_norm: List[float] = []
     cer_vals: List[float] = []
     wer_vals: List[float] = []
+    latex_ned_vals: List[float] = []
     teds_vals: List[float] = []
+    teds_struct_vals: List[float] = []
     iou_vals: List[float] = []
     type_matched = 0
 
@@ -196,11 +277,20 @@ def align_content_lists(cl_a: List[Dict], cl_b: List[Dict]) -> Dict[str, Any]:
                 "text_a": sa,
                 "text_b": sb,
             })
+            # equations: also track LaTeX-aware (tokenized) NED so cosmetic
+            # markup differences do not inflate the formula divergence.
+            if _is_latex(a) and _is_latex(b):
+                lned = latex_ned(sa, sb)
+                latex_ned_vals.append(lned)
+                rec["latex_ned"] = round(lned, 4)
         elif ta == "table" and tb == "table":
             score = teds(item_text(a), item_text(b))
+            sstruct = teds_struct(item_text(a), item_text(b))
             teds_vals.append(score)
+            teds_struct_vals.append(sstruct)
             rec.update({
                 "teds": round(score, 4),
+                "teds_struct": round(sstruct, 4),
                 "text_a": item_text(a),
                 "text_b": item_text(b),
             })
@@ -234,12 +324,12 @@ def align_content_lists(cl_a: List[Dict], cl_b: List[Dict]) -> Dict[str, Any]:
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
     type_consistency = type_matched / n_match if n_match else 0.0
 
-    # ---- reading-order correlation -----------------------------------------
-    # Use matched pairs' global positions in each system.
-    order_a = [ia for ia, _ in matched]
-    order_b = [ib for _, ib in matched]
-    # Rank within each system (positions are already ascending per the alignment)
-    corr = rank_correlation(order_a, order_b)
+    # ---- reading-order correlation (ORDER-INDEPENDENT) ---------------------
+    # The page DP alignment is monotonic, so correlating its matched indices is
+    # tautological. Instead, match items across systems by content (ignoring
+    # position) and compare the orders they were emitted in. tau/rho now only
+    # drop when the systems genuinely disagree on reading order.
+    corr = _reading_order_correlation(pages_a, pages_b)
 
     def _avg(v: List[float]) -> Optional[float]:
         # Return None (not 0.0) when there is nothing to average, so that
@@ -260,14 +350,20 @@ def align_content_lists(cl_a: List[Dict], cl_b: List[Dict]) -> Dict[str, Any]:
         "n_text_pairs": len(ned_norm),
         "mean_cer": _avg(cer_vals),
         "mean_wer": _avg(wer_vals),
+        "mean_latex_ned": _avg(latex_ned_vals),
+        "n_formula_pairs": len(latex_ned_vals),
         "mean_teds": _avg(teds_vals),
+        "mean_teds_struct": _avg(teds_struct_vals),
         "n_table_pairs": len(teds_vals),
         "mean_bbox_iou": _avg(iou_vals),
         "n_bbox_pairs": len(iou_vals),
         "reading_order_kendall_tau": corr.get("kendall_tau"),
         "reading_order_spearman_rho": corr.get("spearman_rho"),
+        "n_reading_order_items": corr.get("n_order_items", 0),
         "diff_items": diff_items,
     }
 
 
-__all__ = ["align_content_lists", "extract_type_sequence", "COMPARABLE_TYPES"]
+__all__ = [
+    "align_content_lists", "extract_type_sequence", "COMPARABLE_TYPES",
+]

@@ -17,6 +17,7 @@ import { unionMake } from './rapid_doc/backend/pipeline/pipeline_middle_json_mkc
 import { MemoryDataWriter } from './rapid_doc/data/data_reader_writer/index.js';
 import { MakeMode } from './rapid_doc/utils/enum_class.js';
 import { buildXlsxBlob } from './ui/utils/xlsxWriter.js';
+import { ASSET_MANIFEST } from './rapid_doc/utils/model_url_map.js';
 
 const PDF_PAGES_BATCH = 64; // default batch size
 
@@ -113,6 +114,8 @@ let queue = [];
 const fileEls = new Map();
 /** @type {Array<{filename:string, run:number, warmup:boolean, timing:object, content_list:any[]}>} */
 let allResults = [];
+/** @type {Map<string, object>} cold-start (first warm-up) timing per file */
+const fileColdStarts = new Map();
 let abortCtrl = null;
 let running = false;
 /** Reproducibility metadata + run config captured at the start of a benchmark. */
@@ -186,28 +189,75 @@ function setFilePages(name, n) {
 
 function getConfig() {
   const ep = el.cfgEp.value;
+  const isWasm = ep === 'wasm';
+  const eps = isWasm ? ['wasm'] : ['webgpu', 'wasm'];
+  // Mirror the MAIN UI (ui/state/appState.js) config EXACTLY so the benchmark
+  // measures the same pipeline the UI runs. Previously table_config/formula_config
+  // omitted model_type, so the benchmark fell back to a DIFFERENT table model
+  // and produced a different (broken) table structure than the main UI.
   return {
     execution_provider: ep,
-    executionProviders: ep === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
+    // ep_mode names the DEPLOYMENT CONFIGURATION under test (mirrors Python):
+    // 'cpu' (wasm) = CPU-only deployment vs Python CPU; 'accelerated' (webgpu)
+    // = realistic GPU deployment vs Python DirectML. We compare the systems
+    // as deployed, not language/runtime in isolation.
+    ep_mode: isWasm ? 'cpu' : 'accelerated',
+    executionProviders: eps,
     parse_method: el.cfgParse.value,
     formula_enable: el.cfgFormula.checked,
     table_enable: el.cfgTable.checked,
     repeat: Math.max(1, parseInt(el.cfgRepeat.value, 10) || 1),
-    warmup: el.cfgWarmup.checked,
+    // Warm-up is now a COUNT (was a checkbox). First warm-up is preserved as
+    // the cold-start measurement; all warm-ups are excluded from steady stats.
+    warmup: Math.max(0, parseInt(el.cfgWarmup.value, 10) || 0),
     layout_config: {
-      executionProviders: ep === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
-      engine_cfg: { use_webgpu: ep !== 'wasm' },
+      execution_provider: ep,
+      executionProviders: eps,
+      engine_cfg: { use_webgpu: !isWasm },
+      model_type: 'pp_doclayoutv2',
+      conf_thresh: 0.5,
+      layout_shape_mode: 'auto',
+      use_doc_orientation_classify: true,
+      batch_num: isWasm ? 1 : 4,
+      markdown_ignore_labels: [
+        'number', 'footnote', 'header', 'header_image',
+        'footer', 'footer_image', 'aside_text',
+      ],
     },
     ocr_config: {
-      executionProviders: ep === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
-      'Det.rec_batch_num': ep === 'webgpu' ? 4 : 1,
-      'Rec.rec_batch_num': ep === 'webgpu' ? 6 : 6,
+      execution_provider: ep,
+      executionProviders: eps,
+      use_det_mode: 'auto',
+      'Det.rec_batch_num': isWasm ? 1 : 4,
+      'Rec.rec_batch_num': 6,
     },
     formula_config: {
+      // Formula stays on wasm in both deployment configs (parity with Python
+      // CPU); in cpu mode every model is wasm.
+      execution_provider: isWasm ? 'wasm' : ep,
       executionProviders: ['wasm'],
+      formula_level: 0,
+      modelType: 'pp_formulanet_plus_s',
+      batch_num: 2,
     },
     table_config: {
+      // Table pinned to wasm (parity with Python CPU). model_type MUST match
+      // the main UI (unet_slanet_plus) or the table structure diverges.
+      execution_provider: isWasm ? 'wasm' : ep,
       executionProviders: ['wasm'],
+      engine_cfg: { use_webgpu: false },
+      model_type: 'unet_slanet_plus',
+      force_ocr: false,
+      use_word_box: false,
+      table_formula_enable: false,
+      table_image_enable: false,
+      skip_text_in_image: true,
+      use_img2table: false,
+      use_compare_table: false,
+    },
+    orientation_config: {
+      execution_provider: ep,
+      executionProviders: eps,
     },
   };
 }
@@ -219,11 +269,29 @@ function getConfig() {
 function buildUnifiedTiming(filename, pageCount, totalMs, stageTimings, postMs) {
   const t = stageTimings ?? {};
   const layoutMs    = t.layout    ?? 0;
-  const ocrMs       = t.ocr       ?? 0;
+  const ocrDetMs    = t.ocr_det   ?? 0;
+  const ocrRecMs    = t.ocr_rec   ?? 0;
+  const ocrMs       = ocrDetMs + ocrRecMs;   // combined OCR (det + rec) inference
   const formulaMs   = t.formula   ?? 0;
   const tableMs     = t.table     ?? 0;
   const modelInitMs = t.model_init ?? 0;
+  const orientationMs   = t.orientation    ?? 0;
+  const regionCollectMs = t.region_collect ?? 0;
+  const pdfLoadMs       = t.pdf_load        ?? 0;
+  // "postprocess" is now ONLY the lightweight middle-json / content-list build
+  // measured by the caller (postMs). OCR-rec inference moved into ocr_rec.
+  const postTotalMs = postMs ?? 0;
+
+  // Inference = layout + OCR(det+rec) + formula + table. OCR-rec is genuine
+  // model inference and is now INCLUDED (previously hidden in "postprocess").
   const inferMs     = layoutMs + ocrMs + formulaMs + tableMs;
+
+  // Reconciliation: everything we explicitly attribute. Anything left over
+  // (memory cleanup, Mat conversion, yields, JS overhead) is reported as
+  // `other_ms` so the per-stage breakdown ALWAYS sums to total_ms.
+  const attributedMs = modelInitMs + pdfLoadMs + orientationMs + layoutMs
+    + regionCollectMs + ocrDetMs + ocrRecMs + formulaMs + tableMs + postTotalMs;
+  const otherMs = Math.max(0, totalMs - attributedMs);
 
   return {
     filename,
@@ -231,20 +299,32 @@ function buildUnifiedTiming(filename, pageCount, totalMs, stageTimings, postMs) 
     // Seconds (primary — matches Python output)
     total_s:           round4(totalMs / 1000),
     model_init_s:      round4(modelInitMs / 1000),
+    pdf_load_s:        round4(pdfLoadMs / 1000),
+    orientation_s:     round4(orientationMs / 1000),
     layout_s:          round4(layoutMs / 1000),
+    region_collect_s:  round4(regionCollectMs / 1000),
+    ocr_det_s:         round4(ocrDetMs / 1000),
+    ocr_rec_s:         round4(ocrRecMs / 1000),
     ocr_s:             round4(ocrMs / 1000),
     formula_s:         round4(formulaMs / 1000),
     table_s:           round4(tableMs / 1000),
-    postprocess_s:     round4(postMs / 1000),
+    postprocess_s:     round4(postTotalMs / 1000),
+    other_s:           round4(otherMs / 1000),
     total_inference_s: round4(inferMs / 1000),
     // Milliseconds (secondary)
     total_ms:          Math.round(totalMs),
     model_init_ms:     Math.round(modelInitMs),
+    pdf_load_ms:       Math.round(pdfLoadMs),
+    orientation_ms:    Math.round(orientationMs),
     layout_ms:         Math.round(layoutMs),
+    region_collect_ms: Math.round(regionCollectMs),
+    ocr_det_ms:        Math.round(ocrDetMs),
+    ocr_rec_ms:        Math.round(ocrRecMs),
     ocr_ms:            Math.round(ocrMs),
     formula_ms:        Math.round(formulaMs),
     table_ms:          Math.round(tableMs),
-    postprocessing_ms: Math.round(postMs),
+    postprocessing_ms: Math.round(postTotalMs),
+    other_ms:          Math.round(otherMs),
   };
 }
 
@@ -306,13 +386,16 @@ async function collectEnvironment(ep) {
 
 function buildRunConfig(config, ep) {
   // Real EPs per model, mirroring the Python real_eps shape for parity checks.
+  // In cpu mode (wasm) ALL models run on wasm — the CPU-only deployment config.
   const gpu = ep === 'wasm' ? 'wasm' : 'webgpu';
   return {
     parse_method: config.parse_method,
     formula_enable: config.formula_enable,
     table_enable: config.table_enable,
     repeat: config.repeat,
-    warmup_excluded: config.warmup,
+    warmup_runs: config.warmup,
+    warmup_excluded: config.warmup > 0,
+    ep_mode: config.ep_mode,
     execution_provider: ep,
     real_eps: {
       layout: gpu,
@@ -321,6 +404,58 @@ function buildRunConfig(config, ep) {
       table: 'wasm',
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Model-file provenance: SHA-256 (first 16 hex) of each served ONNX model.
+// Recorded so the report can PROVE JS and Python used the same artifacts, and
+// that the served file matches the hash declared in the asset manifest.
+// ---------------------------------------------------------------------------
+
+const PROVENANCE_MODEL_IDS = [
+  'layout_pp_doclayoutv2',
+  'ocr_det', 'ocr_rec_ch',
+  'formula_pp_formulanet_plus_s',
+  'table_unet', 'table_slanet_plus',
+];
+
+async function hashModelFiles() {
+  const out = { files: {}, note: '' };
+  if (!globalThis.crypto?.subtle) {
+    out.note = 'SubtleCrypto unavailable (needs secure context); cannot hash.';
+    return out;
+  }
+  // Resolve which model ids are actually present in the manifest (ids vary),
+  // falling back to scanning the manifest for *.onnx assets.
+  const assets = Object.values(ASSET_MANIFEST).filter(
+    (a) => (a.localUrl || a.url || '').includes('.onnx'));
+  const wanted = assets.filter(
+    (a) => PROVENANCE_MODEL_IDS.includes(a.id)) ;
+  const targets = (wanted.length ? wanted : assets).slice(0, 8);
+
+  for (const a of targets) {
+    const url = a.localUrl || a.url;
+    if (!url) continue;
+    try {
+      const resp = await fetch(url, { method: 'GET', cache: 'force-cache' });
+      if (!resp.ok) { out.files[a.id] = { url, error: `HTTP ${resp.status}` }; continue; }
+      const buf = await resp.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', buf);
+      const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const expected = a.sha256 || null;
+      out.files[a.id] = {
+        url,
+        sha256_16: hex.slice(0, 16),
+        sha256_full: hex,
+        size_bytes: buf.byteLength,
+        expected_sha256: expected,
+        matches_manifest: expected ? (hex === expected) : null,
+      };
+    } catch (e) {
+      out.files[a.id] = { url, error: String(e?.message ?? e) };
+    }
+  }
+  return out;
 }
 
 // Cross-run content stability check (verifies the "all runs identical" assumption)
@@ -362,6 +497,7 @@ async function runOnce(file, config, signal) {
       ocr_config: config.ocr_config,
       formula_config: config.formula_config,
       table_config: config.table_config,
+      orientation_config: config.orientation_config,
       pdf_pages_batch: pdfPagesBatch,
     }
   );
@@ -423,15 +559,18 @@ async function runBenchmark() {
   el.resultsPanel.style.display = '';
   el.summaryPanel.style.display = 'none';
   allResults = [];
+  fileColdStarts.clear();
 
   const config = getConfig();
   const repeat = config.repeat;
-  const doWarmup = config.warmup;
-  const totalRuns = queue.length * (repeat + (doWarmup ? 1 : 0));
+  const warmupRuns = config.warmup;
+  const totalRuns = queue.length * (repeat + warmupRuns);
   let doneRuns = 0;
 
-  log(`Starting benchmark: ${queue.length} file(s), ${repeat} run(s) each${doWarmup ? ' + 1 warm-up' : ''}`, 'info');
-  log(`EP: ${config.execution_provider}, formula: ${config.formula_enable}, table: ${config.table_enable}`, 'info');
+  log(`Starting benchmark: ${queue.length} file(s), ${repeat} run(s) each` +
+      `${warmupRuns ? ` + ${warmupRuns} warm-up` : ''}`, 'info');
+  log(`EP: ${config.execution_provider} (mode=${config.ep_mode}), ` +
+      `formula: ${config.formula_enable}, table: ${config.table_enable}`, 'info');
 
   // Load OpenCV + configure ORT (once per session, or if EP changed)
   try {
@@ -457,18 +596,37 @@ async function runBenchmark() {
     lastEnvironment = { error: String(e?.message ?? e) };
   }
 
+  // Model-file provenance (hash served ONNX, verify against manifest).
+  try {
+    log('Hashing model files for provenance…', 'info');
+    const mh = await hashModelFiles();
+    lastEnvironment = { ...(lastEnvironment || {}), model_hashes: mh };
+    const mism = Object.entries(mh.files || {})
+      .filter(([, v]) => v.matches_manifest === false).map(([k]) => k);
+    if (mism.length) {
+      log(`⚠ model hash mismatch vs manifest: ${mism.join(', ')}`, 'warn');
+    } else {
+      log('Model hashes captured (match manifest).', 'ok');
+    }
+  } catch (e) {
+    log(`Model hashing skipped: ${e?.message ?? e}`, 'warn');
+  }
+
   for (const file of queue) {
     if (signal.aborted) break;
     setFileStatus(file.name, 'running', 'running…');
     log(`File: ${file.name}`, 'info');
 
     const fileRuns = [];
-    const totalRunsForFile = repeat + (doWarmup ? 1 : 0);
+    let coldStart = null;  // first warm-up run, preserved as cold-start
+    const totalRunsForFile = repeat + warmupRuns;
 
     for (let run = 0; run < totalRunsForFile; run++) {
       if (signal.aborted) break;
-      const isWarmup = doWarmup && run === 0;
-      const runLabel = isWarmup ? 'warm-up' : `run ${run - (doWarmup ? 1 : 0) + 1}/${repeat}`;
+      const isWarmup = run < warmupRuns;
+      const runLabel = isWarmup
+        ? `warm-up ${run + 1}/${warmupRuns}`
+        : `run ${run - warmupRuns + 1}/${repeat}`;
 
       el.progressLabel.textContent = `${file.name} — ${runLabel}`;
       el.progressFill.style.width = `${Math.round(doneRuns / totalRuns * 100)}%`;
@@ -485,15 +643,17 @@ async function runBenchmark() {
           fileRuns.push(result);
           allResults.push({
             filename: file.name,
-            run: run - (doWarmup ? 1 : 0) + 1,
+            run: run - warmupRuns + 1,
             warmup: false,
             timing: result.timing,
             content_list: result.content_list,
           });
-          appendResultRow(file.name, result.page_count, run - (doWarmup ? 1 : 0) + 1, result.timing);
+          appendResultRow(file.name, result.page_count, run - warmupRuns + 1, result.timing);
           log(`  ✓ ${runLabel}: total=${elapsed}s, inference=${result.timing.total_inference_s}s`, 'ok');
         } else {
-          log(`  ✓ warm-up: ${elapsed}s (excluded from stats)`, 'warn');
+          // Preserve the FIRST warm-up run as the cold-start measurement.
+          if (run === 0) coldStart = result.timing;
+          log(`  ✓ ${runLabel}: ${elapsed}s (excluded from steady-state stats)`, 'warn');
         }
       } catch (err) {
         if (err?.name === 'AbortError') { log('  Aborted.', 'warn'); break; }
@@ -504,6 +664,9 @@ async function runBenchmark() {
       doneRuns++;
       el.progressFill.style.width = `${Math.round(doneRuns / totalRuns * 100)}%`;
     }
+
+    // Stash cold-start for this file so export can attach it.
+    if (coldStart) fileColdStarts.set(file.name, coldStart);
 
     if (!signal.aborted) {
       setFileStatus(file.name, 'done', `done (${repeat}×)`);
@@ -538,11 +701,16 @@ function appendResultRow(filename, pages, run, timing) {
     <td class="num">${run}</td>
     ${n(timing.total_s)}
     ${n(timing.model_init_s)}
+    ${n(timing.pdf_load_s)}
+    ${n(timing.orientation_s)}
     ${n(timing.layout_s)}
-    ${n(timing.ocr_s)}
+    ${n(timing.region_collect_s)}
+    ${n(timing.ocr_det_s)}
+    ${n(timing.ocr_rec_s)}
     ${n(timing.formula_s)}
     ${n(timing.table_s)}
     ${n(timing.postprocess_s)}
+    ${n(timing.other_s)}
     ${n(timing.total_inference_s)}
   `;
   el.resultsBody.appendChild(tr);
@@ -617,11 +785,12 @@ async function exportResults() {
     metadata: {
       ...(lastEnvironment || {}),
       execution_provider: el.cfgEp.value,
+      ep_mode: el.cfgEp.value === 'wasm' ? 'cpu' : 'accelerated',
       formula_enable: el.cfgFormula.checked,
       table_enable: el.cfgTable.checked,
       parse_method: el.cfgParse.value,
       repeat: parseInt(el.cfgRepeat.value, 10),
-      warmup_excluded: el.cfgWarmup.checked,
+      warmup_runs: parseInt(el.cfgWarmup.value, 10) || 0,
     },
     run_config: lastRunConfig || buildRunConfig(getConfig(), el.cfgEp.value),
     files: {},
@@ -631,25 +800,49 @@ async function exportResults() {
     const runs = data.runs;
     const stem = filename.replace(/\.[^.]+$/, '');
 
+    // Cold-start block (first warm-up run): real first-call latency incl.
+    // JIT/shader compilation (and, on a cold HTTP cache, model download).
+    const cold = fileColdStarts.get(filename) || null;
+    const coldBlock = cold ? {
+      total_s: cold.total_s,
+      model_init_s: cold.model_init_s,
+      total_inference_s: cold.total_inference_s,
+      cold_start_total_s: round4((cold.model_init_s || 0) + (cold.total_inference_s || 0)),
+    } : null;
+
     // Mean timing (for evaluate.py)
     const meanTiming = {
       filename,
       page_count: runs[0]?.page_count ?? 0,
       total_s:          round4(mean(runs.map(r => r.total_s))),
       model_init_s:     round4(mean(runs.map(r => r.model_init_s))),
+      pdf_load_s:       round4(mean(runs.map(r => r.pdf_load_s ?? 0))),
+      orientation_s:    round4(mean(runs.map(r => r.orientation_s ?? 0))),
       layout_s:         round4(mean(runs.map(r => r.layout_s))),
+      region_collect_s: round4(mean(runs.map(r => r.region_collect_s ?? 0))),
+      ocr_det_s:        round4(mean(runs.map(r => r.ocr_det_s ?? 0))),
+      ocr_rec_s:        round4(mean(runs.map(r => r.ocr_rec_s ?? 0))),
       ocr_s:            round4(mean(runs.map(r => r.ocr_s))),
       formula_s:        round4(mean(runs.map(r => r.formula_s))),
       table_s:          round4(mean(runs.map(r => r.table_s))),
       postprocess_s:    round4(mean(runs.map(r => r.postprocess_s))),
+      other_s:          round4(mean(runs.map(r => r.other_s ?? 0))),
       total_inference_s: round4(mean(runs.map(r => r.total_inference_s))),
       total_ms:         Math.round(mean(runs.map(r => r.total_ms))),
       model_init_ms:    Math.round(mean(runs.map(r => r.model_init_ms))),
+      pdf_load_ms:      Math.round(mean(runs.map(r => r.pdf_load_ms ?? 0))),
+      orientation_ms:   Math.round(mean(runs.map(r => r.orientation_ms ?? 0))),
       layout_ms:        Math.round(mean(runs.map(r => r.layout_ms))),
+      region_collect_ms: Math.round(mean(runs.map(r => r.region_collect_ms ?? 0))),
+      ocr_det_ms:       Math.round(mean(runs.map(r => r.ocr_det_ms ?? 0))),
+      ocr_rec_ms:       Math.round(mean(runs.map(r => r.ocr_rec_ms ?? 0))),
       ocr_ms:           Math.round(mean(runs.map(r => r.ocr_ms))),
       formula_ms:       Math.round(mean(runs.map(r => r.formula_ms))),
       table_ms:         Math.round(mean(runs.map(r => r.table_ms))),
       postprocessing_ms: Math.round(mean(runs.map(r => r.postprocessing_ms))),
+      other_ms:         Math.round(mean(runs.map(r => r.other_ms ?? 0))),
+      // Cold-start (first-call) measurement, kept distinct from warm stats
+      cold_start: coldBlock,
       // Per-run breakdown for variance analysis
       runs: runs.map((r, i) => ({ run: i + 1, ...r })),
       stats: {
@@ -731,8 +924,9 @@ async function buildJsExcel(exportData) {
   const perDoc = [];
   perDoc.push([
     h('Dokumen'), h('Halaman'), h('Inferensi (s)'), h('Inf/Halaman (s)'),
-    h('Layout (s)'), h('OCR (s)'), h('Formula (s)'), h('Tabel (s)'),
-    h('Postprocess (s)'), h('Model Init (s)'), h('Cold Start (s)'),
+    h('Model Init (s)'), h('PDF Load (s)'), h('Orient. (s)'), h('Layout (s)'),
+    h('Region (s)'), h('OCR Det (s)'), h('OCR Rec (s)'), h('Formula (s)'), h('Tabel (s)'),
+    h('Postprocess (s)'), h('Other (s)'), h('Total (s)'), h('Cold Start (s)'),
     h('N Run'), h('Std'), h('CV'), h('Median'), h('Min'), h('Max'),
     h('Konten Stabil'),
   ]);
@@ -741,11 +935,16 @@ async function buildJsExcel(exportData) {
     const pages = t.page_count || 0;
     const infer = t.total_inference_s || 0;
     const std = t.stats?.std_inference_s || 0;
-    const cold = round4((t.model_init_s || 0) + infer);
+    // Real cold-start when captured (first warm-up run), else fall back to
+    // warm model_init + inference (clearly the warm proxy).
+    const cold = t.cold_start?.cold_start_total_s != null
+      ? t.cold_start.cold_start_total_s
+      : round4((t.model_init_s || 0) + infer);
     perDoc.push([
       stem, pages, infer, pages ? round4(infer / pages) : 0,
-      t.layout_s, t.ocr_s, t.formula_s, t.table_s, t.postprocess_s,
-      t.model_init_s, cold,
+      t.model_init_s, t.pdf_load_s ?? 0, t.orientation_s ?? 0, t.layout_s,
+      t.region_collect_s ?? 0, t.ocr_det_s ?? 0, t.ocr_rec_s ?? 0, t.formula_s, t.table_s,
+      t.postprocess_s, t.other_s ?? 0, t.total_s, cold,
       t.stats?.n || 1, std, infer > 0 ? round4(std / infer) : 0,
       t.stats?.median_inference_s, t.stats?.min_inference_s, t.stats?.max_inference_s,
       t.content_stability?.identical ? 'ya' : 'TIDAK',
@@ -755,12 +954,15 @@ async function buildJsExcel(exportData) {
   // Sheet 2: Per Run (variance analysis)
   const perRun = [];
   perRun.push([h('Dokumen'), h('Run'), h('Total (s)'), h('Inferensi (s)'),
-    h('Layout (s)'), h('OCR (s)'), h('Formula (s)'), h('Tabel (s)'),
-    h('Postprocess (s)'), h('Model Init (s)')]);
+    h('Model Init (s)'), h('PDF Load (s)'), h('Orient. (s)'), h('Layout (s)'),
+    h('Region (s)'), h('OCR Det (s)'), h('OCR Rec (s)'), h('Formula (s)'), h('Tabel (s)'),
+    h('Postprocess (s)'), h('Other (s)')]);
   for (const [stem, payload] of Object.entries(exportData.files)) {
     for (const r of payload.timing.runs || []) {
       perRun.push([stem, r.run, r.total_s, r.total_inference_s,
-        r.layout_s, r.ocr_s, r.formula_s, r.table_s, r.postprocess_s, r.model_init_s]);
+        r.model_init_s, r.pdf_load_s ?? 0, r.orientation_s ?? 0, r.layout_s,
+        r.region_collect_s ?? 0, r.ocr_det_s ?? 0, r.ocr_rec_s ?? 0, r.formula_s, r.table_s,
+        r.postprocess_s, r.other_s ?? 0]);
     }
   }
 

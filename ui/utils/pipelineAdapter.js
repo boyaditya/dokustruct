@@ -904,8 +904,15 @@ export class PipelineAdapter {
       const formulaMs     = Number(stageTimings?.formula       ?? 0);
       const tableMs       = Number(stageTimings?.table         ?? 0);
       const readingOrderMs= Number(stageTimings?.reading_order ?? 0);
-      const postCoreMs    = Number(stageTimings?.postprocessing ?? 0);
-      const ocrMs         = Number(stageTimings?.ocr           ?? rawResult?._timings?.ocr ?? 0);
+      // OCR is now split into det + rec (both inference). Combine for the UI's
+      // single OCR stage. Fall back to the legacy single "ocr" key, and treat
+      // any legacy "postprocessing" (which used to hold OCR-rec) as rec time.
+      const ocrDetMs      = Number(stageTimings?.ocr_det ?? stageTimings?.ocr ?? 0);
+      const ocrRecMs      = Number(stageTimings?.ocr_rec ?? stageTimings?.postprocessing ?? 0);
+      const ocrMs         = ocrDetMs + ocrRecMs;
+      // Engine no longer reports a separate heavy "postprocessing"; the
+      // lightweight middle-json/markdown build is measured by the UI below.
+      const postCoreMs    = 0;
       // model_init: time spent loading/initialising models inside the engine.
       // Reported separately so it can be excluded from inference totals.
       const modelInitMs   = Number(stageTimings?.model_init    ?? 0);

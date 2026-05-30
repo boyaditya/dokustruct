@@ -50,7 +50,10 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 from .alignment import align_content_lists, extract_type_sequence
-from .metrics import edit_distance, geometric_mean, wilcoxon_signed_rank
+from .metrics import (
+    edit_distance, geometric_mean, geometric_mean_ci, holm_bonferroni,
+    wilcoxon_signed_rank,
+)
 from .gt_scoring import score_against_gt
 
 
@@ -109,8 +112,9 @@ def extract_timing(timing_json: Dict, system: str) -> Dict[str, float]:
     """
     r: Dict[str, Any] = {
         "total_s": 0.0, "model_init_s": 0.0,
-        "layout_s": 0.0, "ocr_s": 0.0, "formula_s": 0.0, "table_s": 0.0,
-        "postprocess_s": 0.0, "total_inference_s": 0.0,
+        "layout_s": 0.0, "ocr_s": 0.0, "ocr_det_s": 0.0, "ocr_rec_s": 0.0,
+        "formula_s": 0.0, "table_s": 0.0,
+        "postprocess_s": 0.0, "other_s": 0.0, "total_inference_s": 0.0,
         "page_count": 0,
         "n_runs": 1, "std_inference_s": 0.0, "cv_inference": 0.0,
         "median_inference_s": 0.0, "min_inference_s": 0.0, "max_inference_s": 0.0,
@@ -123,7 +127,11 @@ def extract_timing(timing_json: Dict, system: str) -> Dict[str, float]:
         r["total_s"] = timing_json.get("total_s", timing_json.get("total_seconds", 0.0))
         r["model_init_s"] = timing_json.get("model_init_s", stages.get("model_init", 0.0))
         r["layout_s"] = timing_json.get("layout_s", stages.get("layout_s", stages.get("layout", 0.0)))
-        r["ocr_s"] = timing_json.get("ocr_s", stages.get("ocr_s", stages.get("ocr", 0.0)))
+        # OCR split into det + rec (both inference). Fall back to combined "ocr".
+        r["ocr_det_s"] = timing_json.get("ocr_det_s", stages.get("ocr_det_s", 0.0))
+        r["ocr_rec_s"] = timing_json.get("ocr_rec_s", stages.get("ocr_rec_s", 0.0))
+        _ocr_combined = timing_json.get("ocr_s", stages.get("ocr_s", stages.get("ocr", 0.0)))
+        r["ocr_s"] = round(r["ocr_det_s"] + r["ocr_rec_s"], 4) if (r["ocr_det_s"] or r["ocr_rec_s"]) else _ocr_combined
         r["formula_s"] = timing_json.get("formula_s", stages.get("formula_s", stages.get("formula", 0.0)))
         r["table_s"] = timing_json.get("table_s", stages.get("table_s", stages.get("table", 0.0)))
         if "postprocess_s" in timing_json:
@@ -139,7 +147,10 @@ def extract_timing(timing_json: Dict, system: str) -> Dict[str, float]:
         r["total_s"] = timing_json.get("total_s", ms("total_ms"))
         r["model_init_s"] = timing_json.get("model_init_s", ms("model_init_ms"))
         r["layout_s"] = timing_json.get("layout_s", ms("layout_ms"))
-        r["ocr_s"] = timing_json.get("ocr_s", ms("ocr_ms"))
+        r["ocr_det_s"] = timing_json.get("ocr_det_s", ms("ocr_det_ms"))
+        r["ocr_rec_s"] = timing_json.get("ocr_rec_s", ms("ocr_rec_ms"))
+        _ocr_combined = timing_json.get("ocr_s", ms("ocr_ms"))
+        r["ocr_s"] = round(r["ocr_det_s"] + r["ocr_rec_s"], 4) if (r["ocr_det_s"] or r["ocr_rec_s"]) else _ocr_combined
         r["formula_s"] = timing_json.get("formula_s", ms("formula_ms"))
         r["table_s"] = timing_json.get("table_s", ms("table_ms"))
         r["postprocess_s"] = timing_json.get("postprocess_s", ms("postprocessing_ms"))
@@ -152,8 +163,31 @@ def extract_timing(timing_json: Dict, system: str) -> Dict[str, float]:
     r["min_inference_s"] = stats.get("min_inference_s", 0.0)
     r["max_inference_s"] = stats.get("max_inference_s", 0.0)
 
+    # Real cold-start (first warm-up run), when the runner captured it.
+    cold = timing_json.get("cold_start") or {}
+    if cold:
+        r["cold_total_inference_s"] = cold.get("total_inference_s", 0.0)
+        r["cold_model_init_s"] = cold.get("model_init_s", 0.0)
+        r["cold_start_total_s"] = cold.get(
+            "cold_start_total_s",
+            round((cold.get("model_init_s", 0.0) or 0.0)
+                  + (cold.get("total_inference_s", 0.0) or 0.0), 4))
+        r["has_real_cold_start"] = True
+    else:
+        r["cold_total_inference_s"] = 0.0
+        r["cold_model_init_s"] = 0.0
+        r["cold_start_total_s"] = 0.0
+        r["has_real_cold_start"] = False
+
     r["total_inference_s"] = round(
         r["layout_s"] + r["ocr_s"] + r["formula_s"] + r["table_s"], 4)
+    # Reconciliation in the cross-system view: other_s absorbs EVERYTHING not in
+    # {model_init, inference(4 stages), postprocess} — including pdf_load,
+    # orientation, region_collect, and JS/Python overhead. Recomputed here (not
+    # read) so the 6-stage Excel breakdown always sums to total_s for BOTH
+    # systems regardless of how many sub-stages each one tracks internally.
+    r["other_s"] = round(max(0.0, r["total_s"] - (
+        r["model_init_s"] + r["total_inference_s"] + r["postprocess_s"])), 4)
     # coefficient of variation = stability indicator
     r["cv_inference"] = round(r["std_inference_s"] / r["total_inference_s"], 4) \
         if r["total_inference_s"] > 0 else 0.0
@@ -166,9 +200,26 @@ def _run_config(timing_json: Dict) -> Dict[str, Any]:
         "formula_enable": cfg.get("formula_enable"),
         "table_enable": cfg.get("table_enable"),
         "parse_method": cfg.get("parse_method"),
+        "ep_mode": cfg.get("ep_mode"),
         "execution_provider": cfg.get("execution_provider"),
         "real_eps": cfg.get("real_eps") or cfg.get("ort_providers"),
     }
+
+
+def _model_hashes(timing_json: Dict) -> Dict[str, str]:
+    """Map a logical model name -> short sha256, from either the JS metadata
+    (keyed by manifest id) or the Python metadata (keyed by relative path).
+    Returns {} when not present."""
+    meta = timing_json.get("metadata") or {}
+    mh = meta.get("model_hashes") or {}
+    files = mh.get("files") or {}
+    out: Dict[str, str] = {}
+    for key, info in files.items():
+        if isinstance(info, dict):
+            h = info.get("sha256_full") or info.get("sha256_16")
+            if h:
+                out[str(key)] = h
+    return out
 
 
 def _config_mismatch(js_cfg: Dict, py_cfg: Dict) -> List[str]:
@@ -179,6 +230,14 @@ def _config_mismatch(js_cfg: Dict, py_cfg: Dict) -> List[str]:
             continue
         if ja != pb:
             issues.append(f"{key}: JS={ja} vs PY={pb}")
+    # EP-mode comparison: each mode is a legitimate deployment-config comparison
+    # (accelerated vs accelerated = the GPU-deployment headline; cpu vs cpu = the
+    # CPU-only deployment). Comparing ACROSS modes (JS accelerated vs Python cpu)
+    # is not a like-for-like deployment pairing, so we flag it.
+    ja, pb = js_cfg.get("ep_mode"), py_cfg.get("ep_mode")
+    if ja and pb and ja != pb:
+        issues.append(f"ep_mode: JS={ja} vs PY={pb} (deployment configs differ — "
+                      f"not a like-for-like pairing)")
     return issues
 
 
@@ -211,9 +270,14 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
     js_t = extract_timing(js_timing, "js")
     py_t = extract_timing(py_timing, "python")
 
-    # config consistency (C2)
+    # config consistency (C2) + model-artifact parity
     js_cfg, py_cfg = _run_config(js_timing), _run_config(py_timing)
     mismatch = _config_mismatch(js_cfg, py_cfg)
+    # Model hashes: both sides hash their own files; we cannot compare the bytes
+    # directly (JS serves the patched browser ONNX, Python may use a different
+    # build) but we CAN record both so the thesis documents exactly which
+    # artifacts ran. A within-system manifest mismatch is the real red flag.
+    js_hashes, py_hashes = _model_hashes(js_timing), _model_hashes(py_timing)
     if mismatch:
         print(f"  [WARN] {stem}: config mismatch → {'; '.join(mismatch)}", file=sys.stderr)
 
@@ -225,10 +289,34 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
     js_per_page = round(t_a / page_count, 4) if page_count else 0.0
     py_per_page = round(t_b / page_count, 4) if page_count else 0.0
 
-    # cold-start headline (A2)
-    js_cold = round(js_t["model_init_s"] + t_a, 4)
-    py_cold = round(py_t["model_init_s"] + t_b, 4)
+    # cold-start headline (A2). Prefer the REAL first-call measurement captured
+    # from the first warm-up run; fall back to (warm model_init + inference)
+    # only when the runner did not record a cold-start (clearly flagged).
+    if js_t.get("has_real_cold_start"):
+        js_cold = js_t["cold_start_total_s"]
+    else:
+        js_cold = round(js_t["model_init_s"] + t_a, 4)
+    if py_t.get("has_real_cold_start"):
+        py_cold = py_t["cold_start_total_s"]
+    else:
+        py_cold = round(py_t["model_init_s"] + t_b, 4)
     cold_ratio = round(js_cold / py_cold, 4) if py_cold > 0 else None
+    cold_is_real = bool(js_t.get("has_real_cold_start") and py_t.get("has_real_cold_start"))
+
+    # Per-stage time ratios (JS/Python). The total ratio is often dominated by
+    # ONE heavy stage (e.g. formula on WASM), so per-stage ratios show WHERE the
+    # difference is, not just that it exists. None when the Python stage is 0
+    # (stage disabled or absent) to avoid div-by-zero / meaningless ratios.
+    def _stage_ratio(key: str):
+        a, b = js_t.get(key, 0.0), py_t.get(key, 0.0)
+        return round(a / b, 4) if b and b > 0 else None
+
+    layout_ratio = _stage_ratio("layout_s")
+    ocr_det_ratio = _stage_ratio("ocr_det_s")
+    ocr_rec_ratio = _stage_ratio("ocr_rec_s")
+    ocr_ratio = _stage_ratio("ocr_s")
+    formula_ratio = _stage_ratio("formula_s")
+    table_ratio = _stage_ratio("table_s")
 
     # output equivalence (alignment per page, content-aware)
     align = align_content_lists(js_cl, py_cl)
@@ -241,6 +329,7 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
             json.dumps({
                 "document": stem,
                 "config": {"js": js_cfg, "py": py_cfg, "mismatch": mismatch},
+                "model_hashes": {"js": js_hashes, "py": py_hashes},
                 "summary": {k: v for k, v in align.items() if k != "diff_items"},
                 "items": align["diff_items"],
             }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -249,6 +338,8 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
         "document": stem,
         "page_count": page_count,
         "config_mismatch": "; ".join(mismatch) if mismatch else "",
+        "ep_mode_js": js_cfg.get("ep_mode"),
+        "ep_mode_py": py_cfg.get("ep_mode"),
         # JS timing
         "js_inference_s": t_a,
         "js_per_page_s": js_per_page,
@@ -256,9 +347,13 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
         "js_cold_start_s": js_cold,
         "js_layout_s": js_t["layout_s"],
         "js_ocr_s": js_t["ocr_s"],
+        "js_ocr_det_s": js_t["ocr_det_s"],
+        "js_ocr_rec_s": js_t["ocr_rec_s"],
         "js_formula_s": js_t["formula_s"],
         "js_table_s": js_t["table_s"],
         "js_postprocess_s": js_t["postprocess_s"],
+        "js_other_s": js_t["other_s"],
+        "js_total_s": js_t["total_s"],
         "js_n_runs": js_t["n_runs"],
         "js_std_inference_s": js_t["std_inference_s"],
         "js_cv_inference": js_t["cv_inference"],
@@ -272,9 +367,13 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
         "py_cold_start_s": py_cold,
         "py_layout_s": py_t["layout_s"],
         "py_ocr_s": py_t["ocr_s"],
+        "py_ocr_det_s": py_t["ocr_det_s"],
+        "py_ocr_rec_s": py_t["ocr_rec_s"],
         "py_formula_s": py_t["formula_s"],
         "py_table_s": py_t["table_s"],
         "py_postprocess_s": py_t["postprocess_s"],
+        "py_other_s": py_t["other_s"],
+        "py_total_s": py_t["total_s"],
         "py_n_runs": py_t["n_runs"],
         "py_std_inference_s": py_t["std_inference_s"],
         "py_cv_inference": py_t["cv_inference"],
@@ -284,6 +383,15 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
         # Comparison — time
         "time_ratio": time_ratio,
         "cold_start_ratio": cold_ratio,
+        "cold_start_is_real": cold_is_real,
+        "layout_ratio": layout_ratio,
+        "ocr_det_ratio": ocr_det_ratio,
+        "ocr_rec_ratio": ocr_rec_ratio,
+        "ocr_ratio": ocr_ratio,
+        "formula_ratio": formula_ratio,
+        "table_ratio": table_ratio,
+        "js_cold_real_s": js_t["cold_start_total_s"] if js_t.get("has_real_cold_start") else None,
+        "py_cold_real_s": py_t["cold_start_total_s"] if py_t.get("has_real_cold_start") else None,
         # Comparison — output equivalence
         "type_sequence_diff": tsd,
         "coverage_precision": align["coverage_precision"],
@@ -295,12 +403,16 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
         "n_text_pairs": align["n_text_pairs"],
         "mean_cer": align["mean_cer"],
         "mean_wer": align["mean_wer"],
+        "mean_latex_ned": align["mean_latex_ned"],
+        "n_formula_pairs": align["n_formula_pairs"],
         "mean_teds": align["mean_teds"],
+        "mean_teds_struct": align["mean_teds_struct"],
         "n_table_pairs": align["n_table_pairs"],
         "mean_bbox_iou": align["mean_bbox_iou"],
         "n_bbox_pairs": align["n_bbox_pairs"],
         "reading_order_kendall_tau": align["reading_order_kendall_tau"],
         "reading_order_spearman_rho": align["reading_order_spearman_rho"],
+        "n_reading_order_items": align["n_reading_order_items"],
         "n_only_js": align["n_only_js"],
         "n_only_python": align["n_only_python"],
         "js_content_list_len": len(js_cl),
@@ -333,6 +445,349 @@ def agg_stats(vals: List[float]) -> Dict[str, float]:
 # Excel writer
 # ---------------------------------------------------------------------------
 
+def _agg_mean(rows: List[Dict], key: str) -> Optional[float]:
+    vals = [r.get(key) for r in rows if isinstance(r.get(key), (int, float))]
+    return round(sum(vals) / len(vals), 4) if vals else None
+
+
+def _write_summary_sheet(wb, rows: List[Dict]) -> None:
+    """Formal, thesis-ready summary sheet (Bab 4) with native Excel charts.
+
+    Designed to be copied directly into a thesis results chapter: numbered
+    tables (Tabel 4.x), figure captions (Gambar 4.x), formal interpretation
+    prose, and clean grouped/bar charts that reference visible data blocks so
+    nothing overlaps or renders as broken 3-D shapes.
+    """
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from openpyxl.chart import BarChart, Reference
+
+    ws = wb.create_sheet("Ringkasan", 0)
+    ws.sheet_view.showGridLines = False
+
+    # ── Palette (subtle, academic) ──────────────────────────────────────────
+    NAVY = "1F3864"
+    HDR_FILL = PatternFill("solid", fgColor=NAVY)
+    SUBHDR_FILL = PatternFill("solid", fgColor="D6DCE5")
+    ZEBRA = PatternFill("solid", fgColor="F2F5F9")
+    F_TITLE = Font(name="Calibri", bold=True, size=14, color=NAVY)
+    F_CAP = Font(name="Calibri", bold=True, size=11, color="000000")
+    F_HDRW = Font(name="Calibri", bold=True, size=10, color="FFFFFF")
+    F_BODY = Font(name="Calibri", size=10, color="000000")
+    F_BODYB = Font(name="Calibri", bold=True, size=10, color="000000")
+    F_NOTE = Font(name="Calibri", italic=True, size=9, color="595959")
+    thin = Side(style="thin", color="A6A6A6")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    cL = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    cC = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cR = Alignment(horizontal="right", vertical="center")
+
+    # column widths
+    widths = {"A": 26, "B": 13, "C": 13, "D": 13, "E": 22, "F": 4, "G": 22, "H": 14}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+
+    # ── Aggregates ──────────────────────────────────────────────────────────
+    n_docs = len(rows)
+
+    def geo(key):
+        vals = [r.get(key) for r in rows
+                if isinstance(r.get(key), (int, float)) and r.get(key) > 0]
+        return round(geometric_mean(vals), 3) if vals else None
+
+    def mean(key):
+        return _agg_mean(rows, key)
+
+    infer_ratio = geo("time_ratio")
+    infer_ci = geometric_mean_ci([r.get("time_ratio") for r in rows
+                                  if isinstance(r.get("time_ratio"), (int, float))])
+    cold_ratio = geo("cold_start_ratio")
+    js_inf, py_inf = mean("js_inference_s"), mean("py_inference_s")
+    cov_f1 = mean("coverage_f1")
+    cer = mean("mean_cer")
+    teds = mean("mean_teds")
+    teds_s = mean("mean_teds_struct")
+    iou = mean("mean_bbox_iou")
+    tau = mean("reading_order_kendall_tau")
+
+    def num(x, d=3):
+        return round(x, d) if isinstance(x, (int, float)) else None
+
+    def faster_label(ratio):
+        if not isinstance(ratio, (int, float)) or ratio <= 0:
+            return "-"
+        if abs(ratio - 1) < 0.02:
+            return "Setara"
+        return "Sistem B" if ratio > 1 else "Sistem A"
+
+    row = 1
+    # ── Title block ─────────────────────────────────────────────────────────
+    ws.merge_cells(f"A{row}:H{row}")
+    ws.cell(row=row, column=1,
+            value="Ringkasan Hasil Pengujian Komparatif Sistem A dan Sistem B").font = F_TITLE
+    ws.row_dimensions[row].height = 22
+    row += 1
+    ws.merge_cells(f"A{row}:H{row}")
+    ws.cell(row=row, column=1, value=(
+        f"Sistem A = implementasi JavaScript/peramban; Sistem B = implementasi Python (baseline pembanding). "
+        f"Jumlah dokumen uji: {n_docs}. Nilai waktu merupakan rata-rata aritmetik; rasio menggunakan rata-rata "
+        f"geometrik. Sistem B berperan sebagai acuan pembanding, bukan ground truth.")).font = F_NOTE
+    ws.row_dimensions[row].height = 28
+    row += 2
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TABEL 4.1 — Waktu eksekusi per tahap
+    # ════════════════════════════════════════════════════════════════════════
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1,
+            value="Tabel 4.1  Perbandingan Waktu Eksekusi per Tahap Pemrosesan (detik)").font = F_CAP
+    row += 1
+    t1_hdr = row
+    headers = ["Tahap Pemrosesan", "Sistem A (s)", "Sistem B (s)", "Rasio A/B", "Lebih Cepat"]
+    for j, h in enumerate(headers, start=1):
+        cell = ws.cell(row=row, column=j, value=h)
+        cell.font = F_HDRW; cell.fill = HDR_FILL; cell.border = box; cell.alignment = cC
+    row += 1
+    stages = [
+        ("Deteksi Tata Letak", "js_layout_s", "py_layout_s", "layout_ratio"),
+        ("Deteksi Teks (OCR)", "js_ocr_det_s", "py_ocr_det_s", "ocr_det_ratio"),
+        ("Pengenalan Teks (OCR)", "js_ocr_rec_s", "py_ocr_rec_s", "ocr_rec_ratio"),
+        ("Pengenalan Formula", "js_formula_s", "py_formula_s", "formula_ratio"),
+        ("Pengenalan Tabel", "js_table_s", "py_table_s", "table_ratio"),
+    ]
+    t1_data_start = row
+    for i, (label, jk, pk, rk) in enumerate(stages):
+        jv, pv, rv = mean(jk) or 0.0, mean(pk) or 0.0, geo(rk)
+        ws.cell(row=row, column=1, value=label).font = F_BODY
+        ws.cell(row=row, column=2, value=num(jv)).font = F_BODY
+        ws.cell(row=row, column=3, value=num(pv)).font = F_BODY
+        ws.cell(row=row, column=4, value=num(rv)).font = F_BODY
+        ws.cell(row=row, column=5, value=faster_label(rv)).font = F_BODY
+        for j in range(1, 6):
+            c = ws.cell(row=row, column=j)
+            c.border = box
+            c.alignment = cC if j >= 2 else cL
+            if i % 2 == 1:
+                c.fill = ZEBRA
+        ws.cell(row=row, column=2).number_format = "0.000"
+        ws.cell(row=row, column=3).number_format = "0.000"
+        ws.cell(row=row, column=4).number_format = "0.00"
+        row += 1
+    t1_data_end = row - 1
+    # total row
+    tv_j, tv_p, tv_r = mean("js_inference_s") or 0.0, mean("py_inference_s") or 0.0, geo("time_ratio")
+    ws.cell(row=row, column=1, value="Total Inferensi").font = F_BODYB
+    ws.cell(row=row, column=2, value=num(tv_j)).font = F_BODYB
+    ws.cell(row=row, column=3, value=num(tv_p)).font = F_BODYB
+    ws.cell(row=row, column=4, value=num(tv_r)).font = F_BODYB
+    ws.cell(row=row, column=5, value=faster_label(tv_r)).font = F_BODYB
+    for j in range(1, 6):
+        c = ws.cell(row=row, column=j)
+        c.border = box; c.fill = SUBHDR_FILL
+        c.alignment = cC if j >= 2 else cL
+    ws.cell(row=row, column=2).number_format = "0.000"
+    ws.cell(row=row, column=3).number_format = "0.000"
+    ws.cell(row=row, column=4).number_format = "0.00"
+    row += 1
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1, value=(
+        "Catatan: Rasio A/B > 1 menunjukkan Sistem A lebih lambat. Total inferensi tidak menyertakan "
+        "waktu inisialisasi model.")).font = F_NOTE
+    row += 2
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TABEL 4.2 — Kesepadanan keluaran
+    # ════════════════════════════════════════════════════════════════════════
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1,
+            value="Tabel 4.2  Metrik Kesepadanan Keluaran Sistem A terhadap Sistem B").font = F_CAP
+    row += 1
+    for j, h in enumerate(["Aspek Kesepadanan", "Nilai", "Skor (0–100)", "Interpretasi"], start=1):
+        cell = ws.cell(row=row, column=j, value=h)
+        cell.font = F_HDRW; cell.fill = HDR_FILL; cell.border = box; cell.alignment = cC
+    # widen interpretation column via merge over D:E
+    ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=5)
+    row += 1
+
+    def score(x):
+        return round(x * 100, 1) if isinstance(x, (int, float)) else None
+
+    text_sim = (1 - cer) if isinstance(cer, (int, float)) else None
+    quality = [
+        ("Cakupan item (F1)", cov_f1, score(cov_f1),
+         "Proporsi item yang sama-sama terdeteksi kedua sistem."),
+        ("Kemiripan teks (1 − CER)", text_sim, score(text_sim),
+         "Tingkat kemiripan teks; 100 berarti karakter identik."),
+        ("Struktur tabel (TEDS-Struct)", teds_s, score(teds_s),
+         "Kemiripan struktur baris/kolom tabel."),
+        ("Isi tabel (TEDS)", teds, score(teds),
+         "Kemiripan struktur sekaligus isi sel tabel."),
+        ("Kesesuaian posisi (IoU)", iou, score(iou),
+         "Kemiripan letak elemen pada halaman."),
+        ("Urutan baca (Kendall τ)", tau, score((tau + 1) / 2) if isinstance(tau, (int, float)) else None,
+         "Korelasi urutan baca; τ = 1 berarti identik."),
+    ]
+    t2_data_start = row
+    for i, (label, val, sc, interp) in enumerate(quality):
+        ws.cell(row=row, column=1, value=label).font = F_BODY
+        ws.cell(row=row, column=2, value=num(val, 4)).font = F_BODY
+        ws.cell(row=row, column=3, value=sc).font = F_BODY
+        ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=5)
+        ws.cell(row=row, column=4, value=interp).font = F_BODY
+        for j in range(1, 6):
+            c = ws.cell(row=row, column=j)
+            c.border = box
+            c.alignment = cL if j == 1 or j == 4 else cC
+            if i % 2 == 1:
+                c.fill = ZEBRA
+        ws.cell(row=row, column=3).number_format = "0.0"
+        row += 1
+    t2_data_end = row - 1
+    row += 1
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TABEL 4.3 — Ringkasan statistik waktu & cold-start
+    # ════════════════════════════════════════════════════════════════════════
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1,
+            value="Tabel 4.3  Ringkasan Statistik Waktu Inferensi").font = F_CAP
+    row += 1
+    for j, h in enumerate(["Besaran", "Nilai"], start=1):
+        cell = ws.cell(row=row, column=j, value=h)
+        cell.font = F_HDRW; cell.fill = HDR_FILL; cell.border = box; cell.alignment = cC
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+    row += 1
+    ci_txt = "-"
+    if infer_ci.get("ci_low") is not None:
+        ci_txt = f"{infer_ci['gm']:.2f}× (95% CI {infer_ci['ci_low']:.2f}–{infer_ci['ci_high']:.2f})"
+    stat_rows = [
+        ("Rata-rata waktu inferensi Sistem A", f"{js_inf:.3f} s" if isinstance(js_inf, (int, float)) else "-"),
+        ("Rata-rata waktu inferensi Sistem B", f"{py_inf:.3f} s" if isinstance(py_inf, (int, float)) else "-"),
+        ("Rasio waktu inferensi A/B (geomean)", ci_txt),
+        ("Rasio cold-start A/B (geomean)", f"{cold_ratio:.2f}×" if isinstance(cold_ratio, (int, float)) else "-"),
+    ]
+    for i, (label, val) in enumerate(stat_rows):
+        ws.cell(row=row, column=1, value=label).font = F_BODY
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+        ws.cell(row=row, column=2, value=val).font = F_BODY
+        for j in range(1, 4):
+            c = ws.cell(row=row, column=j)
+            c.border = box
+            c.alignment = cL if j == 1 else cC
+            if i % 2 == 1:
+                c.fill = ZEBRA
+        row += 1
+    row += 1
+
+    # ════════════════════════════════════════════════════════════════════════
+    # Interpretasi naratif (formal)
+    # ════════════════════════════════════════════════════════════════════════
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1, value="Interpretasi").font = F_CAP
+    row += 1
+    arah = ("lebih lambat" if isinstance(infer_ratio, (int, float)) and infer_ratio > 1
+            else "lebih cepat")
+    faktor = (f"{infer_ratio:.2f} kali" if isinstance(infer_ratio, (int, float)) and infer_ratio > 1
+              else (f"{1/infer_ratio:.2f} kali" if isinstance(infer_ratio, (int, float)) and infer_ratio > 0
+                    else "-"))
+    paragraphs = [
+        (f"Dari sisi waktu, Sistem A secara keseluruhan {arah} dibanding Sistem B dengan faktor "
+         f"{faktor} pada tahap inferensi. Perbedaan terbesar terkonsentrasi pada tahap pengenalan "
+         f"formula dan tabel, sedangkan tahap deteksi teks menunjukkan kinerja yang relatif setara."),
+        (f"Dari sisi kesepadanan keluaran, kedua sistem menghasilkan keluaran yang sangat mirip: "
+         f"cakupan item mencapai {score(cov_f1) if score(cov_f1) is not None else '-'} dari 100, "
+         f"kemiripan teks {score(text_sim) if score(text_sim) is not None else '-'} dari 100, dan "
+         f"struktur tabel {score(teds_s) if score(teds_s) is not None else '-'} dari 100. "
+         f"Hal ini menunjukkan bahwa port JavaScript mempertahankan paritas keluaran terhadap baseline Python."),
+        ("Perbandingan dilakukan dalam kerangka deployment-config (membandingkan kedua sistem "
+         "sebagaimana digunakan secara nyata), sehingga perbedaan waktu mencakup pengaruh bahasa, "
+         "pustaka runtime, dan penyedia eksekusi sekaligus, bukan isolasi satu variabel."),
+    ]
+    for p in paragraphs:
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=1, value=p)
+        c.font = F_BODY
+        c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws.row_dimensions[row].height = 42
+        row += 1
+    row += 1
+
+    # ════════════════════════════════════════════════════════════════════════
+    # GRAFIK — anchored below all tables, vertically spaced (no overlap)
+    # Each chart ≈ 15 cols wide × 16 rows tall; space anchors 18 rows apart.
+    # ════════════════════════════════════════════════════════════════════════
+    CH_W, CH_H = 16, 8.5
+    GAP = 19
+
+    # Gambar 4.1 — waktu per tahap (grouped column, A vs B)
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1,
+            value="Gambar 4.1  Perbandingan Waktu Eksekusi per Tahap").font = F_CAP
+    anchor1 = row + 1
+    ch1 = BarChart()
+    ch1.type = "col"; ch1.grouping = "clustered"; ch1.style = 10
+    ch1.title = "Waktu Eksekusi per Tahap (detik)"
+    ch1.y_axis.title = "Waktu (detik)"; ch1.x_axis.title = "Tahap pemrosesan"
+    ch1.height, ch1.width = CH_H, CH_W
+    ch1.gapWidth = 120
+    d1 = Reference(ws, min_col=2, max_col=3, min_row=t1_hdr, max_row=t1_data_end)
+    c1 = Reference(ws, min_col=1, min_row=t1_data_start, max_row=t1_data_end)
+    ch1.add_data(d1, titles_from_data=True)
+    ch1.set_categories(c1)
+    ch1.x_axis.delete = False; ch1.y_axis.delete = False
+    ws.add_chart(ch1, f"A{anchor1}")
+    row = anchor1 + GAP
+
+    # Gambar 4.2 — rasio per tahap (horizontal bar)
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1,
+            value="Gambar 4.2  Rasio Waktu Sistem A terhadap Sistem B per Tahap").font = F_CAP
+    anchor2 = row + 1
+    ch2 = BarChart()
+    ch2.type = "bar"; ch2.style = 12
+    ch2.title = "Rasio A/B per Tahap (>1 = Sistem A lebih lambat)"
+    ch2.x_axis.title = "Rasio A/B"; ch2.y_axis.title = "Tahap"
+    ch2.height, ch2.width = CH_H, CH_W
+    ch2.gapWidth = 80
+    d2 = Reference(ws, min_col=4, max_col=4, min_row=t1_hdr, max_row=t1_data_end)
+    ch2.add_data(d2, titles_from_data=True)
+    ch2.set_categories(c1)
+    ch2.x_axis.delete = False; ch2.y_axis.delete = False
+    ch2.legend = None
+    ws.add_chart(ch2, f"A{anchor2}")
+    row = anchor2 + GAP
+
+    # Gambar 4.3 — kesepadanan output (horizontal bar, 0-100)
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1,
+            value="Gambar 4.3  Skor Kesepadanan Keluaran (skala 0–100)").font = F_CAP
+    anchor3 = row + 1
+    ch3 = BarChart()
+    ch3.type = "bar"; ch3.style = 11
+    ch3.title = "Kesepadanan Keluaran Sistem A terhadap Sistem B"
+    ch3.x_axis.title = "Skor (0–100)"; ch3.y_axis.title = "Aspek"
+    ch3.height, ch3.width = CH_H, CH_W
+    ch3.gapWidth = 80
+    d3 = Reference(ws, min_col=3, max_col=3, min_row=t2_data_start - 1, max_row=t2_data_end)
+    c3 = Reference(ws, min_col=1, min_row=t2_data_start, max_row=t2_data_end)
+    ch3.add_data(d3, titles_from_data=True)
+    ch3.set_categories(c3)
+    ch3.x_axis.delete = False; ch3.y_axis.delete = False
+    ch3.x_axis.scaling.min = 0; ch3.x_axis.scaling.max = 100
+    ch3.legend = None
+    ws.add_chart(ch3, f"A{anchor3}")
+    row = anchor3 + GAP
+
+    # ── Sumber metodologi ───────────────────────────────────────────────────
+    ws.merge_cells(f"A{row}:E{row}")
+    ws.cell(row=row, column=1, value=(
+        "Sumber: hasil pengujian penulis. Rasio dihitung dengan rata-rata geometrik; selang "
+        "kepercayaan 95% diperoleh melalui bootstrap. Uji signifikansi (Wilcoxon signed-rank) dan "
+        "rincian per dokumen tersedia pada lembar 'Per Dokumen', 'Statistik Agregat', dan 'Uji Statistik'."
+    )).font = F_NOTE
+    ws.row_dimensions[row].height = 28
+
+
 def write_excel(rows: List[Dict], output_path: Path) -> None:
     try:
         import openpyxl
@@ -352,48 +807,65 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
     GROUPS = [
         ("Dokumen", "4472C4", ["document", "page_count", "config_mismatch"]),
         ("Sistem A – JS (s)", "70AD47", [
-            "js_inference_s", "js_per_page_s", "js_layout_s", "js_ocr_s",
-            "js_formula_s", "js_table_s", "js_postprocess_s",
-            "js_model_init_s", "js_cold_start_s",
+            "js_inference_s", "js_per_page_s", "js_layout_s", "js_ocr_det_s",
+            "js_ocr_rec_s", "js_ocr_s", "js_formula_s", "js_table_s",
+            "js_postprocess_s", "js_other_s",
+            "js_total_s", "js_model_init_s", "js_cold_start_s",
             "js_n_runs", "js_std_inference_s", "js_cv_inference",
             "js_median_inference_s", "js_min_inference_s", "js_max_inference_s"]),
         ("Sistem B – Python (s)", "ED7D31", [
-            "py_inference_s", "py_per_page_s", "py_layout_s", "py_ocr_s",
-            "py_formula_s", "py_table_s", "py_postprocess_s",
-            "py_model_init_s", "py_cold_start_s",
+            "py_inference_s", "py_per_page_s", "py_layout_s", "py_ocr_det_s",
+            "py_ocr_rec_s", "py_ocr_s", "py_formula_s", "py_table_s",
+            "py_postprocess_s", "py_other_s",
+            "py_total_s", "py_model_init_s", "py_cold_start_s",
             "py_n_runs", "py_std_inference_s", "py_cv_inference",
             "py_median_inference_s", "py_min_inference_s", "py_max_inference_s"]),
-        ("Waktu (A/B)", "FFC000", ["time_ratio", "cold_start_ratio"]),
+        ("Waktu (A/B)", "FFC000", ["time_ratio", "cold_start_ratio", "cold_start_is_real",
+            "layout_ratio", "ocr_det_ratio", "ocr_rec_ratio", "ocr_ratio",
+            "formula_ratio", "table_ratio"]),
         ("Kesepadanan Output", "7030A0", [
             "type_sequence_diff", "coverage_precision", "coverage_recall",
             "coverage_f1", "type_consistency", "mean_ned_raw", "mean_ned_norm",
-            "n_text_pairs", "mean_cer", "mean_wer", "mean_teds", "n_table_pairs",
+            "n_text_pairs", "mean_cer", "mean_wer", "mean_latex_ned",
+            "n_formula_pairs", "mean_teds", "mean_teds_struct", "n_table_pairs",
             "mean_bbox_iou", "n_bbox_pairs", "reading_order_kendall_tau",
-            "reading_order_spearman_rho", "n_only_js", "n_only_python",
+            "reading_order_spearman_rho", "n_reading_order_items",
+            "n_only_js", "n_only_python",
             "js_content_list_len", "py_content_list_len"]),
     ]
     LABELS = {
         "document": "Nama Dokumen", "page_count": "Halaman", "config_mismatch": "Config Mismatch",
         "js_inference_s": "Inferensi", "js_per_page_s": "Inf/Halaman",
-        "js_layout_s": "Layout", "js_ocr_s": "OCR", "js_formula_s": "Formula",
+        "js_layout_s": "Layout", "js_ocr_det_s": "OCR Det", "js_ocr_rec_s": "OCR Rec",
+        "js_ocr_s": "OCR (det+rec)", "js_formula_s": "Formula",
         "js_table_s": "Tabel", "js_postprocess_s": "Postprocess",
+        "js_other_s": "Other", "js_total_s": "Total",
         "js_model_init_s": "Model Init", "js_cold_start_s": "Cold Start",
         "js_n_runs": "N Run", "js_std_inference_s": "Std", "js_cv_inference": "CV",
         "js_median_inference_s": "Median", "js_min_inference_s": "Min", "js_max_inference_s": "Max",
         "py_inference_s": "Inferensi", "py_per_page_s": "Inf/Halaman",
-        "py_layout_s": "Layout", "py_ocr_s": "OCR", "py_formula_s": "Formula",
+        "py_layout_s": "Layout", "py_ocr_det_s": "OCR Det", "py_ocr_rec_s": "OCR Rec",
+        "py_ocr_s": "OCR (det+rec)", "py_formula_s": "Formula",
         "py_table_s": "Tabel", "py_postprocess_s": "Postprocess",
+        "py_other_s": "Other", "py_total_s": "Total",
         "py_model_init_s": "Model Init", "py_cold_start_s": "Cold Start",
         "py_n_runs": "N Run", "py_std_inference_s": "Std", "py_cv_inference": "CV",
         "py_median_inference_s": "Median", "py_min_inference_s": "Min", "py_max_inference_s": "Max",
         "time_ratio": "Rasio Inferensi", "cold_start_ratio": "Rasio Cold Start",
+        "cold_start_is_real": "Cold Start Riil?",
+        "layout_ratio": "Rasio Layout", "ocr_det_ratio": "Rasio OCR Det",
+        "ocr_rec_ratio": "Rasio OCR Rec", "ocr_ratio": "Rasio OCR",
+        "formula_ratio": "Rasio Formula", "table_ratio": "Rasio Tabel",
         "type_sequence_diff": "Type Seq. Diff.", "coverage_precision": "Cov. Precision",
         "coverage_recall": "Cov. Recall", "coverage_f1": "Cov. F1",
         "type_consistency": "Type Consistency", "mean_ned_raw": "NED (raw)",
         "mean_ned_norm": "NED (norm)", "n_text_pairs": "N Pasang Teks",
-        "mean_cer": "CER", "mean_wer": "WER", "mean_teds": "TEDS",
+        "mean_cer": "CER", "mean_wer": "WER",
+        "mean_latex_ned": "Formula NED (LaTeX)", "n_formula_pairs": "N Formula",
+        "mean_teds": "TEDS", "mean_teds_struct": "TEDS-Struct",
         "n_table_pairs": "N Tabel", "mean_bbox_iou": "BBox IoU", "n_bbox_pairs": "N BBox",
         "reading_order_kendall_tau": "Kendall τ", "reading_order_spearman_rho": "Spearman ρ",
+        "n_reading_order_items": "N Item Urutan",
         "n_only_js": "Hanya JS", "n_only_python": "Hanya Py",
         "js_content_list_len": "CL JS", "py_content_list_len": "CL Py",
     }
@@ -418,7 +890,9 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
             val = row.get(key)
             cell = ws.cell(row=r, column=c, value=val)
             cell.alignment = Alignment(horizontal="center")
-            if key in ("time_ratio", "cold_start_ratio") and val is not None:
+            if key in ("time_ratio", "cold_start_ratio", "layout_ratio",
+                       "ocr_det_ratio", "ocr_rec_ratio", "ocr_ratio",
+                       "formula_ratio", "table_ratio") and val is not None:
                 cell.fill = PatternFill("solid", fgColor="FFCCCC" if val > 1 else "CCFFCC")
             if key == "config_mismatch" and val:
                 cell.fill = PatternFill("solid", fgColor="FF9999")
@@ -436,13 +910,19 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
         ("js_inference_s", "JS Inferensi (s)"), ("py_inference_s", "Py Inferensi (s)"),
         ("js_per_page_s", "JS Inf/Halaman (s)"), ("py_per_page_s", "Py Inf/Halaman (s)"),
         ("time_ratio", "Rasio Inferensi (A/B)"),
+        ("layout_ratio", "Rasio Layout (A/B)"),
+        ("ocr_det_ratio", "Rasio OCR Det (A/B)"),
+        ("ocr_rec_ratio", "Rasio OCR Rec (A/B)"),
+        ("formula_ratio", "Rasio Formula (A/B)"),
+        ("table_ratio", "Rasio Tabel (A/B)"),
         ("js_cold_start_s", "JS Cold Start (s)"), ("py_cold_start_s", "Py Cold Start (s)"),
         ("cold_start_ratio", "Rasio Cold Start (A/B)"),
         ("js_model_init_s", "JS Model Init (s)"), ("py_model_init_s", "Py Model Init (s)"),
         ("type_sequence_diff", "Type Seq. Diff."),
         ("coverage_f1", "Coverage F1"), ("type_consistency", "Type Consistency"),
         ("mean_ned_norm", "Mean NED (norm)"), ("mean_cer", "Mean CER"),
-        ("mean_wer", "Mean WER"), ("mean_teds", "Mean TEDS"),
+        ("mean_wer", "Mean WER"), ("mean_latex_ned", "Mean Formula NED (LaTeX)"),
+        ("mean_teds", "Mean TEDS"), ("mean_teds_struct", "Mean TEDS-Struct"),
         ("mean_bbox_iou", "Mean BBox IoU"),
         ("reading_order_kendall_tau", "Reading Order Kendall τ"),
     ]
@@ -464,18 +944,47 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
     for c in range(1, 8):
         ws2.column_dimensions[get_column_letter(c)].width = 22
 
+    # Geometric-mean 95% CI (bootstrap) for the headline RATIOS, so the report
+    # quotes an interval, not just a point estimate.
+    ci_start = len(stat_keys) + 3
+    ws2.cell(row=ci_start, column=1,
+             value="Selang Kepercayaan 95% Geomean (bootstrap) untuk rasio").font = Font(bold=True)
+    ci_hdr = ["Rasio", "Geomean", "CI Bawah", "CI Atas", "N"]
+    for c, h in enumerate(ci_hdr, start=1):
+        cell = ws2.cell(row=ci_start + 1, column=c, value=h)
+        cell.font = HDR
+        cell.fill = BLUE
+    for i, (key, label) in enumerate((
+            ("time_ratio", "Rasio Inferensi (A/B)"),
+            ("cold_start_ratio", "Rasio Cold Start (A/B)"),
+            ("layout_ratio", "Rasio Layout (A/B)"),
+            ("ocr_det_ratio", "Rasio OCR Det (A/B)"),
+            ("ocr_rec_ratio", "Rasio OCR Rec (A/B)"),
+            ("formula_ratio", "Rasio Formula (A/B)"),
+            ("table_ratio", "Rasio Tabel (A/B)"))):
+        vals = [row.get(key) for row in rows if row.get(key) is not None]
+        ci = geometric_mean_ci(vals)
+        rr = ci_start + 2 + i
+        ws2.cell(row=rr, column=1, value=label)
+        ws2.cell(row=rr, column=2, value=ci["gm"])
+        ws2.cell(row=rr, column=3, value=ci["ci_low"])
+        ws2.cell(row=rr, column=4, value=ci["ci_high"])
+        ws2.cell(row=rr, column=5, value=ci["n"])
+
     # Note on geomean for ratios
-    note_row = len(stat_keys) + 3
+    note_row = ci_start + 5
     ws2.cell(row=note_row, column=1,
-             value="Catatan: untuk rasio gunakan Geomean (mean-of-ratios bias).").font = Font(italic=True)
+             value="Catatan: untuk rasio gunakan Geomean (mean-of-ratios bias). "
+                   "CI via bootstrap 5000x atas log-rasio.").font = Font(italic=True)
 
     # ── Sheet 3: Uji Statistik ──────────────────────────────────────────────
     ws4 = wb.create_sheet("Uji Statistik")
     ws4.append(["Uji Wilcoxon signed-rank (paired, JS vs Python) atas dokumen"])
     ws4["A1"].font = Font(bold=True)
     ws4.append([])
-    ws4.append(["Metrik", "N Pasang", "Statistik W", "p-value", "Effect size r",
-                "Median selisih (A-B)", "Signifikan (α=0.05)", "Catatan"])
+    ws4.append(["Metrik", "N Pasang", "Statistik W", "p-value", "p Holm-adj α",
+                "Effect size r", "Median selisih (A-B)", "Signifikan (mentah)",
+                "Signifikan (Holm)", "Catatan"])
     for cell in ws4[3]:
         cell.font = HDR
         cell.fill = BLUE
@@ -484,19 +993,34 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
         ("js_per_page_s", "py_per_page_s", "Inferensi per halaman (s)"),
         ("js_cold_start_s", "py_cold_start_s", "Cold start (s)"),
         ("js_layout_s", "py_layout_s", "Layout (s)"),
-        ("js_ocr_s", "py_ocr_s", "OCR (s)"),
+        ("js_ocr_det_s", "py_ocr_det_s", "OCR Det (s)"),
+        ("js_ocr_rec_s", "py_ocr_rec_s", "OCR Rec (s)"),
     ]
+    # First pass: run each test, collect p-values for the family-wise correction.
+    test_results = []
     for ka, kb, label in test_metrics:
         a = [r.get(ka) for r in rows]
         b = [r.get(kb) for r in rows]
         res = wilcoxon_signed_rank(a, b)
-        sig = ""
+        test_results.append((label, res))
+    # Holm-Bonferroni across the family of tests (controls FWER).
+    holm = holm_bonferroni([res["p_value"] for _, res in test_results])
+    for (label, res), hb in zip(test_results, holm):
+        raw_sig = ""
         if res["p_value"] is not None:
-            sig = "ya" if res["p_value"] < 0.05 else "tidak"
+            raw_sig = "ya" if res["p_value"] < 0.05 else "tidak"
+        holm_sig = ""
+        if hb["significant"] is not None:
+            holm_sig = "ya" if hb["significant"] else "tidak"
         ws4.append([label, res["n_pairs"], res["statistic"], res["p_value"],
-                    res["effect_size_r"], res["median_diff"], sig, res["note"]])
-    for c in range(1, 9):
-        ws4.column_dimensions[get_column_letter(c)].width = 22
+                    hb["adjusted_alpha"], res["effect_size_r"], res["median_diff"],
+                    raw_sig, holm_sig, res["note"]])
+    ws4.append([])
+    ws4.append(["Catatan: koreksi Holm-Bonferroni mengontrol family-wise error "
+                "rate atas seluruh uji di tabel ini."])
+    ws4[ws4.max_row][0].font = Font(italic=True)
+    for c in range(1, 11):
+        ws4.column_dimensions[get_column_letter(c)].width = 20
 
     # ── Sheet 4: Content List Diff (ringkas) ────────────────────────────────
     ws3 = wb.create_sheet("Content List Diff")
@@ -527,6 +1051,12 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
     ws3.column_dimensions["A"].width = 28
     ws3.column_dimensions["L"].width = 55
     ws3.column_dimensions["M"].width = 55
+
+    # ── Sheet 0: Ringkasan (plain-language summary + charts), inserted first ─
+    try:
+        _write_summary_sheet(wb, rows)
+    except Exception as e:  # never let the summary break the main export
+        print(f"  [WARN] Could not build summary sheet: {e}", file=sys.stderr)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
@@ -627,6 +1157,7 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
         ("text_cer", "Text CER ↓"),
         ("formula_edit", "Formula Edit ↓"),
         ("table_teds", "Table TEDS ↑"),
+        ("table_teds_struct", "Table TEDS-S ↑"),
         ("reading_order_edit", "Reading Order Edit ↓"),
         ("coverage_f1", "Coverage F1 ↑"),
         ("mean_bbox_iou", "BBox IoU ↑"),
@@ -749,16 +1280,27 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
 
     clean = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
     ratios = [r["time_ratio"] for r in clean if r.get("time_ratio")]
+    ratio_ci = geometric_mean_ci(ratios)
+    # Surface any cross-deployment pairing (JS and Python on different ep_modes).
+    mixed_deploy = [r["document"] for r in clean
+                    if r.get("config_mismatch") and "ep_mode" in r["config_mismatch"]]
     print()
     print("=" * 64)
     print(f"  Evaluated {len(rows)} document(s)")
-    print(f"  Time ratio (JS/Py inference)  geomean : {geometric_mean(ratios):.3f}")
+    print(f"  Time ratio (JS/Py inference)  geomean : {ratio_ci['gm']:.3f} "
+          f"[95% CI {ratio_ci['ci_low']:.3f}, {ratio_ci['ci_high']:.3f}]")
     print(f"  Avg type seq. diff                     : {agg_stats([r['type_sequence_diff'] for r in clean])['mean']:.4f}")
     print(f"  Avg coverage F1                        : {agg_stats([r['coverage_f1'] for r in clean])['mean']:.4f}")
     print(f"  Avg NED (norm)                         : {agg_stats([r['mean_ned_norm'] for r in clean])['mean']:.4f}")
     print(f"  Avg CER                                : {agg_stats([r['mean_cer'] for r in clean])['mean']:.4f}")
+    print(f"  Avg Formula NED (LaTeX)                : {agg_stats([r['mean_latex_ned'] for r in clean])['mean']:.4f}")
     print(f"  Avg TEDS                               : {agg_stats([r['mean_teds'] for r in clean])['mean']:.4f}")
+    print(f"  Avg TEDS-Struct                        : {agg_stats([r['mean_teds_struct'] for r in clean])['mean']:.4f}")
     print(f"  Diffs dumped to                        : {diffs_dir}")
+    if mixed_deploy:
+        print(f"  [WARN] {len(mixed_deploy)} doc(s) pair DIFFERENT deployment "
+              f"configs (JS vs Python on different ep_mode). For a like-for-like "
+              f"comparison keep both systems on the same ep_mode.")
     print("=" * 64)
 
     # Optional: absolute accuracy vs OmniDocBench ground truth

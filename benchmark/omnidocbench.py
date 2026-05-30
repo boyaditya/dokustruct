@@ -233,8 +233,22 @@ def convert_dataset(gt_json_path: Path, out_dir: Path,
         cl = gt_page_to_content_list(page, include_discarded=include_discarded)
         (out_dir / f"{stem}_content_list.json").write_text(
             json.dumps(cl, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Content-complexity signals so the timing corpus can be stratified by
+        # what actually drives runtime (text/table/formula counts), not just
+        # document type and language.
+        type_counts: Dict[str, int] = {}
+        for it in cl:
+            t = it.get("type", "unknown")
+            type_counts[t] = type_counts.get(t, 0) + 1
+        n_items = len(cl)
+        complexity = "simple" if n_items <= 5 else ("medium" if n_items <= 15 else "complex")
         index[stem] = {
-            "n_items": len(cl),
+            "n_items": n_items,
+            "complexity": complexity,
+            "n_text": type_counts.get("text", 0),
+            "n_table": type_counts.get("table", 0),
+            "n_equation": type_counts.get("equation", 0),
+            "n_image": type_counts.get("image", 0),
             "data_source": attrs["data_source"],
             "language": attrs["language"],
             "layout": attrs["layout"],

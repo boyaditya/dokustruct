@@ -18,6 +18,7 @@ import { MemoryDataWriter } from './rapid_doc/data/data_reader_writer/index.js';
 import { MakeMode } from './rapid_doc/utils/enum_class.js';
 import { buildXlsxBlob } from './ui/utils/xlsxWriter.js';
 import { ASSET_MANIFEST } from './rapid_doc/utils/model_url_map.js';
+import JSZip from 'jszip';
 
 const PDF_PAGES_BATCH = 64; // default batch size
 
@@ -881,30 +882,45 @@ async function exportResults() {
 
   const tsStamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
 
-  // 1) Combined JSON (evaluate.py can explode this directly)
-  downloadBlob(
-    new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' }),
-    `benchmark_js_${tsStamp}.json`);
+  // Bundle EVERYTHING into a single ZIP so the browser fires one download
+  // (multiple sequential downloads get blocked/throttled by browsers) and the
+  // archive can be fed straight into benchmark/evaluate.py via --js-dir.
+  const zip = new JSZip();
 
-  log('Combined JSON exported. evaluate.py can read it via --js-dir (auto-explodes benchmark_js_*.json).', 'ok');
+  // 1) Combined JSON (evaluate.py auto-explodes benchmark_js_*.json)
+  zip.file(`benchmark_js_${tsStamp}.json`, JSON.stringify(exportData, null, 2));
 
-  // 2) Individual <stem>_timing.json + <stem>_content_list.json for evaluate.py
+  // 2) Per-file <stem>_timing.json + <stem>_content_list.json for evaluate.py.
+  //    Placed under js_results/ so the ZIP mirrors the expected --js-dir layout.
   for (const [filename, data] of Object.entries(byFile)) {
     const stem = filename.replace(/\.[^.]+$/, '');
     const meanTiming = exportData.files[stem].timing;
-    downloadBlob(new Blob([JSON.stringify(meanTiming, null, 2)], { type: 'application/json' }),
-      `${stem}_timing.json`);
-    downloadBlob(new Blob([JSON.stringify(data.content_list, null, 2)], { type: 'application/json' }),
-      `${stem}_content_list.json`);
+    zip.file(`js_results/${stem}_timing.json`, JSON.stringify(meanTiming, null, 2));
+    zip.file(`js_results/${stem}_content_list.json`, JSON.stringify(data.content_list, null, 2));
   }
 
   // 3) Standalone Excel of the JS-side data (ready immediately, no Python needed)
   try {
     const xlsxBlob = await buildJsExcel(exportData);
-    downloadBlob(xlsxBlob, `benchmark_js_${tsStamp}.xlsx`);
-    log('JS benchmark Excel exported (benchmark_js_*.xlsx). For the full JS↔Python comparison, run benchmark/evaluate.py.', 'ok');
+    zip.file(`benchmark_js_${tsStamp}.xlsx`, xlsxBlob);
   } catch (e) {
-    log(`Excel export failed: ${e?.message ?? e}`, 'err');
+    log(`Excel build failed (ZIP will omit it): ${e?.message ?? e}`, 'err');
+  }
+
+  // 4) Emit the single ZIP.
+  try {
+    const zipBlob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+    const fileCount = Object.keys(byFile).length;
+    downloadBlob(zipBlob, `benchmark_js_${tsStamp}.zip`);
+    log(`ZIP exported: ${fileCount} file(s) × (timing + content_list) + combined JSON + Excel ` +
+        `in benchmark_js_${tsStamp}.zip.`, 'ok');
+    log('Unzip js_results/ into benchmark/js_results, then run benchmark/evaluate.py for the full JS↔Python comparison.', 'info');
+  } catch (e) {
+    log(`ZIP export failed: ${e?.message ?? e}`, 'err');
   }
 }
 

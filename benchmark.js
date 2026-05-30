@@ -249,7 +249,11 @@ function getConfig() {
       model_type: 'unet_slanet_plus',
       force_ocr: false,
       use_word_box: false,
-      table_formula_enable: false,
+      // Match the Python parity config (build_parity_config leaves
+      // table_formula_enable at its default True). With table_formula_enable
+      // OFF, formulas inside table cells are read as plain OCR text and their
+      // superscripts/subscripts collapse, diverging from the Python baseline.
+      table_formula_enable: el.cfgFormula.checked,
       table_image_enable: false,
       skip_text_in_image: true,
       use_img2table: false,

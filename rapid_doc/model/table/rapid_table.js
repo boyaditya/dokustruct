@@ -261,7 +261,10 @@ export class RapidTableModel {
     }
 
     if (Array.isArray(mfdRes)) {
-      const delimiters = getLatexDelimiterConfig() || { inline: { left: "\\(", right: "\\)" } };
+      // Default to `$`/`$` to match the Python baseline (mkcontent
+      // default_delimiters) and the JS mkcontent inline default. The previous
+      // `\(`/`\)` fallback diverged from Python and from non-table inline math.
+      const delimiters = getLatexDelimiterConfig() || { inline: { left: "$", right: "$" } };
       const inlineLeftDelimiter = delimiters.inline.left;
       const inlineRightDelimiter = delimiters.inline.right;
 

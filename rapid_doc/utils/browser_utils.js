@@ -66,13 +66,61 @@ export function detectProfile() {
   return BrowserPerformanceProfile.DESKTOP;
 }
 
+// ─── Background-throttle-resistant yield ─────────────────────────────────────
+//
+// `setTimeout(fn, 0)` is NOT a reliable way to yield: browsers clamp timers in
+// hidden/background tabs to a minimum of ~1000ms, and Chrome's "intensive
+// throttling" further clamps them to once per minute after a tab has been
+// hidden for a few minutes. Because the pipeline awaits a yield at many points
+// per page batch (layout, formula, OCR det/rec, table, postprocess), a
+// timer-based yield makes inference crawl or appear frozen as soon as the tab
+// loses focus — only resuming when the user interacts with the page.
+//
+// `MessageChannel` callbacks are macrotasks that the background-tab timer
+// throttling does NOT apply to, so they keep firing at full speed in hidden
+// tabs. A single channel is reused and resolvers are drained FIFO (one message
+// delivered per `postMessage`, so order is preserved) to avoid per-yield
+// allocation in the hot loop.
+
+/** @type {MessageChannel | null} */
+let _yieldChannel = null;
+/** @type {Array<() => void>} */
+const _yieldResolvers = [];
+
+function getYieldChannel() {
+  if (_yieldChannel) return _yieldChannel;
+  if (typeof MessageChannel !== 'function') return null;
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => {
+    const resolve = _yieldResolvers.shift();
+    if (resolve) resolve();
+  };
+  // Some environments require start() before messages flow.
+  channel.port1.start?.();
+  _yieldChannel = channel;
+  return channel;
+}
+
 /**
- * Yields control back to the browser event loop.
- * Prevents UI freeze during long-running pipeline operations.
+ * Yields control back to the browser event loop without being throttled when
+ * the tab is in the background. Prevents UI freeze during long-running pipeline
+ * operations and keeps inference running at full speed in hidden tabs.
+ *
+ * Uses MessageChannel (not subject to background-tab timer clamping) when
+ * available, falling back to setTimeout in non-browser environments.
+ *
  * @returns {Promise<void>}
  */
-export async function yieldToBrowser() {
-  await new Promise(resolve => setTimeout(resolve, 0));
+export function yieldToBrowser() {
+  const channel = getYieldChannel();
+  if (channel) {
+    return new Promise((resolve) => {
+      _yieldResolvers.push(resolve);
+      channel.port2.postMessage(0);
+    });
+  }
+  // Fallback for environments without MessageChannel (e.g. some test runners).
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /**

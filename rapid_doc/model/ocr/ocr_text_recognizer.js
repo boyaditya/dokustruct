@@ -8,7 +8,7 @@
 import * as ort from 'onnxruntime-web';
 import { acquireGlobalGpu } from '../../utils/ort_runtime.js';
 import { AbortException } from '../../utils/exceptions.js';
-import { formatPipelineError, detectProfile } from '../../utils/browser_utils.js';
+import { formatPipelineError, detectProfile, yieldToBrowser } from '../../utils/browser_utils.js';
 import { RecPreProcess } from './ocr_preprocess.js';
 import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 
@@ -29,19 +29,18 @@ function getMaxConcurrentBatches(useWebGpu) {
 }
 
 /**
- * Yield execution to the browser's idle callback mechanism.
- * FIX P11: keeps the browser event loop responsive between non-critical OCR rec batches.
- * Uses requestIdleCallback when available; falls back to setTimeout(cb, 0).
+ * Yield execution back to the browser event loop between OCR rec batches.
+ * FIX P11: keeps the event loop responsive between non-critical OCR rec batches.
+ *
+ * NOTE: this used to call requestIdleCallback (falling back to setTimeout), but
+ * both are heavily throttled — or suspended entirely — in hidden/background
+ * tabs, which stalled OCR recognition (the heaviest stage) whenever the tab
+ * lost focus. It now delegates to the shared MessageChannel-based
+ * `yieldToBrowser`, which is NOT subject to background-tab throttling.
  * @returns {Promise<void>}
  */
 function yieldToIdleCallback() {
-  return new Promise(resolve => {
-    if (typeof requestIdleCallback === 'function') {
-      requestIdleCallback(() => resolve());
-    } else {
-      setTimeout(resolve, 0);
-    }
-  });
+  return yieldToBrowser();
 }
 
 /**

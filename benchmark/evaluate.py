@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -52,7 +53,7 @@ for _stream in (sys.stdout, sys.stderr):
 from .alignment import align_content_lists, extract_type_sequence
 from .metrics import (
     edit_distance, geometric_mean, geometric_mean_ci, holm_bonferroni,
-    wilcoxon_signed_rank,
+    paired_diff_ci, wilcoxon_signed_rank,
 )
 from .gt_scoring import score_against_gt
 
@@ -252,6 +253,29 @@ def type_sequence_difference(cl_a: List[Dict], cl_b: List[Dict]) -> float:
     return round(edit_distance(ta, tb) / denom, 4) if denom else 0.0
 
 
+def _input_parity(js_timing: Dict, py_timing: Dict) -> Dict[str, Any]:
+    """Compare the input-file provenance recorded by both runners.
+
+    Returns whether both systems consumed the SAME input bytes (sha256 match)
+    plus the input kind. This is a clean parity proof for the paired comparison.
+    """
+    ji = js_timing.get("input_file") or {}
+    pi = py_timing.get("input_file") or {}
+    out: Dict[str, Any] = {
+        "js_kind": ji.get("kind"),
+        "py_kind": pi.get("kind"),
+        "js_sha256": ji.get("sha256_full") or ji.get("sha256_16"),
+        "py_sha256": pi.get("sha256_full") or pi.get("sha256_16"),
+        "same_input_bytes": None,
+    }
+    js_h, py_h = out["js_sha256"], out["py_sha256"]
+    if js_h and py_h:
+        # Compare on the common prefix length (one side may store only 16 hex).
+        n = min(len(js_h), len(py_h))
+        out["same_input_bytes"] = (js_h[:n] == py_h[:n])
+    return out
+
+
 def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
                       diffs_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     js_timing = load_json(js_dir / f"{stem}_timing.json")
@@ -280,6 +304,13 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
     js_hashes, py_hashes = _model_hashes(js_timing), _model_hashes(py_timing)
     if mismatch:
         print(f"  [WARN] {stem}: config mismatch → {'; '.join(mismatch)}", file=sys.stderr)
+
+    # Input-file parity: did both systems consume the same input bytes?
+    inparity = _input_parity(js_timing, py_timing)
+    if inparity.get("same_input_bytes") is False:
+        print(f"  [WARN] {stem}: input bytes DIFFER between JS and Python "
+              f"(js={inparity.get('js_sha256')} vs py={inparity.get('py_sha256')}) — "
+              f"not a like-for-like input.", file=sys.stderr)
 
     t_a = js_t["total_inference_s"]
     t_b = py_t["total_inference_s"]
@@ -329,6 +360,7 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
             json.dumps({
                 "document": stem,
                 "config": {"js": js_cfg, "py": py_cfg, "mismatch": mismatch},
+                "input_parity": inparity,
                 "model_hashes": {"js": js_hashes, "py": py_hashes},
                 "summary": {k: v for k, v in align.items() if k != "diff_items"},
                 "items": align["diff_items"],
@@ -338,6 +370,8 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
         "document": stem,
         "page_count": page_count,
         "config_mismatch": "; ".join(mismatch) if mismatch else "",
+        "input_same_bytes": inparity.get("same_input_bytes"),
+        "input_kind": inparity.get("js_kind") or inparity.get("py_kind"),
         "ep_mode_js": js_cfg.get("ep_mode"),
         "ep_mode_py": py_cfg.get("ep_mode"),
         # JS timing
@@ -805,7 +839,8 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
     ws = wb.active
     ws.title = "Per Dokumen"
     GROUPS = [
-        ("Dokumen", "4472C4", ["document", "page_count", "config_mismatch"]),
+        ("Dokumen", "4472C4", ["document", "page_count", "config_mismatch",
+            "input_kind", "input_same_bytes"]),
         ("Sistem A – JS (s)", "70AD47", [
             "js_inference_s", "js_per_page_s", "js_layout_s", "js_ocr_det_s",
             "js_ocr_rec_s", "js_ocr_s", "js_formula_s", "js_table_s",
@@ -835,6 +870,7 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
     ]
     LABELS = {
         "document": "Nama Dokumen", "page_count": "Halaman", "config_mismatch": "Config Mismatch",
+        "input_kind": "Jenis Input", "input_same_bytes": "Input Sama (bytes)",
         "js_inference_s": "Inferensi", "js_per_page_s": "Inf/Halaman",
         "js_layout_s": "Layout", "js_ocr_det_s": "OCR Det", "js_ocr_rec_s": "OCR Rec",
         "js_ocr_s": "OCR (det+rec)", "js_formula_s": "Formula",
@@ -895,6 +931,8 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
                        "formula_ratio", "table_ratio") and val is not None:
                 cell.fill = PatternFill("solid", fgColor="FFCCCC" if val > 1 else "CCFFCC")
             if key == "config_mismatch" and val:
+                cell.fill = PatternFill("solid", fgColor="FF9999")
+            if key == "input_same_bytes" and val is False:
                 cell.fill = PatternFill("solid", fgColor="FF9999")
     for c in range(1, len(all_keys) + 1):
         max_len = max((len(str(ws.cell(row=r, column=c).value or ""))
@@ -1123,11 +1161,23 @@ def run_gt_evaluation(js_dir: Path, py_dir: Path, gt_dir: Path,
         sys_stems = {f.name.replace("_content_list.json", "")
                      for f in sys_dir.glob("*_content_list.json")}
         common = sorted(gt_stems & sys_stems)
-        for stem in common:
+        total = len(common)
+        sys_name = "Sistem A (JS)" if label == "js" else "Sistem B (Python)"
+        print(f"  [{sys_name}] scoring {total} document(s) vs GT …")
+        scored = 0
+        for i, stem in enumerate(common, start=1):
+            print(f"    ({i}/{total}) {label.upper()}: {stem} …")
             row = evaluate_against_gt(stem, sys_dir, gt_dir, label,
                                       diffs_dir=diffs_dir, gt_index=gt_index)
             if row is not None:
                 out[label].append(row)
+                scored += 1
+                ov = row.get("overall")
+                ov_str = f"{ov:.2f}" if isinstance(ov, (int, float)) else "n/a"
+                print(f"        ✓ Overall={ov_str}")
+            else:
+                print(f"        [SKIP] {stem}: missing content_list")
+        print(f"  [{sys_name}] done: {scored}/{total} document(s) scored.")
 
     write_gt_excel(out, output)
     return out
@@ -1135,6 +1185,48 @@ def run_gt_evaluation(js_dir: Path, py_dir: Path, gt_dir: Path,
 
 def _gt_agg(rows: List[Dict], key: str) -> Dict[str, float]:
     return agg_stats([r.get(key) for r in rows])
+
+
+def _paired_by_document(scores: Dict[str, List[Dict]], key: str):
+    """Return (js_vals, py_vals) paired on the SAME document, in matching order.
+
+    Only documents scored by BOTH systems with a numeric value for `key` on
+    both sides are kept, so the result is suitable for a paired test / paired
+    bootstrap CI.
+    """
+    js_by_doc = {r.get("document"): r.get(key) for r in scores.get("js", [])}
+    py_by_doc = {r.get("document"): r.get(key) for r in scores.get("py", [])}
+    js_vals: List[float] = []
+    py_vals: List[float] = []
+    for doc in sorted(set(js_by_doc) & set(py_by_doc)):
+        jv, pv = js_by_doc[doc], py_by_doc[doc]
+        if isinstance(jv, (int, float)) and isinstance(pv, (int, float)):
+            js_vals.append(float(jv))
+            py_vals.append(float(pv))
+    return js_vals, py_vals
+
+
+# Composite accuracy label. IMPORTANT: this is a PROXY composite (mean of
+# (1-text_edit), TEDS, (1-formula_edit) on a 0–100 scale), NOT the official
+# OmniDocBench leaderboard "Overall" (which uses different per-category metrics
+# and CDM for formulas). It is named distinctly to prevent comparison to
+# published leaderboard numbers we do not reproduce.
+_COMPOSITE_LABEL = "Skor Komposit (0–100)*"
+
+# (internal key, display label). Order drives all GT sheets.
+_GT_METRIC_KEYS = [
+    ("overall", _COMPOSITE_LABEL),
+    ("text_edit", "Text Edit ↓"),
+    ("text_cer", "Text CER ↓"),
+    ("formula_edit", "Formula Edit ↓"),
+    ("table_teds", "Table TEDS ↑"),
+    ("table_teds_struct", "Table TEDS-S ↑"),
+    ("reading_order_edit", "Reading Order Edit ↓"),
+    ("coverage_f1", "Coverage F1 ↑"),
+    ("mean_bbox_iou", "BBox IoU ↑"),
+]
+
+_GT_LOWER_BETTER = {"text_edit", "text_cer", "formula_edit", "reading_order_edit"}
 
 
 def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
@@ -1150,18 +1242,9 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
     HDR = Font(bold=True, color="FFFFFF")
     BLUE = PatternFill("solid", fgColor="4472C4")
     GREEN = PatternFill("solid", fgColor="70AD47")
+    NOTE = Font(italic=True, size=9, color="595959")
 
-    metric_keys = [
-        ("overall", "Overall (0-100)"),
-        ("text_edit", "Text Edit ↓"),
-        ("text_cer", "Text CER ↓"),
-        ("formula_edit", "Formula Edit ↓"),
-        ("table_teds", "Table TEDS ↑"),
-        ("table_teds_struct", "Table TEDS-S ↑"),
-        ("reading_order_edit", "Reading Order Edit ↓"),
-        ("coverage_f1", "Coverage F1 ↑"),
-        ("mean_bbox_iou", "BBox IoU ↑"),
-    ]
+    metric_keys = _GT_METRIC_KEYS
 
     # ── Sheet 1: Per Dokumen (both systems) ─────────────────────────────────
     ws = wb.active
@@ -1184,6 +1267,13 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
     ws.freeze_panes = "E2"
     for c in range(1, len(head) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 15
+    # composite-score caveat footnote
+    ws.append([])
+    ws.append([f"* {_COMPOSITE_LABEL} = rata-rata [(1−Text Edit), Table TEDS, "
+               "(1−Formula Edit)]×100. PROKSI, BUKAN metrik 'Overall' resmi "
+               "OmniDocBench (yang memakai CDM untuk formula). Jangan dibandingkan "
+               "dengan angka leaderboard."])
+    ws.cell(row=ws.max_row, column=1).font = NOTE
 
     # ── Sheet 2: Ringkasan per Sistem ───────────────────────────────────────
     ws2 = wb.create_sheet("Ringkasan per Sistem")
@@ -1208,37 +1298,176 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
     ws4 = wb.create_sheet("Per Bahasa")
     _write_strata_sheet(ws4, scores, "language", metric_keys, HDR, BLUE)
 
-    # ── Sheet 5: JS vs Py vs GT (head-to-head) ──────────────────────────────
+    # ── Sheet 5: JS vs Py vs GT (head-to-head, PAIRED + significance) ───────
+    # Raw mean comparison alone cannot tell signal from noise. We add a paired
+    # Wilcoxon signed-rank test (per document), a bootstrap 95% CI of the mean
+    # paired difference, and a Holm-Bonferroni correction across the metric
+    # family so the "winner" is only declared when it is statistically defensible.
     ws5 = wb.create_sheet("JS vs Py (vs GT)")
-    ws5.append(["Metrik", "JS (mean)", "Python (mean)", "Selisih (JS-Py)", "Pemenang"])
+    ws5.append(["Metrik", "JS (mean)", "Python (mean)", "Selisih (JS−Py)",
+                "N pasang", "CI 95% selisih", "p (Wilcoxon)", "p (Holm)",
+                "Signifikan (Holm)", "Pemenang"])
     for cell in ws5[1]:
         cell.font = HDR
         cell.fill = BLUE
-    lower_better = {"text_edit", "text_cer", "formula_edit", "reading_order_edit"}
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+
+    # First pass: collect paired stats + p-values so Holm can correct the family.
+    h2h_rows = []
+    pvals: List[Optional[float]] = []
     for k, lbl in metric_keys:
-        js_mean = _gt_agg(scores.get("js", []), k)["mean"]
-        py_mean = _gt_agg(scores.get("py", []), k)["mean"]
-        diff = round(js_mean - py_mean, 4)
-        if k in lower_better:
-            winner = "JS" if js_mean < py_mean else ("Python" if py_mean < js_mean else "seri")
+        js_vals, py_vals = _paired_by_document(scores, k)
+        js_mean = round(sum(js_vals) / len(js_vals), 4) if js_vals else None
+        py_mean = round(sum(py_vals) / len(py_vals), 4) if py_vals else None
+        ci = paired_diff_ci(js_vals, py_vals)
+        wil = wilcoxon_signed_rank(js_vals, py_vals)
+        p = wil.get("p_value")
+        pvals.append(p)
+        h2h_rows.append((k, lbl, js_mean, py_mean, ci, p))
+
+    holm = holm_bonferroni(pvals)
+
+    for (k, lbl, js_mean, py_mean, ci, p), hb in zip(h2h_rows, holm):
+        diff = (round(js_mean - py_mean, 4)
+                if isinstance(js_mean, (int, float)) and isinstance(py_mean, (int, float))
+                else None)
+        sig = hb.get("significant")
+        # Winner only when the paired difference is significant after Holm.
+        if not isinstance(diff, (int, float)) or not sig:
+            winner = "tidak signifikan"
+        elif k in _GT_LOWER_BETTER:
+            winner = "JS" if js_mean < py_mean else "Python"
         else:
-            winner = "JS" if js_mean > py_mean else ("Python" if py_mean > js_mean else "seri")
-        ws5.append([lbl, js_mean, py_mean, diff, winner])
-    for c in range(1, 6):
-        ws5.column_dimensions[get_column_letter(c)].width = 20
+            winner = "JS" if js_mean > py_mean else "Python"
+        ci_str = (f"[{ci['ci_low']}, {ci['ci_high']}]"
+                  if ci.get("ci_low") is not None else "—")
+        ws5.append([
+            lbl, js_mean, py_mean, diff, ci.get("n"), ci_str,
+            round(p, 6) if isinstance(p, (int, float)) else "—",
+            round(hb["p_value"], 6) if hb.get("significant") is not None and isinstance(hb.get("p_value"), (int, float)) else "—",
+            ("ya" if sig else "tidak") if sig is not None else "—",
+            winner,
+        ])
+    ws5.append([])
+    ws5.append(["Catatan: uji Wilcoxon signed-rank berpasangan per dokumen; "
+                "CI 95% selisih via bootstrap (5000×); koreksi Holm-Bonferroni "
+                "atas keluarga metrik. 'Pemenang' hanya dinyatakan bila selisih "
+                "signifikan setelah Holm. Python = baseline pembanding, bukan GT."])
+    ws5.cell(row=ws5.max_row, column=1).font = NOTE
+    for c in range(1, 11):
+        ws5.column_dimensions[get_column_letter(c)].width = 18
+
+    # ── Sheet 6: Kecukupan Sampel (sample adequacy) ─────────────────────────
+    _write_sample_adequacy_sheet(wb, scores, metric_keys, HDR, BLUE, NOTE)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
     print(f"[evaluate] GT accuracy Excel saved → {output_path}")
 
 
+def _write_sample_adequacy_sheet(wb, scores, metric_keys, HDR, FILL, NOTE) -> None:
+    """Sample-adequacy diagnostics so the report never over-claims on thin data.
+
+    For each metric, computes the achieved 95% margin of error from the OBSERVED
+    paired-difference variance (half-width = 1.96 * sd / sqrt(n)). Also reports
+    per-stratum counts and flags strata below a minimum so per-category /
+    per-language claims are not made on n < threshold cells.
+    """
+    import math as _math
+    from collections import Counter
+    from openpyxl.styles import Alignment, PatternFill, Font
+    from openpyxl.utils import get_column_letter
+
+    BOLD = Font(bold=True)
+    RED = PatternFill("solid", fgColor="F4CCCC")
+    ws = wb.create_sheet("Kecukupan Sampel")
+
+    # ---- overall sample size + recommendation -------------------------------
+    n_js = len(scores.get("js", []))
+    n_py = len(scores.get("py", []))
+    paired_docs = len(set(r.get("document") for r in scores.get("js", []))
+                      & set(r.get("document") for r in scores.get("py", [])))
+    ws.append(["Diagnostik Kecukupan Sampel — Akurasi vs GT"])
+    ws.cell(row=ws.max_row, column=1).font = BOLD
+    ws.append(["Dokumen JS", n_js])
+    ws.append(["Dokumen Python", n_py])
+    ws.append(["Dokumen berpasangan (JS∩Py)", paired_docs])
+    FLOOR = 100  # defensible floor from sample_size.py guidance
+    REC = 150    # recommended
+    status = ("DI BAWAH FLOOR" if paired_docs < FLOOR
+              else ("CUKUP (floor)" if paired_docs < REC else "DIREKOMENDASIKAN"))
+    ws.append([f"Pedoman sample_size.py: floor≈{FLOOR}, rekomendasi≈{REC}", status])
+    if paired_docs < FLOOR:
+        for c in (1, 2):
+            ws.cell(row=ws.max_row, column=c).fill = RED
+    ws.append([])
+
+    # ---- per-metric achieved margin of error --------------------------------
+    ws.append(["Margin of Error 95% tercapai (dari variansi selisih berpasangan)"])
+    ws.cell(row=ws.max_row, column=1).font = BOLD
+    hdr_row = ws.max_row + 1
+    ws.append(["Metrik", "N pasang", "Mean selisih", "Std selisih",
+               "Margin ±95%", "Memadai (±0.05)?"])
+    for cell in ws[hdr_row]:
+        cell.font = HDR
+        cell.fill = FILL
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+    import statistics as _st
+    for k, lbl in metric_keys:
+        js_vals, py_vals = _paired_by_document(scores, k)
+        diffs = [a - b for a, b in zip(js_vals, py_vals)]
+        n = len(diffs)
+        if n < 2:
+            ws.append([lbl, n, "—", "—", "—", "—"])
+            continue
+        mean_d = _st.mean(diffs)
+        sd = _st.stdev(diffs)
+        margin = 1.96 * sd / _math.sqrt(n)
+        # 'overall'/composite is on a 0–100 scale; express its adequacy at ±5 pts.
+        thresh = 5.0 if k == "overall" else 0.05
+        adequate = "ya" if margin <= thresh else "TIDAK"
+        ws.append([lbl, n, round(mean_d, 4), round(sd, 4),
+                   round(margin, 4), adequate])
+        if margin > thresh:
+            ws.cell(row=ws.max_row, column=6).fill = RED
+    ws.append([])
+
+    # ---- per-stratum counts (where claims become thin) ----------------------
+    for attr in ("data_source", "language"):
+        ws.append([f"Jumlah dokumen per stratum: {attr}"])
+        ws.cell(row=ws.max_row, column=1).font = BOLD
+        hr = ws.max_row + 1
+        ws.append([attr, "N (JS)", "Cukup (≥10)?"])
+        for cell in ws[hr]:
+            cell.font = HDR
+            cell.fill = FILL
+        counts = Counter((r.get(attr) or "unknown") for r in scores.get("js", []))
+        for gkey in sorted(counts, key=lambda x: str(x)):
+            n = counts[gkey]
+            ok = "ya" if n >= 10 else "TIDAK"
+            ws.append([gkey, n, ok])
+            if n < 10:
+                ws.cell(row=ws.max_row, column=3).fill = RED
+        ws.append([])
+
+    ws.append(["Catatan: stratum dengan N<10 TIDAK boleh dijadikan dasar klaim "
+               "per-kategori/bahasa (lihat sample_size.py). Margin of error "
+               "dihitung dari variansi selisih berpasangan yang teramati."])
+    ws.cell(row=ws.max_row, column=1).font = NOTE
+    for c in range(1, 7):
+        ws.column_dimensions[get_column_letter(c)].width = 22
+
+
 def _write_strata_sheet(ws, scores, attr_key, metric_keys, HDR, FILL):
     from openpyxl.styles import Alignment
-    ws.append(["Sistem", attr_key, "N Dok"] + [lbl for _, lbl in metric_keys])
+    ws.append(["Sistem", attr_key, "N Dok", "Memadai (≥10)?"]
+              + [lbl for _, lbl in metric_keys])
     for cell in ws[1]:
         cell.font = HDR
         cell.fill = FILL
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
+    from openpyxl.styles import PatternFill
+    RED = PatternFill("solid", fgColor="F4CCCC")
     for label in ("js", "py"):
         rows = scores.get(label, [])
         groups: Dict[Any, List[Dict]] = {}
@@ -1246,8 +1475,11 @@ def _write_strata_sheet(ws, scores, attr_key, metric_keys, HDR, FILL):
             groups.setdefault(r.get(attr_key) or "unknown", []).append(r)
         for gkey in sorted(groups, key=lambda x: str(x)):
             grp = groups[gkey]
-            ws.append([label.upper(), gkey, len(grp)] +
+            adequate = "ya" if len(grp) >= 10 else "TIDAK"
+            ws.append([label.upper(), gkey, len(grp), adequate] +
                       [_gt_agg(grp, k)["mean"] for k, _ in metric_keys])
+            if len(grp) < 10:
+                ws.cell(row=ws.max_row, column=4).fill = RED
 
 
 # ---------------------------------------------------------------------------
@@ -1256,19 +1488,36 @@ def _write_strata_sheet(ws, scores, attr_key, metric_keys, HDR, FILL):
 
 def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
                    diffs_dir: Optional[Path] = None,
-                   gt_dir: Optional[Path] = None) -> List[Dict]:
+                   gt_dir: Optional[Path] = None,
+                   session_dir: Optional[Path] = None,
+                   use_session_dir: bool = True) -> List[Dict]:
     explode_js_combined(js_dir)
     stems = find_pairs(js_dir, py_dir)
     if not stems:
         print("[ERROR] No matching document stems found.", file=sys.stderr)
         return []
     print(f"[evaluate] Found {len(stems)} document(s): {', '.join(stems)}")
-    if diffs_dir is None:
+
+    # Per-session output folder (created UP FRONT). Groups this run's Excel(s)
+    # + per-item diff dumps together so repeated evaluations don't overwrite
+    # each other or mix diffs from different sessions in one flat folder.
+    if use_session_dir:
+        if session_dir is None:
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            session_dir = output.parent / f"{output.stem}_{ts}"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        output = session_dir / output.name
+        if diffs_dir is None:
+            diffs_dir = session_dir / "diffs"
+        print(f"[evaluate] Session folder: {session_dir}")
+    elif diffs_dir is None:
         diffs_dir = output.parent / "diffs"
+    diffs_dir.mkdir(parents=True, exist_ok=True)
 
     rows: List[Dict] = []
-    for stem in stems:
-        print(f"  Processing: {stem}")
+    total = len(stems)
+    for i, stem in enumerate(stems, start=1):
+        print(f"  ({i}/{total}) Processing: {stem}")
         res = evaluate_document(stem, js_dir, py_dir, diffs_dir=diffs_dir)
         if res is not None:
             rows.append(res)
@@ -1301,6 +1550,11 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
         print(f"  [WARN] {len(mixed_deploy)} doc(s) pair DIFFERENT deployment "
               f"configs (JS vs Python on different ep_mode). For a like-for-like "
               f"comparison keep both systems on the same ep_mode.")
+    # Input parity: flag any byte mismatches (proves like-for-like input).
+    bad_input = [r["document"] for r in clean if r.get("input_same_bytes") is False]
+    if bad_input:
+        print(f"  [WARN] {len(bad_input)} doc(s) had DIFFERENT input bytes between "
+              f"JS and Python — not a like-for-like input pairing.")
     print("=" * 64)
 
     # Optional: absolute accuracy vs OmniDocBench ground truth
@@ -1315,7 +1569,34 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
                 te = agg_stats([r.get("text_edit") for r in srows])["mean"]
                 td = agg_stats([r.get("table_teds") for r in srows])["mean"]
                 print(f"  {label.upper():6s} vs GT  ({len(srows)} docs): "
-                      f"Overall={ov:.2f}  TextEdit={te:.4f}  TableTEDS={td:.4f}")
+                      f"Komposit={ov:.2f}  TextEdit={te:.4f}  TableTEDS={td:.4f}")
+
+        # Paired significance + sample-adequacy summary (the two items an
+        # examiner presses hardest). Printed so it is visible without Excel.
+        paired_docs = len(set(r.get("document") for r in gt_scores.get("js", []))
+                          & set(r.get("document") for r in gt_scores.get("py", [])))
+        if paired_docs:
+            print(f"\n  GT head-to-head (paired Wilcoxon + Holm, n={paired_docs}):")
+            pvals, rowmeta = [], []
+            for k, lbl in _GT_METRIC_KEYS:
+                jv, pv = _paired_by_document(gt_scores, k)
+                ci = paired_diff_ci(jv, pv)
+                wil = wilcoxon_signed_rank(jv, pv)
+                pvals.append(wil.get("p_value"))
+                rowmeta.append((lbl, ci))
+            for (lbl, ci), hb in zip(rowmeta, holm_bonferroni(pvals)):
+                sig = hb.get("significant")
+                tag = "—" if sig is None else ("SIG" if sig else "ns")
+                ci_str = (f"[{ci['ci_low']}, {ci['ci_high']}]"
+                          if ci.get("ci_low") is not None else "—")
+                print(f"    {lbl:<26s} Δ(JS−Py)={str(ci.get('mean_diff')):>9s} "
+                      f"CI95={ci_str:>20s}  Holm={tag}")
+            FLOOR = 100
+            if paired_docs < FLOOR:
+                print(f"  [WARN] Accuracy corpus n={paired_docs} is BELOW the "
+                      f"defensible floor (~{FLOOR}) from sample_size.py. Pooled "
+                      f"estimates have wide CIs; do NOT make per-stratum claims "
+                      f"(strata with n<10 are flagged in the 'Kecukupan Sampel' sheet).")
     return rows
 
 
@@ -1326,9 +1607,15 @@ def main() -> None:
     parser.add_argument("--py-dir", required=True, type=Path)
     parser.add_argument("--output", default=Path("benchmark/results.xlsx"), type=Path)
     parser.add_argument("--diffs-dir", default=None, type=Path,
-                        help="Where to dump per-item diff JSON (default: <output dir>/diffs)")
+                        help="Where to dump per-item diff JSON (default: <session dir>/diffs)")
     parser.add_argument("--gt-dir", default=None, type=Path,
                         help="OmniDocBench GT content lists dir (enables absolute accuracy scoring)")
+    parser.add_argument("--session-dir", default=None, type=Path,
+                        help="Explicit per-session output folder for this run's Excel(s) + diffs. "
+                             "Default: auto-created as <output dir>/<output stem>_<timestamp>/")
+    parser.add_argument("--no-session-dir", action="store_true", default=False,
+                        help="Write directly to --output / --diffs-dir without a per-session folder "
+                             "(legacy flat layout).")
     args = parser.parse_args()
 
     if not args.js_dir.exists():
@@ -1339,7 +1626,9 @@ def main() -> None:
         sys.exit(1)
 
     rows = run_evaluation(args.js_dir, args.py_dir, args.output, args.diffs_dir,
-                          gt_dir=args.gt_dir)
+                          gt_dir=args.gt_dir,
+                          session_dir=args.session_dir,
+                          use_session_dir=not args.no_session_dir)
     if not rows:
         sys.exit(1)
 

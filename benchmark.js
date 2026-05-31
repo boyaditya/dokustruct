@@ -117,6 +117,8 @@ const fileEls = new Map();
 let allResults = [];
 /** @type {Map<string, object>} cold-start (first warm-up) timing per file */
 const fileColdStarts = new Map();
+/** @type {Map<string, object>} input-file provenance (sha256 + kind) per file */
+const fileInputProvenance = new Map();
 let abortCtrl = null;
 let running = false;
 /** Reproducibility metadata + run config captured at the start of a benchmark. */
@@ -463,6 +465,40 @@ async function hashModelFiles() {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Input-file provenance: SHA-256 + kind. Recorded per document so the report
+// can PROVE JS and Python consumed the SAME input bytes (a clean parity proof
+// for the paired comparison).
+// ---------------------------------------------------------------------------
+
+const _IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'tiff', 'tif', 'gif', 'jp2'];
+
+async function hashInputFile(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const out = { name: file.name, size_bytes: file.size };
+  if (_IMAGE_EXTS.includes(ext)) {
+    out.kind = 'image';
+  } else if (ext === 'pdf') {
+    out.kind = 'pdf';
+  } else {
+    out.kind = 'other';
+  }
+  try {
+    if (globalThis.crypto?.subtle) {
+      const buf = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', buf);
+      const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+      out.sha256_16 = hex.slice(0, 16);
+      out.sha256_full = hex;
+    } else {
+      out.note = 'SubtleCrypto unavailable (needs secure context); cannot hash.';
+    }
+  } catch (e) {
+    out.error = String(e?.message ?? e);
+  }
+  return out;
+}
+
 // Cross-run content stability check (verifies the "all runs identical" assumption)
 function contentStability(runsContent) {
   if (!runsContent || !runsContent.length) {
@@ -565,6 +601,7 @@ async function runBenchmark() {
   el.summaryPanel.style.display = 'none';
   allResults = [];
   fileColdStarts.clear();
+  fileInputProvenance.clear();
 
   const config = getConfig();
   const repeat = config.repeat;
@@ -621,6 +658,16 @@ async function runBenchmark() {
     if (signal.aborted) break;
     setFileStatus(file.name, 'running', 'running…');
     log(`File: ${file.name}`, 'info');
+
+    // Input-file provenance (hash bytes + kind) so JS↔Python input parity can
+    // be proven (same bytes fed to both systems).
+    try {
+      const prov = await hashInputFile(file);
+      fileInputProvenance.set(file.name, prov);
+      log(`  input: ${prov.kind} (sha256=${prov.sha256_16 ?? 'n/a'})`, 'info');
+    } catch (e) {
+      log(`  input hashing skipped: ${e?.message ?? e}`, 'warn');
+    }
 
     const fileRuns = [];
     let coldStart = null;  // first warm-up run, preserved as cold-start
@@ -866,6 +913,7 @@ async function exportResults() {
       // Reproducibility + parity provenance (consumed by evaluate.py)
       run_config: exportData.run_config,
       metadata: exportData.metadata,
+      input_file: fileInputProvenance.get(filename) || null,
       content_stability: contentStability(data.run_contents),
     };
 

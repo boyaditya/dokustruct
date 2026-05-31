@@ -24,6 +24,7 @@ from benchmark.metrics import (
     ned,
     normalize_latex,
     normalize_text,
+    paired_diff_ci,
     rank_correlation,
     teds,
     teds_struct,
@@ -370,6 +371,49 @@ def test_gt_scoring_missing_modalities_are_none():
     assert s["table_teds"] is None   # no tables → not scored as 0
     assert s["formula_edit"] is None
     assert s["overall"] is not None  # text-only still has an overall
+
+
+# ---------------------------------------------------------------------------
+# Paired-difference bootstrap CI (GT head-to-head significance)
+# ---------------------------------------------------------------------------
+
+def test_paired_diff_ci_zero_difference():
+    a = [1.0, 2.0, 3.0, 4.0]
+    b = [1.0, 2.0, 3.0, 4.0]
+    out = paired_diff_ci(a, b)
+    assert out["n"] == 4
+    assert out["mean_diff"] == 0.0
+    # identical pairs → CI collapses to 0 and does NOT exclude zero
+    assert out["ci_low"] == 0.0 and out["ci_high"] == 0.0
+    assert out["excludes_zero"] is False
+
+
+def test_paired_diff_ci_consistent_positive_difference():
+    # A is consistently 2.0 higher than B → CI should exclude zero
+    a = [5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+    b = [3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    out = paired_diff_ci(a, b)
+    assert out["mean_diff"] == 2.0
+    assert out["ci_low"] > 0.0
+    assert out["excludes_zero"] is True
+
+
+def test_paired_diff_ci_handles_empty_and_singleton():
+    assert paired_diff_ci([], [])["n"] == 0
+    assert paired_diff_ci([], [])["excludes_zero"] is None
+    one = paired_diff_ci([5.0], [3.0])
+    assert one["n"] == 1
+    assert one["mean_diff"] == 2.0
+    # cannot establish significance from a single pair
+    assert one["excludes_zero"] is False
+
+
+def test_paired_diff_ci_skips_non_numeric_pairs():
+    a = [1.0, None, 3.0, 4.0]
+    b = [0.0, 2.0, None, 2.0]
+    out = paired_diff_ci(a, b)
+    # only docs 0 and 3 are valid pairs → n == 2
+    assert out["n"] == 2
 
 
 if __name__ == "__main__":

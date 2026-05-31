@@ -477,6 +477,55 @@ def geometric_mean_ci(vals: Sequence[float], confidence: float = 0.95,
     return out
 
 
+def paired_diff_ci(a: Sequence[float], b: Sequence[float],
+                   confidence: float = 0.95, n_boot: int = 5000,
+                   seed: int = 42) -> Dict[str, Any]:
+    """Bootstrap CI for the mean PAIRED difference (a - b).
+
+    Used for accuracy metrics (e.g. GT Overall) where the quantity of interest
+    is an additive difference between two systems on the SAME documents, not a
+    ratio. Resamples the paired differences with replacement (percentile
+    bootstrap). Returns {mean_diff, ci_low, ci_high, n, excludes_zero}.
+
+    `excludes_zero` is True when the 95% CI does not contain 0, i.e. the
+    difference is significant at the corresponding level — a CI-based companion
+    to the Wilcoxon p-value that also conveys effect magnitude and direction.
+    """
+    pairs = [(x, y) for x, y in zip(a, b)
+             if isinstance(x, (int, float)) and isinstance(y, (int, float))]
+    n = len(pairs)
+    out: Dict[str, Any] = {
+        "mean_diff": None, "ci_low": None, "ci_high": None,
+        "n": n, "excludes_zero": None,
+    }
+    if n == 0:
+        return out
+    diffs = [x - y for x, y in pairs]
+    mean_diff = sum(diffs) / n
+    out["mean_diff"] = round(mean_diff, 4)
+    if n == 1:
+        out["ci_low"] = out["ci_high"] = round(mean_diff, 4)
+        out["excludes_zero"] = False  # cannot establish significance with n=1
+        return out
+
+    import random as _random
+    rng = _random.Random(seed)
+    alpha = 1.0 - confidence
+    boots: List[float] = []
+    for _ in range(n_boot):
+        sample = [diffs[rng.randrange(n)] for _ in range(n)]
+        boots.append(sum(sample) / n)
+    boots.sort()
+    lo_idx = max(0, int(math.floor((alpha / 2.0) * len(boots))))
+    hi_idx = min(len(boots) - 1, int(math.ceil((1.0 - alpha / 2.0) * len(boots)) - 1))
+    lo = boots[lo_idx]
+    hi = boots[hi_idx]
+    out["ci_low"] = round(lo, 4)
+    out["ci_high"] = round(hi, 4)
+    out["excludes_zero"] = bool(lo > 0 or hi < 0)
+    return out
+
+
 def holm_bonferroni(pvals: Sequence[Optional[float]], alpha: float = 0.05) -> List[Dict[str, Any]]:
     """Holm-Bonferroni step-down correction for a family of p-values.
 
@@ -583,4 +632,5 @@ __all__ = [
     "normalize_latex", "latex_tokens", "latex_ned",
     "teds", "teds_struct", "geometric_mean", "geometric_mean_ci",
     "holm_bonferroni", "wilcoxon_signed_rank", "rank_correlation",
+    "paired_diff_ci",
 ]

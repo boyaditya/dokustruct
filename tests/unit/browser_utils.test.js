@@ -7,15 +7,43 @@ describe('yieldToBrowser', () => {
     expect(result).toBeUndefined();
   });
 
-  it('uses setTimeout with 0ms delay', async () => {
+  it('yields asynchronously (does not resolve synchronously)', async () => {
+    let resolved = false;
+    const p = yieldToBrowser().then(() => { resolved = true; });
+    // Must not have resolved within the same synchronous tick.
+    expect(resolved).toBe(false);
+    await p;
+    expect(resolved).toBe(true);
+  });
+
+  it('prefers MessageChannel over setTimeout when available (avoids background-tab throttling)', async () => {
+    if (typeof MessageChannel !== 'function') {
+      // Environment without MessageChannel: falls back to setTimeout.
+      const originalSetTimeout = globalThis.setTimeout;
+      const spy = vi.fn((cb, ms) => originalSetTimeout(cb, ms));
+      globalThis.setTimeout = spy;
+      await yieldToBrowser();
+      expect(spy).toHaveBeenCalledWith(expect.any(Function), 0);
+      globalThis.setTimeout = originalSetTimeout;
+      return;
+    }
+    // MessageChannel present: setTimeout must NOT be used for yielding.
     const originalSetTimeout = globalThis.setTimeout;
     const spy = vi.fn((cb, ms) => originalSetTimeout(cb, ms));
     globalThis.setTimeout = spy;
-
     await yieldToBrowser();
-
-    expect(spy).toHaveBeenCalledWith(expect.any(Function), 0);
+    expect(spy).not.toHaveBeenCalled();
     globalThis.setTimeout = originalSetTimeout;
+  });
+
+  it('resolves multiple concurrent yields (FIFO drain)', async () => {
+    const order = [];
+    await Promise.all([
+      yieldToBrowser().then(() => order.push(1)),
+      yieldToBrowser().then(() => order.push(2)),
+      yieldToBrowser().then(() => order.push(3)),
+    ]);
+    expect(order).toEqual([1, 2, 3]);
   });
 });
 

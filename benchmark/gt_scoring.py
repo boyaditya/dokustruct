@@ -20,30 +20,78 @@ Convention: GT is the reference (system B role), prediction is the hypothesis.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .alignment import align_content_lists
-from .metrics import edit_distance, normalize_text, ned, latex_ned
+from .metrics import latex_ned
+
+
+def _item_type(item: Dict) -> str:
+    return item.get("type", "unknown")
+
+
+def _item_text(item: Dict) -> str:
+    if _item_type(item) == "table":
+        return item.get("table_body") or item.get("html") or ""
+    return item.get("text") or item.get("content") or ""
+
+
+def _count_type(content_list: List[Dict], typ: str) -> int:
+    return sum(1 for item in content_list if _item_type(item) == typ)
 
 
 def score_against_gt(pred_cl: List[Dict], gt_cl: List[Dict]) -> Dict[str, Any]:
     """Score one document's prediction content_list against GT content_list."""
     align = align_content_lists(pred_cl, gt_cl)
 
+    n_text_gt = _count_type(gt_cl, "text")
+    n_formula_gt = _count_type(gt_cl, "equation")
+    n_table_gt = _count_type(gt_cl, "table")
+    n_formula_pred = _count_type(pred_cl, "equation")
+    n_table_pred = _count_type(pred_cl, "table")
+
     text_edit = align["mean_ned_norm"]      # may be None
     text_cer = align["mean_cer"]            # may be None
-    table_teds = align["mean_teds"]         # may be None
-    table_teds_struct = align["mean_teds_struct"]  # may be None
+    if n_text_gt and text_edit is None:
+        # A prediction that misses all GT text should not disappear from the
+        # composite. Use maximal edit/CER cost; coverage still captures count.
+        text_edit = 1.0
+        text_cer = 1.0
 
-    # Formula: LaTeX-aware (normalized + tokenized) NED over matched equation
-    # pairs. This is a recognized PROXY for the official CDM metric (documented
-    # deviation), and is robust to cosmetic markup (\dfrac vs \frac, spacing).
+    # Formula: LaTeX-aware NED over GT equations. Missing GT formulas are
+    # penalized as 1.0; pages without GT formulas remain N/A rather than 0.
     formula_vals: List[float] = []
     for d in align["diff_items"]:
         if d.get("status") == "matched" and d.get("type_a") == "equation" \
                 and d.get("type_b") == "equation":
             formula_vals.append(latex_ned(d.get("text_a", ""), d.get("text_b", "")))
-    formula_edit = round(sum(formula_vals) / len(formula_vals), 4) if formula_vals else None
+        elif d.get("status") == "only_in_python" and d.get("type_b") == "equation":
+            formula_vals.append(1.0)
+    formula_edit = (
+        round(sum(formula_vals) / n_formula_gt, 4)
+        if n_formula_gt else None
+    )
+
+    # Tables follow the same GT-denominator policy: missing GT tables score 0,
+    # while documents with no GT table are N/A.
+    table_teds_vals: List[float] = []
+    table_teds_struct_vals: List[float] = []
+    for d in align["diff_items"]:
+        if d.get("status") == "matched" and d.get("type_a") == "table" \
+                and d.get("type_b") == "table":
+            table_teds_vals.append(d.get("teds", 0.0))
+            table_teds_struct_vals.append(d.get("teds_struct", 0.0))
+        elif d.get("status") == "only_in_python" and d.get("type_b") == "table":
+            table_teds_vals.append(0.0)
+            table_teds_struct_vals.append(0.0)
+    table_teds = (
+        round(sum(table_teds_vals) / n_table_gt, 4)
+        if n_table_gt else None
+    )
+    table_teds_struct = (
+        round(sum(table_teds_struct_vals) / n_table_gt, 4)
+        if n_table_gt else None
+    )
 
     # Reading order: use the order-INDEPENDENT correlation from alignment, then
     # express it as an edit-like cost in [0,1] (0 = identical order). Kendall's
@@ -76,6 +124,14 @@ def score_against_gt(pred_cl: List[Dict], gt_cl: List[Dict]) -> Dict[str, Any]:
         "coverage_recall": align["coverage_recall"],
         "n_text_pairs": align["n_text_pairs"],
         "n_table_pairs": align["n_table_pairs"],
+        "n_text_gt": n_text_gt,
+        "n_formula_gt": n_formula_gt,
+        "n_formula_pred": n_formula_pred,
+        "n_formula_pairs": align["n_formula_pairs"],
+        "n_formula_scored": len(formula_vals),
+        "n_table_gt": n_table_gt,
+        "n_table_pred": n_table_pred,
+        "n_table_scored": len(table_teds_vals),
         "n_only_pred": align["n_only_js"],     # pred == system A role
         "n_only_gt": align["n_only_python"],   # gt == system B role
         "mean_bbox_iou": align["mean_bbox_iou"],

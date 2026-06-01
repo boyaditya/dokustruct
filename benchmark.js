@@ -21,6 +21,11 @@ import { ASSET_MANIFEST } from './rapid_doc/utils/model_url_map.js';
 import JSZip from 'jszip';
 
 const PDF_PAGES_BATCH = 64; // default batch size
+const BENCHMARK_MODE = new URLSearchParams(location.search).get('benchmarkMode') === 'final'
+  ? 'final'
+  : 'strict';
+const AUDIT_PROVENANCE = BENCHMARK_MODE === 'strict';
+const CHECK_CONTENT_STABILITY = BENCHMARK_MODE === 'strict';
 
 // ---------------------------------------------------------------------------
 // OpenCV loader (same pattern as pipelineAdapter.js)
@@ -473,16 +478,17 @@ async function hashModelFiles() {
 
 const _IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'tiff', 'tif', 'gif', 'jp2'];
 
+function fileKind(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (_IMAGE_EXTS.includes(ext)) return 'image';
+  if (ext === 'pdf') return 'pdf';
+  return 'other';
+}
+
 async function hashInputFile(file) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   const out = { name: file.name, size_bytes: file.size };
-  if (_IMAGE_EXTS.includes(ext)) {
-    out.kind = 'image';
-  } else if (ext === 'pdf') {
-    out.kind = 'pdf';
-  } else {
-    out.kind = 'other';
-  }
+  out.kind = fileKind(file);
   try {
     if (globalThis.crypto?.subtle) {
       const buf = await file.arrayBuffer();
@@ -638,7 +644,10 @@ async function runBenchmark() {
     lastEnvironment = { error: String(e?.message ?? e) };
   }
 
+  lastEnvironment = { ...(lastEnvironment || {}), benchmark_mode: BENCHMARK_MODE };
+
   // Model-file provenance (hash served ONNX, verify against manifest).
+  if (AUDIT_PROVENANCE) {
   try {
     log('Hashing model files for provenance…', 'info');
     const mh = await hashModelFiles();
@@ -653,6 +662,13 @@ async function runBenchmark() {
   } catch (e) {
     log(`Model hashing skipped: ${e?.message ?? e}`, 'warn');
   }
+  } else {
+    lastEnvironment = {
+      ...(lastEnvironment || {}),
+      model_hashes: { skipped: true, reason: 'benchmarkMode=final' },
+    };
+    log('Model hashing skipped (benchmarkMode=final).', 'info');
+  }
 
   for (const file of queue) {
     if (signal.aborted) break;
@@ -661,12 +677,21 @@ async function runBenchmark() {
 
     // Input-file provenance (hash bytes + kind) so JS↔Python input parity can
     // be proven (same bytes fed to both systems).
-    try {
-      const prov = await hashInputFile(file);
-      fileInputProvenance.set(file.name, prov);
-      log(`  input: ${prov.kind} (sha256=${prov.sha256_16 ?? 'n/a'})`, 'info');
-    } catch (e) {
-      log(`  input hashing skipped: ${e?.message ?? e}`, 'warn');
+    if (AUDIT_PROVENANCE) {
+      try {
+        const prov = await hashInputFile(file);
+        fileInputProvenance.set(file.name, prov);
+        log(`  input: ${prov.kind} (sha256=${prov.sha256_16 ?? 'n/a'})`, 'info');
+      } catch (e) {
+        log(`  input hashing skipped: ${e?.message ?? e}`, 'warn');
+      }
+    } else {
+      fileInputProvenance.set(file.name, {
+        name: file.name,
+        kind: fileKind(file),
+        size_bytes: file.size,
+        hash_skipped: true,
+      });
     }
 
     const fileRuns = [];
@@ -829,7 +854,7 @@ async function exportResults() {
   for (const r of allResults) {
     if (!byFile[r.filename]) byFile[r.filename] = { runs: [], content_list: r.content_list, run_contents: [] };
     byFile[r.filename].runs.push(r.timing);
-    byFile[r.filename].run_contents.push(r.content_list);
+    if (CHECK_CONTENT_STABILITY) byFile[r.filename].run_contents.push(r.content_list);
     byFile[r.filename].content_list = r.content_list; // last run wins for export
   }
 
@@ -914,10 +939,12 @@ async function exportResults() {
       run_config: exportData.run_config,
       metadata: exportData.metadata,
       input_file: fileInputProvenance.get(filename) || null,
-      content_stability: contentStability(data.run_contents),
+      content_stability: CHECK_CONTENT_STABILITY
+        ? contentStability(data.run_contents)
+        : { skipped: true, reason: 'benchmarkMode=final' },
     };
 
-    if (!meanTiming.content_stability.identical) {
+    if (!meanTiming.content_stability.skipped && !meanTiming.content_stability.identical) {
       log(`  ⚠ ${stem}: content differs across runs ` +
           `(distinct_outputs=${meanTiming.content_stability.distinct_outputs})`, 'warn');
     }
@@ -1015,7 +1042,7 @@ async function buildJsExcel(exportData) {
       t.postprocess_s, t.other_s ?? 0, t.total_s, cold,
       t.stats?.n || 1, std, infer > 0 ? round4(std / infer) : 0,
       t.stats?.median_inference_s, t.stats?.min_inference_s, t.stats?.max_inference_s,
-      t.content_stability?.identical ? 'ya' : 'TIDAK',
+      t.content_stability?.skipped ? 'N/A' : (t.content_stability?.identical ? 'ya' : 'TIDAK'),
     ]);
   }
 

@@ -65,6 +65,26 @@ def _text_distance(a: Dict, b: Dict) -> float:
     return ned(normalize_text(item_text(a)), normalize_text(item_text(b)))
 
 
+def _alignment_cost(a: Dict, b: Dict) -> float:
+    """Cheap matching cost used inside DP alignment.
+
+    Final reported metrics are still computed exactly after alignment. This
+    shortcut only avoids O(N*M) edit-distance calls on many long paragraph pairs
+    while choosing candidate matches.
+    """
+    ta, tb = item_type(a), item_type(b)
+    if ta == "text" and tb == "text":
+        sa, sb = normalize_text(item_text(a)), normalize_text(item_text(b))
+        max_len = max(len(sa), len(sb))
+        if max_len > 320:
+            def sketch(s: str) -> str:
+                return s[:160] + "\n" + s[-160:]
+            prefix_cost = ned(sketch(sa), sketch(sb))
+            length_cost = abs(len(sa) - len(sb)) / max_len if max_len else 0.0
+            return min(1.0, 0.8 * prefix_cost + 0.2 * length_cost)
+    return _text_distance(a, b)
+
+
 def extract_type_sequence(content_list: List[Dict]) -> List[str]:
     return [item_type(it) for it in content_list if item_type(it) != "discarded"]
 
@@ -116,7 +136,7 @@ def _align_one_page(
                 # Content-aware substitution cost in [0,1]: text/equation use
                 # (LaTeX-aware) NED, tables use 1-TEDS, other same-type items 0.
                 if item_type(ta) in COMPARABLE_TYPES or item_type(ta) == "table":
-                    sub = _text_distance(ta, tb)
+                    sub = _alignment_cost(ta, tb)
                 else:
                     sub = 0.0
             else:
@@ -186,7 +206,7 @@ def _reading_order_correlation(
                     continue
                 # content distance, with bbox IoU as a tie-breaker
                 if item_type(a) in COMPARABLE_TYPES or item_type(a) == "table":
-                    cost = _text_distance(a, b)
+                    cost = _alignment_cost(a, b)
                 else:
                     iou = bbox_iou(a.get("bbox"), b.get("bbox"))
                     cost = 1.0 - (iou if iou is not None else 0.0)

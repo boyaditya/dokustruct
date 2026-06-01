@@ -373,6 +373,23 @@ def test_gt_scoring_missing_modalities_are_none():
     assert s["overall"] is not None  # text-only still has an overall
 
 
+def test_gt_scoring_missing_gt_modalities_are_penalized():
+    from benchmark.gt_scoring import score_against_gt
+    gt = [
+        {"type": "text", "text": "caption", "page_idx": 0},
+        {"type": "equation", "text": "x^2", "page_idx": 0},
+        {"type": "table", "html": "<table><tr><td>A</td></tr></table>", "page_idx": 0},
+    ]
+    pred = [{"type": "text", "text": "caption", "page_idx": 0}]
+    s = score_against_gt(pred, gt)
+    assert s["formula_edit"] == 1.0
+    assert s["table_teds"] == 0.0
+    assert s["table_teds_struct"] == 0.0
+    assert s["n_formula_gt"] == 1
+    assert s["n_table_gt"] == 1
+    assert s["overall"] < 100.0
+
+
 # ---------------------------------------------------------------------------
 # Paired-difference bootstrap CI (GT head-to-head significance)
 # ---------------------------------------------------------------------------

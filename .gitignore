@@ -95,3 +95,4 @@ benchmark/*.xlsx
 benchmark/_*.txt
 
 OmniDocBench/
+benchmark/results*

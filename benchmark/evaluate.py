@@ -93,11 +93,31 @@ def explode_js_combined(js_dir: Path) -> None:
         print(f"[evaluate] Exploded combined export: {combined.name}")
 
 
-def find_pairs(js_dir: Path, py_dir: Path) -> List[str]:
+def _load_manifest_stems(manifest: Path, split: str) -> List[str]:
+    data = load_json(manifest)
+    if not isinstance(data, dict):
+        return []
+    section = data.get(split)
+    if isinstance(section, dict) and isinstance(section.get("stems"), list):
+        return [str(s) for s in section["stems"]]
+    if isinstance(data.get("stems"), list):
+        return [str(s) for s in data["stems"]]
+    return []
+
+
+def find_pairs(js_dir: Path, py_dir: Path,
+               manifest: Optional[Path] = None,
+               manifest_split: str = "accuracy") -> List[str]:
     def stems(d: Path) -> set:
         return {f.name.replace("_timing.json", "").replace("_content_list.json", "")
                 for f in d.glob("*.json")
                 if f.name.endswith(("_timing.json", "_content_list.json"))}
+    if manifest is not None:
+        expected = _load_manifest_stems(manifest, manifest_split)
+        if expected:
+            return sorted(dict.fromkeys(expected))
+        print(f"  [WARN] Manifest has no '{manifest_split}.stems': {manifest}",
+              file=sys.stderr)
     return sorted(stems(js_dir) & stems(py_dir))
 
 
@@ -197,12 +217,33 @@ def extract_timing(timing_json: Dict, system: str) -> Dict[str, float]:
 
 def _run_config(timing_json: Dict) -> Dict[str, Any]:
     cfg = timing_json.get("run_config") or timing_json.get("metadata") or {}
+    layout_cfg = cfg.get("layout_config") or {}
+    ocr_cfg = cfg.get("ocr_config") or {}
+    formula_cfg = cfg.get("formula_config") or {}
+    table_cfg = cfg.get("table_config") or {}
     return {
         "formula_enable": cfg.get("formula_enable"),
         "table_enable": cfg.get("table_enable"),
         "parse_method": cfg.get("parse_method"),
         "ep_mode": cfg.get("ep_mode"),
         "execution_provider": cfg.get("execution_provider"),
+        "use_doc_orientation_classify": (
+            cfg.get("use_doc_orientation_classify")
+            if cfg.get("use_doc_orientation_classify") is not None
+            else layout_cfg.get("use_doc_orientation_classify")
+        ),
+        "layout_model_type": layout_cfg.get("model_type"),
+        "layout_batch_num": layout_cfg.get("batch_num"),
+        "ocr_det_batch_num": ocr_cfg.get("Det.rec_batch_num"),
+        "ocr_rec_batch_num": ocr_cfg.get("Rec.rec_batch_num"),
+        "formula_model_type": formula_cfg.get("modelType") or formula_cfg.get("model_type"),
+        "formula_batch_num": formula_cfg.get("batch_num"),
+        "table_model_type": table_cfg.get("model_type"),
+        "table_formula_enable": table_cfg.get("table_formula_enable"),
+        "table_image_enable": table_cfg.get("table_image_enable"),
+        "skip_text_in_image": table_cfg.get("skip_text_in_image"),
+        "use_img2table": table_cfg.get("use_img2table"),
+        "use_compare_table": table_cfg.get("use_compare_table"),
         "real_eps": cfg.get("real_eps") or cfg.get("ort_providers"),
     }
 
@@ -225,7 +266,14 @@ def _model_hashes(timing_json: Dict) -> Dict[str, str]:
 
 def _config_mismatch(js_cfg: Dict, py_cfg: Dict) -> List[str]:
     issues = []
-    for key in ("formula_enable", "table_enable", "parse_method"):
+    comparable_keys = (
+        "formula_enable", "table_enable", "parse_method",
+        "use_doc_orientation_classify", "layout_model_type",
+        "formula_model_type", "table_model_type", "table_formula_enable",
+        "table_image_enable", "skip_text_in_image", "use_img2table",
+        "use_compare_table",
+    )
+    for key in comparable_keys:
         ja, pb = js_cfg.get(key), py_cfg.get(key)
         if ja is None or pb is None:
             continue
@@ -276,6 +324,22 @@ def _input_parity(js_timing: Dict, py_timing: Dict) -> Dict[str, Any]:
     return out
 
 
+def _empty_document_row(stem: str, status: str, js_dir: Path, py_dir: Path) -> Dict[str, Any]:
+    """Manifest-based placeholder so missing/crashed docs do not vanish."""
+    return {
+        "document": stem,
+        "status": status,
+        "page_count": None,
+        "config_mismatch": status,
+        "input_same_bytes": None,
+        "input_kind": None,
+        "ep_mode_js": None,
+        "ep_mode_py": None,
+        "_js_dir": str(js_dir),
+        "_py_dir": str(py_dir),
+    }
+
+
 def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
                       diffs_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     js_timing = load_json(js_dir / f"{stem}_timing.json")
@@ -283,9 +347,15 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
     js_cl = load_json(js_dir / f"{stem}_content_list.json")
     py_cl = load_json(py_dir / f"{stem}_content_list.json")
 
-    if js_timing is None or py_timing is None:
-        print(f"  [SKIP] {stem}: missing timing JSON", file=sys.stderr)
-        return None
+    missing = []
+    if js_timing is None:
+        missing.append("missing_js_timing")
+    if py_timing is None:
+        missing.append("missing_py_timing")
+    if missing:
+        status = "; ".join(missing)
+        print(f"  [WARN] {stem}: {status}", file=sys.stderr)
+        return _empty_document_row(stem, status, js_dir, py_dir)
     if js_cl is None or py_cl is None:
         print(f"  [WARN] {stem}: missing content_list — output metrics = 0", file=sys.stderr)
         js_cl = js_cl or []
@@ -368,6 +438,7 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
 
     return {
         "document": stem,
+        "status": "ok",
         "page_count": page_count,
         "config_mismatch": "; ".join(mismatch) if mismatch else "",
         "input_same_bytes": inparity.get("same_input_bytes"),
@@ -460,11 +531,14 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
 # Aggregate statistics
 # ---------------------------------------------------------------------------
 
-def agg_stats(vals: List[float]) -> Dict[str, float]:
+def agg_stats(vals: List[float], empty_value: Optional[float] = 0) -> Dict[str, Optional[float]]:
     import statistics
     vals = [v for v in vals if v is not None]
     if not vals:
-        return {"mean": 0, "median": 0, "std": 0, "min": 0, "max": 0, "geomean": 0}
+        return {
+            "mean": empty_value, "median": empty_value, "std": empty_value,
+            "min": empty_value, "max": empty_value, "geomean": empty_value,
+        }
     return {
         "mean": round(statistics.mean(vals), 4),
         "median": round(statistics.median(vals), 4),
@@ -484,7 +558,169 @@ def _agg_mean(rows: List[Dict], key: str) -> Optional[float]:
     return round(sum(vals) / len(vals), 4) if vals else None
 
 
-def _write_summary_sheet(wb, rows: List[Dict]) -> None:
+def _write_accuracy_pilot_summary_sheet(wb, rows: List[Dict]) -> None:
+    """Accuracy-pilot front sheet: accuracy/parity first, timing diagnostic only."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.chart import BarChart, Reference
+
+    ws = wb.create_sheet("Ringkasan", 0)
+    ws.sheet_view.showGridLines = False
+    BLUE = "1F4E79"
+    HDR_FILL = PatternFill("solid", fgColor=BLUE)
+    ZEBRA = PatternFill("solid", fgColor="F2F5F9")
+    NOTE = Font(italic=True, size=9, color="595959")
+    TITLE = Font(bold=True, size=14, color=BLUE)
+    CAP = Font(bold=True, size=11)
+    HDR = Font(bold=True, color="FFFFFF")
+    BODY = Font(size=10)
+    thin = Side(style="thin", color="A6A6A6")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    for col, width in {"A": 32, "B": 16, "C": 16, "D": 52}.items():
+        ws.column_dimensions[col].width = width
+
+    def mean(key):
+        return _agg_mean(rows, key)
+
+    def score01(x):
+        if not isinstance(x, (int, float)):
+            return None
+        return round(max(0.0, min(1.0, x)) * 100.0, 1)
+
+    n_docs = len(rows)
+    status_counts: Dict[str, int] = {}
+    for r in rows:
+        status_counts[r.get("status") or "ok"] = status_counts.get(r.get("status") or "ok", 0) + 1
+    complete_docs = status_counts.get("ok", 0)
+    ned_norm = mean("mean_ned_norm")
+    text_sim = (1.0 - ned_norm) if isinstance(ned_norm, (int, float)) else None
+    formula_ned = mean("mean_latex_ned")
+    formula_sim = (1.0 - formula_ned) if isinstance(formula_ned, (int, float)) else None
+    tau = mean("reading_order_kendall_tau")
+
+    row = 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
+    ws.cell(row=row, column=1, value="Ringkasan Pilot Akurasi Sistem A dan Sistem B").font = TITLE
+    row += 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
+    ws.cell(row=row, column=1, value=(
+        f"Mode laporan: accuracy_pilot. Sistem A = JavaScript/peramban; Sistem B = "
+        f"Python baseline pembanding. Jumlah dokumen manifest/evaluasi: {n_docs}; "
+        f"dokumen lengkap: {complete_docs}. Timing pada workbook ini hanya diagnostik "
+        "run tunggal/non-final, bukan dasar klaim performa skripsi."
+    )).font = NOTE
+    ws.row_dimensions[row].height = 36
+    row += 2
+
+    ws.cell(row=row, column=1, value="Tabel 4.1  Kesepadanan Output terhadap Baseline Python").font = CAP
+    row += 1
+    for c, h in enumerate(["Aspek", "Nilai", "Skor 0-100", "Interpretasi"], start=1):
+        cell = ws.cell(row=row, column=c, value=h)
+        cell.font = HDR
+        cell.fill = HDR_FILL
+        cell.alignment = center
+        cell.border = box
+    row += 1
+    data_start = row
+    quality = [
+        ("Cakupan item (F1)", mean("coverage_f1"), score01(mean("coverage_f1")),
+         "Proporsi item yang sama-sama terdeteksi oleh kedua sistem."),
+        ("Kemiripan teks (1 - NED norm)", text_sim, score01(text_sim),
+         "Skor teks berbasis NED ternormalisasi; CER/WER tetap dilaporkan sebagai error metric."),
+        ("Konsistensi tipe item", mean("type_consistency"), score01(mean("type_consistency")),
+         "Proporsi pasangan item dengan tipe yang sama."),
+        ("Kemiripan formula (1 - Formula NED)", formula_sim, score01(formula_sim),
+         "Berlaku hanya pada dokumen dengan formula yang terdeteksi."),
+        ("Isi tabel (TEDS)", mean("mean_teds"), score01(mean("mean_teds")),
+         "Berlaku hanya pada dokumen dengan pasangan tabel."),
+        ("Struktur tabel (TEDS-Struct)", mean("mean_teds_struct"), score01(mean("mean_teds_struct")),
+         "Berlaku hanya pada dokumen dengan pasangan tabel."),
+        ("Kesesuaian posisi (BBox IoU)", mean("mean_bbox_iou"), score01(mean("mean_bbox_iou")),
+         "Kemiripan posisi elemen pada halaman."),
+        ("Urutan baca (Kendall tau)", tau,
+         score01((tau + 1.0) / 2.0) if isinstance(tau, (int, float)) else None,
+         "Korelasi urutan baca; skor 100 berarti urutan identik."),
+    ]
+    for i, (label, val, sc, interp) in enumerate(quality):
+        vals = [label, val if val is not None else "N/A", sc if sc is not None else "N/A", interp]
+        for c, v in enumerate(vals, start=1):
+            cell = ws.cell(row=row, column=c, value=v)
+            cell.font = BODY
+            cell.border = box
+            cell.alignment = left if c in (1, 4) else center
+            if i % 2:
+                cell.fill = ZEBRA
+        row += 1
+    data_end = row - 1
+    row += 1
+
+    ws.cell(row=row, column=1, value="Tabel D.1  Timing Diagnostik Accuracy Pilot").font = CAP
+    row += 1
+    for c, h in enumerate(["Besaran", "Nilai"], start=1):
+        cell = ws.cell(row=row, column=c, value=h)
+        cell.font = HDR
+        cell.fill = HDR_FILL
+        cell.alignment = center
+        cell.border = box
+    row += 1
+    ratios = [r.get("time_ratio") for r in rows if isinstance(r.get("time_ratio"), (int, float))]
+    ratio_ci = geometric_mean_ci(ratios)
+    n_runs_js = sorted({r.get("js_n_runs") for r in rows if r.get("js_n_runs") is not None})
+    n_runs_py = sorted({r.get("py_n_runs") for r in rows if r.get("py_n_runs") is not None})
+    diag_rows = [
+        ("JS N run", ", ".join(map(str, n_runs_js)) or "N/A"),
+        ("Python N run", ", ".join(map(str, n_runs_py)) or "N/A"),
+        ("Rasio inferensi A/B geomean", ratio_ci.get("gm") if ratio_ci.get("gm") is not None else "N/A"),
+        ("Cold-start riil tersedia", sum(1 for r in rows if r.get("cold_start_is_real"))),
+    ]
+    for label, val in diag_rows:
+        ws.cell(row=row, column=1, value=label).border = box
+        ws.cell(row=row, column=2, value=val).border = box
+        ws.cell(row=row, column=1).alignment = left
+        ws.cell(row=row, column=2).alignment = center
+        row += 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
+    ws.cell(row=row, column=1, value=(
+        "Catatan: timing di workbook accuracy_pilot hanya membantu audit. Untuk klaim performa, "
+        "gunakan report_mode=timing_final dengan warm-up dan measured repeats."
+    )).font = NOTE
+    ws.row_dimensions[row].height = 30
+    row += 2
+
+    ws.cell(row=row, column=1, value="Interpretasi").font = CAP
+    row += 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
+    ws.cell(row=row, column=1, value=(
+        "Pada sampel pilot ini, workbook utama dipakai untuk audit kesepadanan output JS terhadap "
+        "baseline Python. Klaim akurasi absolut dan signifikansi JS vs Python harus merujuk ke "
+        "workbook *_gt_accuracy.xlsx; bila hasil Holm tidak signifikan, narasi yang aman adalah "
+        "tidak ditemukan perbedaan akurasi signifikan pada sampel pilot."
+    )).alignment = left
+    ws.row_dimensions[row].height = 48
+    row += 2
+
+    ws.cell(row=row, column=1, value="Gambar 4.1  Skor Kesepadanan Output (0-100)").font = CAP
+    chart = BarChart()
+    chart.type = "bar"
+    chart.style = 11
+    chart.title = "Kesepadanan Output terhadap Baseline Python"
+    chart.x_axis.title = "Skor (0-100)"
+    chart.y_axis.title = "Aspek"
+    chart.x_axis.scaling.min = 0
+    chart.x_axis.scaling.max = 100
+    data = Reference(ws, min_col=3, max_col=3, min_row=data_start - 1, max_row=data_end)
+    cats = Reference(ws, min_col=1, min_row=data_start, max_row=data_end)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.legend = None
+    chart.height = 9
+    chart.width = 16
+    ws.add_chart(chart, f"A{row + 1}")
+
+
+def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_pilot") -> None:
     """Formal, thesis-ready summary sheet (Bab 4) with native Excel charts.
 
     Designed to be copied directly into a thesis results chapter: numbered
@@ -492,6 +728,9 @@ def _write_summary_sheet(wb, rows: List[Dict]) -> None:
     prose, and clean grouped/bar charts that reference visible data blocks so
     nothing overlaps or renders as broken 3-D shapes.
     """
+    if report_mode == "accuracy_pilot":
+        _write_accuracy_pilot_summary_sheet(wb, rows)
+        return
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
     from openpyxl.chart import BarChart, Reference
@@ -538,6 +777,7 @@ def _write_summary_sheet(wb, rows: List[Dict]) -> None:
     cold_ratio = geo("cold_start_ratio")
     js_inf, py_inf = mean("js_inference_s"), mean("py_inference_s")
     cov_f1 = mean("coverage_f1")
+    ned_norm = mean("mean_ned_norm")
     cer = mean("mean_cer")
     teds = mean("mean_teds")
     teds_s = mean("mean_teds_struct")
@@ -646,12 +886,12 @@ def _write_summary_sheet(wb, rows: List[Dict]) -> None:
     def score(x):
         return round(x * 100, 1) if isinstance(x, (int, float)) else None
 
-    text_sim = (1 - cer) if isinstance(cer, (int, float)) else None
+    text_sim = (1 - ned_norm) if isinstance(ned_norm, (int, float)) else None
     quality = [
         ("Cakupan item (F1)", cov_f1, score(cov_f1),
          "Proporsi item yang sama-sama terdeteksi kedua sistem."),
-        ("Kemiripan teks (1 − CER)", text_sim, score(text_sim),
-         "Tingkat kemiripan teks; 100 berarti karakter identik."),
+        ("Kemiripan teks (1 - NED norm)", text_sim, score(text_sim),
+         "Tingkat kemiripan teks berbasis NED; CER/WER tetap dilaporkan sebagai error metric."),
         ("Struktur tabel (TEDS-Struct)", teds_s, score(teds_s),
          "Kemiripan struktur baris/kolom tabel."),
         ("Isi tabel (TEDS)", teds, score(teds),
@@ -728,11 +968,11 @@ def _write_summary_sheet(wb, rows: List[Dict]) -> None:
         (f"Dari sisi waktu, Sistem A secara keseluruhan {arah} dibanding Sistem B dengan faktor "
          f"{faktor} pada tahap inferensi. Perbedaan terbesar terkonsentrasi pada tahap pengenalan "
          f"formula dan tabel, sedangkan tahap deteksi teks menunjukkan kinerja yang relatif setara."),
-        (f"Dari sisi kesepadanan keluaran, kedua sistem menghasilkan keluaran yang sangat mirip: "
+        (f"Dari sisi kesepadanan keluaran, metrik perbandingan menunjukkan indikasi kesepadanan output: "
          f"cakupan item mencapai {score(cov_f1) if score(cov_f1) is not None else '-'} dari 100, "
          f"kemiripan teks {score(text_sim) if score(text_sim) is not None else '-'} dari 100, dan "
          f"struktur tabel {score(teds_s) if score(teds_s) is not None else '-'} dari 100. "
-         f"Hal ini menunjukkan bahwa port JavaScript mempertahankan paritas keluaran terhadap baseline Python."),
+         f"Hindari klaim paritas final tanpa evaluasi GT dan kecukupan sampel."),
         ("Perbandingan dilakukan dalam kerangka deployment-config (membandingkan kedua sistem "
          "sebagaimana digunakan secara nyata), sehingga perbedaan waktu mencakup pengaruh bahasa, "
          "pustaka runtime, dan penyedia eksekusi sekaligus, bukan isolasi satu variabel."),
@@ -822,7 +1062,8 @@ def _write_summary_sheet(wb, rows: List[Dict]) -> None:
     ws.row_dimensions[row].height = 28
 
 
-def write_excel(rows: List[Dict], output_path: Path) -> None:
+def write_excel(rows: List[Dict], output_path: Path,
+                report_mode: str = "accuracy_pilot") -> None:
     try:
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment
@@ -840,7 +1081,7 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
     ws.title = "Per Dokumen"
     GROUPS = [
         ("Dokumen", "4472C4", ["document", "page_count", "config_mismatch",
-            "input_kind", "input_same_bytes"]),
+            "status", "input_kind", "input_same_bytes"]),
         ("Sistem A – JS (s)", "70AD47", [
             "js_inference_s", "js_per_page_s", "js_layout_s", "js_ocr_det_s",
             "js_ocr_rec_s", "js_ocr_s", "js_formula_s", "js_table_s",
@@ -870,7 +1111,7 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
     ]
     LABELS = {
         "document": "Nama Dokumen", "page_count": "Halaman", "config_mismatch": "Config Mismatch",
-        "input_kind": "Jenis Input", "input_same_bytes": "Input Sama (bytes)",
+        "status": "Status", "input_kind": "Jenis Input", "input_same_bytes": "Input Sama (bytes)",
         "js_inference_s": "Inferensi", "js_per_page_s": "Inf/Halaman",
         "js_layout_s": "Layout", "js_ocr_det_s": "OCR Det", "js_ocr_rec_s": "OCR Rec",
         "js_ocr_s": "OCR (det+rec)", "js_formula_s": "Formula",
@@ -932,6 +1173,8 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
                 cell.fill = PatternFill("solid", fgColor="FFCCCC" if val > 1 else "CCFFCC")
             if key == "config_mismatch" and val:
                 cell.fill = PatternFill("solid", fgColor="FF9999")
+            if key == "status" and val not in (None, "", "ok"):
+                cell.fill = PatternFill("solid", fgColor="FF9999")
             if key == "input_same_bytes" and val is False:
                 cell.fill = PatternFill("solid", fgColor="FF9999")
     for c in range(1, len(all_keys) + 1):
@@ -992,14 +1235,16 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
         cell = ws2.cell(row=ci_start + 1, column=c, value=h)
         cell.font = HDR
         cell.fill = BLUE
-    for i, (key, label) in enumerate((
+    ratio_ci_keys = (
             ("time_ratio", "Rasio Inferensi (A/B)"),
             ("cold_start_ratio", "Rasio Cold Start (A/B)"),
             ("layout_ratio", "Rasio Layout (A/B)"),
             ("ocr_det_ratio", "Rasio OCR Det (A/B)"),
             ("ocr_rec_ratio", "Rasio OCR Rec (A/B)"),
             ("formula_ratio", "Rasio Formula (A/B)"),
-            ("table_ratio", "Rasio Tabel (A/B)"))):
+            ("table_ratio", "Rasio Tabel (A/B)"),
+    )
+    for i, (key, label) in enumerate(ratio_ci_keys):
         vals = [row.get(key) for row in rows if row.get(key) is not None]
         ci = geometric_mean_ci(vals)
         rr = ci_start + 2 + i
@@ -1010,7 +1255,7 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
         ws2.cell(row=rr, column=5, value=ci["n"])
 
     # Note on geomean for ratios
-    note_row = ci_start + 5
+    note_row = ci_start + 2 + len(ratio_ci_keys)
     ws2.cell(row=note_row, column=1,
              value="Catatan: untuk rasio gunakan Geomean (mean-of-ratios bias). "
                    "CI via bootstrap 5000x atas log-rasio.").font = Font(italic=True)
@@ -1092,7 +1337,7 @@ def write_excel(rows: List[Dict], output_path: Path) -> None:
 
     # ── Sheet 0: Ringkasan (plain-language summary + charts), inserted first ─
     try:
-        _write_summary_sheet(wb, rows)
+        _write_summary_sheet(wb, rows, report_mode=report_mode)
     except Exception as e:  # never let the summary break the main export
         print(f"  [WARN] Could not build summary sheet: {e}", file=sys.stderr)
 
@@ -1121,8 +1366,12 @@ def evaluate_against_gt(stem: str, sys_dir: Path, gt_dir: Path,
                         gt_index: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
     sys_cl = load_json(sys_dir / f"{stem}_content_list.json")
     gt_cl = load_json(gt_dir / f"{stem}_content_list.json")
-    if sys_cl is None or gt_cl is None:
+    status = "ok"
+    if gt_cl is None:
         return None
+    if sys_cl is None:
+        sys_cl = []
+        status = "missing_prediction"
     score = score_against_gt(sys_cl, gt_cl)
 
     if diffs_dir is not None:
@@ -1140,6 +1389,7 @@ def evaluate_against_gt(stem: str, sys_dir: Path, gt_dir: Path,
     row.update({
         "document": stem,
         "system": system_label,
+        "status": status,
         "data_source": meta.get("data_source"),
         "language": meta.get("language"),
         "layout": meta.get("layout"),
@@ -1148,7 +1398,8 @@ def evaluate_against_gt(stem: str, sys_dir: Path, gt_dir: Path,
 
 
 def run_gt_evaluation(js_dir: Path, py_dir: Path, gt_dir: Path,
-                      output: Path, diffs_dir: Path) -> Dict[str, List[Dict]]:
+                      output: Path, diffs_dir: Path,
+                      expected_stems: Optional[List[str]] = None) -> Dict[str, List[Dict]]:
     """Score BOTH systems against OmniDocBench GT. Returns {'js': [...], 'py': [...]}.
     Writes a separate Excel with per-document + per-category + per-language sheets.
     """
@@ -1158,11 +1409,18 @@ def run_gt_evaluation(js_dir: Path, py_dir: Path, gt_dir: Path,
 
     out: Dict[str, List[Dict]] = {"js": [], "py": []}
     for label, sys_dir in (("js", js_dir), ("py", py_dir)):
+        sys_name = "Sistem A (JS)" if label == "js" else "Sistem B (Python)"
         sys_stems = {f.name.replace("_content_list.json", "")
                      for f in sys_dir.glob("*_content_list.json")}
-        common = sorted(gt_stems & sys_stems)
+        if expected_stems is not None:
+            common = [s for s in expected_stems if s in gt_stems]
+            missing_outputs = [s for s in common if s not in sys_stems]
+            if missing_outputs:
+                print(f"  [{sys_name}] {len(missing_outputs)} manifest document(s) "
+                      "missing prediction output; scoring as failed predictions.")
+        else:
+            common = sorted(gt_stems & sys_stems)
         total = len(common)
-        sys_name = "Sistem A (JS)" if label == "js" else "Sistem B (Python)"
         print(f"  [{sys_name}] scoring {total} document(s) vs GT …")
         scored = 0
         for i, stem in enumerate(common, start=1):
@@ -1184,7 +1442,7 @@ def run_gt_evaluation(js_dir: Path, py_dir: Path, gt_dir: Path,
 
 
 def _gt_agg(rows: List[Dict], key: str) -> Dict[str, float]:
-    return agg_stats([r.get(key) for r in rows])
+    return agg_stats([r.get(key) for r in rows], empty_value=None)
 
 
 def _paired_by_document(scores: Dict[str, List[Dict]], key: str):
@@ -1227,6 +1485,30 @@ _GT_METRIC_KEYS = [
 ]
 
 _GT_LOWER_BETTER = {"text_edit", "text_cer", "formula_edit", "reading_order_edit"}
+_STRATUM_PILOT_LABEL = "pilot/tidak untuk klaim kategori"
+
+
+def _gt_metric_display(row: Dict[str, Any], key: str) -> Any:
+    value = row.get(key)
+    if key == "formula_edit" and not row.get("n_formula_gt"):
+        return "N/A"
+    if key in ("table_teds", "table_teds_struct") and not row.get("n_table_gt"):
+        return "N/A"
+    return value if value is not None else "N/A"
+
+
+def _mean_or_na(rows: List[Dict], key: str) -> Any:
+    value = _gt_agg(rows, key)["mean"]
+    return value if value is not None else "N/A"
+
+
+def _modality_doc_counts(rows: List[Dict]) -> Dict[str, int]:
+    return {
+        "n_docs_formula": sum(1 for r in rows if (r.get("n_formula_gt") or 0) > 0),
+        "n_docs_table": sum(1 for r in rows if (r.get("n_table_gt") or 0) > 0),
+        "n_formula_gt": sum(int(r.get("n_formula_gt") or 0) for r in rows),
+        "n_table_gt": sum(int(r.get("n_table_gt") or 0) for r in rows),
+    }
 
 
 def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
@@ -1249,8 +1531,9 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
     # ── Sheet 1: Per Dokumen (both systems) ─────────────────────────────────
     ws = wb.active
     ws.title = "Akurasi vs GT (Per Dok)"
-    head = ["Dokumen", "Sistem", "Doc Type", "Bahasa"] + [lbl for _, lbl in metric_keys] \
-        + ["N Teks", "N Tabel", "Hanya Pred", "Hanya GT"]
+    head = ["Dokumen", "Sistem", "Status", "Doc Type", "Bahasa"] + [lbl for _, lbl in metric_keys] \
+        + ["N Teks", "N Formula GT", "N Tabel GT", "N Formula Match",
+           "N Tabel Match", "Hanya Pred", "Hanya GT"]
     ws.append(head)
     for cell in ws[1]:
         cell.font = HDR
@@ -1259,25 +1542,29 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
     for label in ("js", "py"):
         for r in scores.get(label, []):
             ws.append([
-                r.get("document"), label.upper(), r.get("data_source"), r.get("language"),
-                *[r.get(k) for k, _ in metric_keys],
-                r.get("n_text_pairs"), r.get("n_table_pairs"),
+                r.get("document"), label.upper(), r.get("status") or "ok",
+                r.get("data_source"), r.get("language"),
+                *[_gt_metric_display(r, k) for k, _ in metric_keys],
+                r.get("n_text_pairs"), r.get("n_formula_gt"), r.get("n_table_gt"),
+                r.get("n_formula_pairs"), r.get("n_table_pairs"),
                 r.get("n_only_pred"), r.get("n_only_gt"),
             ])
-    ws.freeze_panes = "E2"
+    ws.freeze_panes = "F2"
     for c in range(1, len(head) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 15
     # composite-score caveat footnote
     ws.append([])
     ws.append([f"* {_COMPOSITE_LABEL} = rata-rata [(1−Text Edit), Table TEDS, "
                "(1−Formula Edit)]×100. PROKSI, BUKAN metrik 'Overall' resmi "
-               "OmniDocBench (yang memakai CDM untuk formula). Jangan dibandingkan "
-               "dengan angka leaderboard."])
+               "OmniDocBench (yang memakai CDM untuk formula). Modalitas yang tidak "
+               "ada di GT ditulis N/A; modalitas GT yang hilang di prediksi diberi "
+               "penalti. Jangan dibandingkan dengan angka leaderboard."])
     ws.cell(row=ws.max_row, column=1).font = NOTE
 
     # ── Sheet 2: Ringkasan per Sistem ───────────────────────────────────────
     ws2 = wb.create_sheet("Ringkasan per Sistem")
-    ws2.append(["Sistem", "N Dok"] + [lbl for _, lbl in metric_keys])
+    ws2.append(["Sistem", "N Dok", "N Dok Formula", "N Dok Tabel", "N Formula GT", "N Tabel GT"]
+               + [lbl for _, lbl in metric_keys])
     for cell in ws2[1]:
         cell.font = HDR
         cell.fill = GREEN
@@ -1285,9 +1572,11 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
         rows = scores.get(label, [])
         if not rows:
             continue
-        ws2.append([label.upper(), len(rows)] +
-                   [_gt_agg(rows, k)["mean"] for k, _ in metric_keys])
-    for c in range(1, len(metric_keys) + 3):
+        counts = _modality_doc_counts(rows)
+        ws2.append([label.upper(), len(rows), counts["n_docs_formula"], counts["n_docs_table"],
+                    counts["n_formula_gt"], counts["n_table_gt"]] +
+                   [_mean_or_na(rows, k) for k, _ in metric_keys])
+    for c in range(1, len(metric_keys) + 7):
         ws2.column_dimensions[get_column_letter(c)].width = 16
 
     # ── Sheet 3: Per Kategori Dokumen ───────────────────────────────────────
@@ -1305,7 +1594,7 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
     # family so the "winner" is only declared when it is statistically defensible.
     ws5 = wb.create_sheet("JS vs Py (vs GT)")
     ws5.append(["Metrik", "JS (mean)", "Python (mean)", "Selisih (JS−Py)",
-                "N pasang", "CI 95% selisih", "p (Wilcoxon)", "p (Holm)",
+                "N pasang", "CI 95% selisih", "p-value", "Holm alpha",
                 "Signifikan (Holm)", "Pemenang"])
     for cell in ws5[1]:
         cell.font = HDR
@@ -1344,7 +1633,7 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
         ws5.append([
             lbl, js_mean, py_mean, diff, ci.get("n"), ci_str,
             round(p, 6) if isinstance(p, (int, float)) else "—",
-            round(hb["p_value"], 6) if hb.get("significant") is not None and isinstance(hb.get("p_value"), (int, float)) else "—",
+            hb.get("adjusted_alpha") if hb.get("adjusted_alpha") is not None else "—",
             ("ya" if sig else "tidak") if sig is not None else "—",
             winner,
         ])
@@ -1444,7 +1733,7 @@ def _write_sample_adequacy_sheet(wb, scores, metric_keys, HDR, FILL, NOTE) -> No
         counts = Counter((r.get(attr) or "unknown") for r in scores.get("js", []))
         for gkey in sorted(counts, key=lambda x: str(x)):
             n = counts[gkey]
-            ok = "ya" if n >= 10 else "TIDAK"
+            ok = "ya" if n >= 10 else _STRATUM_PILOT_LABEL
             ws.append([gkey, n, ok])
             if n < 10:
                 ws.cell(row=ws.max_row, column=3).fill = RED
@@ -1460,7 +1749,8 @@ def _write_sample_adequacy_sheet(wb, scores, metric_keys, HDR, FILL, NOTE) -> No
 
 def _write_strata_sheet(ws, scores, attr_key, metric_keys, HDR, FILL):
     from openpyxl.styles import Alignment
-    ws.append(["Sistem", attr_key, "N Dok", "Memadai (≥10)?"]
+    ws.append(["Sistem", attr_key, "N Dok", "Memadai (pilot/n>=10)?",
+               "N Dok Formula", "N Dok Tabel", "N Formula GT", "N Tabel GT"]
               + [lbl for _, lbl in metric_keys])
     for cell in ws[1]:
         cell.font = HDR
@@ -1475,9 +1765,12 @@ def _write_strata_sheet(ws, scores, attr_key, metric_keys, HDR, FILL):
             groups.setdefault(r.get(attr_key) or "unknown", []).append(r)
         for gkey in sorted(groups, key=lambda x: str(x)):
             grp = groups[gkey]
-            adequate = "ya" if len(grp) >= 10 else "TIDAK"
-            ws.append([label.upper(), gkey, len(grp), adequate] +
-                      [_gt_agg(grp, k)["mean"] for k, _ in metric_keys])
+            adequate = "ya" if len(grp) >= 10 else _STRATUM_PILOT_LABEL
+            counts = _modality_doc_counts(grp)
+            ws.append([label.upper(), gkey, len(grp), adequate,
+                       counts["n_docs_formula"], counts["n_docs_table"],
+                       counts["n_formula_gt"], counts["n_table_gt"]] +
+                      [_mean_or_na(grp, k) for k, _ in metric_keys])
             if len(grp) < 10:
                 ws.cell(row=ws.max_row, column=4).fill = RED
 
@@ -1490,9 +1783,12 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
                    diffs_dir: Optional[Path] = None,
                    gt_dir: Optional[Path] = None,
                    session_dir: Optional[Path] = None,
-                   use_session_dir: bool = True) -> List[Dict]:
+                   use_session_dir: bool = True,
+                   report_mode: str = "accuracy_pilot",
+                   manifest: Optional[Path] = None,
+                   manifest_split: str = "accuracy") -> List[Dict]:
     explode_js_combined(js_dir)
-    stems = find_pairs(js_dir, py_dir)
+    stems = find_pairs(js_dir, py_dir, manifest=manifest, manifest_split=manifest_split)
     if not stems:
         print("[ERROR] No matching document stems found.", file=sys.stderr)
         return []
@@ -1525,7 +1821,16 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
         print("[ERROR] No documents could be evaluated.", file=sys.stderr)
         return []
 
-    write_excel(rows, output)
+    if report_mode == "timing_final":
+        weak = [r.get("document") for r in rows
+                if (r.get("js_n_runs") or 0) < 2 or (r.get("py_n_runs") or 0) < 2
+                or not r.get("cold_start_is_real")]
+        if weak:
+            print(f"  [WARN] report_mode=timing_final but {len(weak)} doc(s) lack "
+                  "repeat>=2 or real cold-start. Treat timing as diagnostic until "
+                  "the timing corpus is rerun with warm-up and measured repeats.")
+
+    write_excel(rows, output, report_mode=report_mode)
 
     clean = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
     ratios = [r["time_ratio"] for r in clean if r.get("time_ratio")]
@@ -1536,8 +1841,11 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
     print()
     print("=" * 64)
     print(f"  Evaluated {len(rows)} document(s)")
-    print(f"  Time ratio (JS/Py inference)  geomean : {ratio_ci['gm']:.3f} "
-          f"[95% CI {ratio_ci['ci_low']:.3f}, {ratio_ci['ci_high']:.3f}]")
+    if ratio_ci.get("gm") is not None:
+        print(f"  Time ratio (JS/Py inference)  geomean : {ratio_ci['gm']:.3f} "
+              f"[95% CI {ratio_ci['ci_low']:.3f}, {ratio_ci['ci_high']:.3f}]")
+    else:
+        print("  Time ratio (JS/Py inference)  geomean : n/a")
     print(f"  Avg type seq. diff                     : {agg_stats([r['type_sequence_diff'] for r in clean])['mean']:.4f}")
     print(f"  Avg coverage F1                        : {agg_stats([r['coverage_f1'] for r in clean])['mean']:.4f}")
     print(f"  Avg NED (norm)                         : {agg_stats([r['mean_ned_norm'] for r in clean])['mean']:.4f}")
@@ -1561,7 +1869,9 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
     if gt_dir is not None and gt_dir.exists():
         print(f"\n[evaluate] Scoring against OmniDocBench GT in {gt_dir} …")
         gt_output = output.parent / (output.stem + "_gt_accuracy.xlsx")
-        gt_scores = run_gt_evaluation(js_dir, py_dir, gt_dir, gt_output, diffs_dir)
+        expected_gt_stems = stems if manifest is not None else None
+        gt_scores = run_gt_evaluation(js_dir, py_dir, gt_dir, gt_output, diffs_dir,
+                                      expected_stems=expected_gt_stems)
         for label in ("js", "py"):
             srows = gt_scores.get(label, [])
             if srows:
@@ -1616,6 +1926,17 @@ def main() -> None:
     parser.add_argument("--no-session-dir", action="store_true", default=False,
                         help="Write directly to --output / --diffs-dir without a per-session folder "
                              "(legacy flat layout).")
+    parser.add_argument("--report-mode", choices=("accuracy_pilot", "timing_final"),
+                        default="accuracy_pilot",
+                        help="accuracy_pilot makes accuracy/parity the main report and labels timing "
+                             "as diagnostic; timing_final keeps timing as the headline and warns when "
+                             "repeat/warm-up evidence is insufficient.")
+    parser.add_argument("--manifest", default=None, type=Path,
+                        help="Optional sample_manifest.json. When provided, evaluator uses the "
+                             "manifest stem list so missing/crashed documents are recorded instead "
+                             "of disappearing from the comparison.")
+    parser.add_argument("--manifest-split", choices=("accuracy", "timing"), default="accuracy",
+                        help="Which manifest split to use with --manifest.")
     args = parser.parse_args()
 
     if not args.js_dir.exists():
@@ -1624,11 +1945,17 @@ def main() -> None:
     if not args.py_dir.exists():
         print(f"[ERROR] Python dir not found: {args.py_dir}", file=sys.stderr)
         sys.exit(1)
+    if args.manifest is not None and not args.manifest.exists():
+        print(f"[ERROR] Manifest not found: {args.manifest}", file=sys.stderr)
+        sys.exit(1)
 
     rows = run_evaluation(args.js_dir, args.py_dir, args.output, args.diffs_dir,
                           gt_dir=args.gt_dir,
                           session_dir=args.session_dir,
-                          use_session_dir=not args.no_session_dir)
+                          use_session_dir=not args.no_session_dir,
+                          report_mode=args.report_mode,
+                          manifest=args.manifest,
+                          manifest_split=args.manifest_split)
     if not rows:
         sys.exit(1)
 

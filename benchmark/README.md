@@ -182,19 +182,28 @@ rtk python -m demo.demo_batch --pdfs benchmark/sample/accuracy_images \
 #    (JS: drop accuracy_images ke benchmark.html, repeat=1, export ke benchmark/js_accuracy)
 rtk python -m benchmark.evaluate --js-dir benchmark/js_accuracy \
     --py-dir benchmark/py_accuracy --gt-dir benchmark/omnidocbench_gt \
+    --manifest benchmark/sample/sample_manifest.json --manifest-split accuracy \
+    --report-mode accuracy_pilot \
     --output benchmark/results_accuracy.xlsx
 
 # 3b. TIMING — kedua sistem, 10 run + warmup, pada subset kecil
 rtk python -m demo.demo_batch --pdfs benchmark/sample/timing_images \
-    --benchmark-dir benchmark/py_timing --repeat 10 --formula --table --no-evaluate
-#    (JS: drop timing_images ke benchmark.html, repeat=10, export ke benchmark/js_timing)
+    --benchmark-dir benchmark/py_timing --repeat 10 --warmup 2 \
+    --benchmark-mode final --formula --table --no-evaluate
+#    (JS: buka benchmark.html?benchmarkMode=final, drop timing_images,
+#     repeat=10, warmup=2, export ke benchmark/js_timing)
 rtk python -m benchmark.evaluate --js-dir benchmark/js_timing \
-    --py-dir benchmark/py_timing --output benchmark/results_timing.xlsx
+    --py-dir benchmark/py_timing \
+    --manifest benchmark/sample/sample_manifest.json --manifest-split timing \
+    --report-mode timing_final --output benchmark/results_timing.xlsx
 ```
 
 Pelaporan: akurasi sebagai mean per-stratum + 95% CI; timing sebagai mean/median
 + CV + uji Wilcoxon. Sebut eksplisit ini **stratified random sample (seed tetap)**,
 estimasi atas populasi 1651 — bukan sensus penuh leaderboard.
+
+Untuk workbook pilot N=50, lihat `benchmark/METHODOLOGY_AUDIT_PLAN.md`.
+Validasi Excel dapat dijalankan dengan `rtk python -m benchmark.audit_workbook`.
 
 ### Berapa ukuran minimum yang tetap valid?
 

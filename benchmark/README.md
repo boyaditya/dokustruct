@@ -183,7 +183,7 @@ rtk python -m demo.demo_batch --pdfs benchmark/sample/accuracy_images \
 rtk python -m benchmark.evaluate --js-dir benchmark/js_accuracy \
     --py-dir benchmark/py_accuracy --gt-dir benchmark/omnidocbench_gt \
     --manifest benchmark/sample/sample_manifest.json --manifest-split accuracy \
-    --report-mode accuracy_pilot \
+    --report-mode accuracy_final \
     --output benchmark/results_accuracy.xlsx
 
 # 3b. TIMING — kedua sistem, 10 run + warmup, pada subset kecil

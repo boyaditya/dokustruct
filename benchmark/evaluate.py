@@ -558,8 +558,8 @@ def _agg_mean(rows: List[Dict], key: str) -> Optional[float]:
     return round(sum(vals) / len(vals), 4) if vals else None
 
 
-def _write_accuracy_pilot_summary_sheet(wb, rows: List[Dict]) -> None:
-    """Accuracy-pilot front sheet: accuracy/parity first, timing diagnostic only."""
+def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> None:
+    """Accuracy front sheet: accuracy/parity first, timing diagnostic only."""
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.chart import BarChart, Reference
 
@@ -602,14 +602,28 @@ def _write_accuracy_pilot_summary_sheet(wb, rows: List[Dict]) -> None:
 
     row = 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
-    ws.cell(row=row, column=1, value="Ringkasan Pilot Akurasi Sistem A dan Sistem B").font = TITLE
+    is_pilot = report_mode == "accuracy_pilot"
+    run_label = "Pilot Akurasi" if is_pilot else "Akurasi Final"
+    sample_label = "sampel pilot" if is_pilot else "sampel final"
+    timing_context = (
+        "run tunggal/non-final, bukan dasar klaim performa skripsi."
+        if is_pilot else
+        "dari corpus akurasi repeat=1, bukan dasar klaim performa skripsi."
+    )
+    safe_claim = (
+        "tidak ditemukan perbedaan akurasi signifikan pada sampel pilot."
+        if is_pilot else
+        "tidak ditemukan perbedaan akurasi signifikan pada sampel final."
+    )
+
+    ws.cell(row=row, column=1, value=f"Ringkasan {run_label} Sistem A dan Sistem B").font = TITLE
     row += 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
     ws.cell(row=row, column=1, value=(
-        f"Mode laporan: accuracy_pilot. Sistem A = JavaScript/peramban; Sistem B = "
+        f"Mode laporan: {report_mode}. Sistem A = JavaScript/peramban; Sistem B = "
         f"Python baseline pembanding. Jumlah dokumen manifest/evaluasi: {n_docs}; "
         f"dokumen lengkap: {complete_docs}. Timing pada workbook ini hanya diagnostik "
-        "run tunggal/non-final, bukan dasar klaim performa skripsi."
+        f"{timing_context}"
     )).font = NOTE
     ws.row_dimensions[row].height = 36
     row += 2
@@ -656,7 +670,7 @@ def _write_accuracy_pilot_summary_sheet(wb, rows: List[Dict]) -> None:
     data_end = row - 1
     row += 1
 
-    ws.cell(row=row, column=1, value="Tabel D.1  Timing Diagnostik Accuracy Pilot").font = CAP
+    ws.cell(row=row, column=1, value=f"Tabel D.1  Timing Diagnostik {run_label}").font = CAP
     row += 1
     for c, h in enumerate(["Besaran", "Nilai"], start=1):
         cell = ws.cell(row=row, column=c, value=h)
@@ -683,7 +697,7 @@ def _write_accuracy_pilot_summary_sheet(wb, rows: List[Dict]) -> None:
         row += 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
     ws.cell(row=row, column=1, value=(
-        "Catatan: timing di workbook accuracy_pilot hanya membantu audit. Untuk klaim performa, "
+        f"Catatan: timing di workbook {report_mode} hanya membantu audit. Untuk klaim performa, "
         "gunakan report_mode=timing_final dengan warm-up dan measured repeats."
     )).font = NOTE
     ws.row_dimensions[row].height = 30
@@ -693,10 +707,10 @@ def _write_accuracy_pilot_summary_sheet(wb, rows: List[Dict]) -> None:
     row += 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
     ws.cell(row=row, column=1, value=(
-        "Pada sampel pilot ini, workbook utama dipakai untuk audit kesepadanan output JS terhadap "
+        f"Pada {sample_label} ini, workbook utama dipakai untuk audit kesepadanan output JS terhadap "
         "baseline Python. Klaim akurasi absolut dan signifikansi JS vs Python harus merujuk ke "
         "workbook *_gt_accuracy.xlsx; bila hasil Holm tidak signifikan, narasi yang aman adalah "
-        "tidak ditemukan perbedaan akurasi signifikan pada sampel pilot."
+        + safe_claim
     )).alignment = left
     ws.row_dimensions[row].height = 48
     row += 2
@@ -720,7 +734,7 @@ def _write_accuracy_pilot_summary_sheet(wb, rows: List[Dict]) -> None:
     ws.add_chart(chart, f"A{row + 1}")
 
 
-def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_pilot") -> None:
+def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_final") -> None:
     """Formal, thesis-ready summary sheet (Bab 4) with native Excel charts.
 
     Designed to be copied directly into a thesis results chapter: numbered
@@ -728,8 +742,8 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_pilo
     prose, and clean grouped/bar charts that reference visible data blocks so
     nothing overlaps or renders as broken 3-D shapes.
     """
-    if report_mode == "accuracy_pilot":
-        _write_accuracy_pilot_summary_sheet(wb, rows)
+    if report_mode in ("accuracy_pilot", "accuracy_final"):
+        _write_accuracy_summary_sheet(wb, rows, report_mode)
         return
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -1063,7 +1077,7 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_pilo
 
 
 def write_excel(rows: List[Dict], output_path: Path,
-                report_mode: str = "accuracy_pilot") -> None:
+                report_mode: str = "accuracy_final") -> None:
     try:
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment
@@ -1485,7 +1499,7 @@ _GT_METRIC_KEYS = [
 ]
 
 _GT_LOWER_BETTER = {"text_edit", "text_cer", "formula_edit", "reading_order_edit"}
-_STRATUM_PILOT_LABEL = "pilot/tidak untuk klaim kategori"
+_STRATUM_LOW_N_LABEL = "N<10/tidak untuk klaim kategori"
 
 
 def _gt_metric_display(row: Dict[str, Any], key: str) -> Any:
@@ -1733,7 +1747,7 @@ def _write_sample_adequacy_sheet(wb, scores, metric_keys, HDR, FILL, NOTE) -> No
         counts = Counter((r.get(attr) or "unknown") for r in scores.get("js", []))
         for gkey in sorted(counts, key=lambda x: str(x)):
             n = counts[gkey]
-            ok = "ya" if n >= 10 else _STRATUM_PILOT_LABEL
+            ok = "ya" if n >= 10 else _STRATUM_LOW_N_LABEL
             ws.append([gkey, n, ok])
             if n < 10:
                 ws.cell(row=ws.max_row, column=3).fill = RED
@@ -1749,7 +1763,7 @@ def _write_sample_adequacy_sheet(wb, scores, metric_keys, HDR, FILL, NOTE) -> No
 
 def _write_strata_sheet(ws, scores, attr_key, metric_keys, HDR, FILL):
     from openpyxl.styles import Alignment
-    ws.append(["Sistem", attr_key, "N Dok", "Memadai (pilot/n>=10)?",
+    ws.append(["Sistem", attr_key, "N Dok", "Memadai (n>=10)?",
                "N Dok Formula", "N Dok Tabel", "N Formula GT", "N Tabel GT"]
               + [lbl for _, lbl in metric_keys])
     for cell in ws[1]:
@@ -1765,7 +1779,7 @@ def _write_strata_sheet(ws, scores, attr_key, metric_keys, HDR, FILL):
             groups.setdefault(r.get(attr_key) or "unknown", []).append(r)
         for gkey in sorted(groups, key=lambda x: str(x)):
             grp = groups[gkey]
-            adequate = "ya" if len(grp) >= 10 else _STRATUM_PILOT_LABEL
+            adequate = "ya" if len(grp) >= 10 else _STRATUM_LOW_N_LABEL
             counts = _modality_doc_counts(grp)
             ws.append([label.upper(), gkey, len(grp), adequate,
                        counts["n_docs_formula"], counts["n_docs_table"],
@@ -1784,7 +1798,7 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
                    gt_dir: Optional[Path] = None,
                    session_dir: Optional[Path] = None,
                    use_session_dir: bool = True,
-                   report_mode: str = "accuracy_pilot",
+                   report_mode: str = "accuracy_final",
                    manifest: Optional[Path] = None,
                    manifest_split: str = "accuracy") -> List[Dict]:
     explode_js_combined(js_dir)
@@ -1926,11 +1940,12 @@ def main() -> None:
     parser.add_argument("--no-session-dir", action="store_true", default=False,
                         help="Write directly to --output / --diffs-dir without a per-session folder "
                              "(legacy flat layout).")
-    parser.add_argument("--report-mode", choices=("accuracy_pilot", "timing_final"),
-                        default="accuracy_pilot",
-                        help="accuracy_pilot makes accuracy/parity the main report and labels timing "
-                             "as diagnostic; timing_final keeps timing as the headline and warns when "
-                             "repeat/warm-up evidence is insufficient.")
+    parser.add_argument("--report-mode", choices=("accuracy_final", "accuracy_pilot", "timing_final"),
+                        default="accuracy_final",
+                        help="accuracy_final makes accuracy/parity the main report and labels timing "
+                             "as diagnostic; accuracy_pilot keeps pilot wording for small preliminary "
+                             "runs; timing_final keeps timing as the headline and warns when repeat/"
+                             "warm-up evidence is insufficient.")
     parser.add_argument("--manifest", default=None, type=Path,
                         help="Optional sample_manifest.json. When provided, evaluator uses the "
                              "manifest stem list so missing/crashed documents are recorded instead "

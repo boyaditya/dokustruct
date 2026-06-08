@@ -38,6 +38,53 @@ let adapterMetadata = null;
  * the real error.
  */
 let deviceLost = false;
+let sharedGpuDeviceAvailable = null;
+let sharedGpuDeviceWarningShown = false;
+
+function setOrtWebGpuDevice(runtime, device) {
+  const env = runtime?.env?.webgpu;
+  if (!env) return false;
+
+  try {
+    env.device = device;
+    sharedGpuDeviceAvailable = env.device === device;
+    return sharedGpuDeviceAvailable;
+  } catch (assignErr) {
+    try {
+      Object.defineProperty(env, 'device', {
+        value: device,
+        writable: true,
+        configurable: true,
+      });
+      sharedGpuDeviceAvailable = env.device === device;
+      return sharedGpuDeviceAvailable;
+    } catch {
+      sharedGpuDeviceAvailable = false;
+      if (!sharedGpuDeviceWarningShown) {
+        sharedGpuDeviceWarningShown = true;
+        console.warn('[ORT] WebGPU shared device assignment skipped:', assignErr?.message ?? assignErr);
+      }
+      return false;
+    }
+  }
+}
+
+function clearOrtWebGpuDevice(runtime) {
+  const env = runtime?.env?.webgpu;
+  if (!env) return;
+
+  try {
+    env.device = undefined;
+  } catch {
+    try {
+      Object.defineProperty(env, 'device', {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+    } catch { /* read-only in this ORT build; leave ORT-owned device alone */ }
+  }
+}
 
 /**
  * Configure ORT wasm runtime paths through Vite-managed asset URLs.
@@ -134,8 +181,12 @@ export async function configureOrtRuntime(opts = {}) {
             }
           }
 
-          gpuDevice = await adapter.requestDevice({ requiredLimits });
-          runtime.env.webgpu.device = gpuDevice;
+          const requestedDevice = await adapter.requestDevice({ requiredLimits });
+          const assigned = setOrtWebGpuDevice(runtime, requestedDevice);
+          gpuDevice = assigned ? requestedDevice : null;
+          if (!assigned) {
+            try { requestedDevice.destroy?.(); } catch { /* ignore */ }
+          }
           deviceLost = false;
           adapterMetadata = {
             label: adapterLabel,
@@ -143,11 +194,18 @@ export async function configureOrtRuntime(opts = {}) {
             limits: { ...requiredLimits },
           };
           attachDeviceLostListener(gpuDevice);
-          console.info(
-            `[ORT] WebGPU device initialized — adapter: ${adapterLabel}, ` +
-            `maxBufferSize: ${requiredLimits.maxBufferSize ?? 'default'}, ` +
-            `maxStorageBufferBindingSize: ${requiredLimits.maxStorageBufferBindingSize ?? 'default'}`,
-          );
+          if (assigned) {
+            console.info(
+              `[ORT] WebGPU device initialized — adapter: ${adapterLabel}, ` +
+              `maxBufferSize: ${requiredLimits.maxBufferSize ?? 'default'}, ` +
+              `maxStorageBufferBindingSize: ${requiredLimits.maxStorageBufferBindingSize ?? 'default'}`,
+            );
+          } else {
+            console.info(
+              `[ORT] WebGPU shared device unavailable — ORT will manage its own device ` +
+              `(adapter: ${adapterLabel}).`,
+            );
+          }
         }
       }
     } catch (err) {
@@ -174,6 +232,16 @@ export function isOrtRuntimeConfigured() {
  */
 export function getGpuDevice() {
   return gpuDevice;
+}
+
+/**
+ * Whether RapidDoc successfully attached a shared WebGPU device to ORT.
+ * `false` means ORT owns its internal WebGPU device, so RapidDoc cannot force
+ * a full device-pool teardown on reset.
+ * @returns {boolean|null}
+ */
+export function isSharedGpuDeviceAvailable() {
+  return sharedGpuDeviceAvailable;
 }
 
 /**
@@ -247,7 +315,7 @@ export async function releaseGpuDevice() {
   try {
     // Best-effort: detach the device from ORT before destroying so subsequent
     // session.run calls do not silently use a dead handle.
-    if (ort?.env?.webgpu) ort.env.webgpu.device = undefined;
+    clearOrtWebGpuDevice(ort);
   } catch { /* ignore */ }
 
   try {
@@ -297,7 +365,7 @@ function attachDeviceLostListener(device) {
       // release on a dead device throws "cannot release session, invalid
       // session id" which masks the real WebGPU failure).
       deviceLost = true;
-      try { if (ort?.env?.webgpu) ort.env.webgpu.device = undefined; } catch { /* ignore */ }
+      try { clearOrtWebGpuDevice(ort); } catch { /* ignore */ }
     })
     .catch(() => { /* lost-promise itself is informational */ });
 }

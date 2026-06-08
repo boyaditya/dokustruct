@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest --run",
+    "bench:js:supervised": "node benchmark/js_supervised_runner.mjs",
     "lint": "eslint rapid_doc/ ui/ --ext .js",
     "lint:bbox": "eslint rapid_doc/ --ext .js --rule \"rapiddoc/no-math-round-bbox: warn\"",
     "parity:audit:static": "node scripts/parity_audit.mjs --static",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "eslint": "^9.39.4",
     "fast-check": "^4.8.0",
+    "playwright": "^1.60.0",
     "vite": "^7.3.1",
     "vitest": "^4.1.6"
   }

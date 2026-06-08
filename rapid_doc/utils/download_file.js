@@ -446,12 +446,16 @@ export async function downloadFile(url, onProgress = null) {
   return fetchAssetBuffer(url, onProgress);
 }
 
-export function __resetAssetMemoryCacheForTests() {
+export function clearAssetMemoryCache() {
   memoryCache.clear();
   for (const url of objectUrlCache.values()) {
     try { URL.revokeObjectURL(url); } catch { /* ignore */ }
   }
   objectUrlCache.clear();
+}
+
+export function __resetAssetMemoryCacheForTests() {
+  clearAssetMemoryCache();
 }
 
 export const CPU_MODEL = Object.freeze([

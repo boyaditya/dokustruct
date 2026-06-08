@@ -321,7 +321,13 @@ export class AtomModelSingleton {
     const key = AtomModelSingleton.buildKey(atomModelName, kwargs);
 
     if (!this.#models.has(key)) {
-      const initPromise = atomModelInit(atomModelName, kwargs);
+      let initPromise;
+      initPromise = atomModelInit(atomModelName, kwargs).catch(err => {
+        if (this.#models.get(key) === initPromise) {
+          this.#models.delete(key);
+        }
+        throw err;
+      });
       this.#models.set(key, initPromise);
     }
     return await this.#models.get(key);
@@ -385,9 +391,17 @@ export class AtomModelSingleton {
     for (const [key, value] of this.#models.entries()) {
       if (keepKey !== null && key === keepKey) continue;
       this.#models.delete(key);
+      let resource = null;
       try {
-        await disposeModelResource(await value, seen);
+        resource = await value;
       } catch (err) {
+        if (err instanceof AbortException) throw err;
+        continue;
+      }
+      try {
+        await disposeModelResource(resource, seen);
+      } catch (err) {
+        if (err instanceof AbortException) throw err;
         console.warn(formatPipelineError({
           stage: "dispose",
           module: "AtomModelSingleton",
@@ -407,9 +421,17 @@ export class AtomModelSingleton {
     for (const [key, value] of this.#models.entries()) {
       if (keepKeys.has(key)) continue;
       this.#models.delete(key);
+      let resource = null;
       try {
-        await disposeModelResource(await value, seen);
+        resource = await value;
       } catch (err) {
+        if (err instanceof AbortException) throw err;
+        continue;
+      }
+      try {
+        await disposeModelResource(resource, seen);
+      } catch (err) {
+        if (err instanceof AbortException) throw err;
         console.warn(formatPipelineError({
           stage: "dispose",
           module: "AtomModelSingleton",

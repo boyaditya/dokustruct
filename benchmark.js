@@ -10,22 +10,54 @@
  * that can be fed directly into benchmark/evaluate.py.
  */
 
-import { configureOrtRuntime, getAdapterMetadata } from './rapid_doc/utils/ort_runtime.js';
-import { docAnalyze } from './rapid_doc/backend/pipeline/pipeline_analyze.js';
+import {
+  configureOrtRuntime,
+  getAdapterMetadata,
+  isSharedGpuDeviceAvailable,
+} from './rapid_doc/utils/ort_runtime.js';
+import { docAnalyze, engineReset } from './rapid_doc/backend/pipeline/pipeline_analyze.js';
 import { resultToMiddleJson } from './rapid_doc/backend/pipeline/model_json_to_middle_json.js';
 import { unionMake } from './rapid_doc/backend/pipeline/pipeline_middle_json_mkcontent.js';
 import { MemoryDataWriter } from './rapid_doc/data/data_reader_writer/index.js';
 import { MakeMode } from './rapid_doc/utils/enum_class.js';
 import { buildXlsxBlob } from './ui/utils/xlsxWriter.js';
 import { ASSET_MANIFEST } from './rapid_doc/utils/model_url_map.js';
+import { clearAssetMemoryCache } from './rapid_doc/utils/download_file.js';
 import JSZip from 'jszip';
 
-const PDF_PAGES_BATCH = 64; // default batch size
-const BENCHMARK_MODE = new URLSearchParams(location.search).get('benchmarkMode') === 'final'
+const SEARCH_PARAMS = new URLSearchParams(location.search);
+
+function queryStringParam(name, fallback = null) {
+  const value = SEARCH_PARAMS.get(name);
+  return value == null || value === '' ? fallback : value;
+}
+
+function queryBoolParam(name, fallback = false) {
+  const value = SEARCH_PARAMS.get(name);
+  if (value == null || value === '') return fallback;
+  return /^(1|true|yes|on)$/i.test(value);
+}
+
+function queryIntParam(name, fallback, min = 0) {
+  const raw = SEARCH_PARAMS.get(name);
+  if (raw == null || raw === '') return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? Math.max(min, parsed) : fallback;
+}
+
+const QUERY_EP = queryStringParam('ep', null);
+const AUTOMATION_MODE = queryBoolParam('automation', false) || queryBoolParam('supervised', false);
+const STRICT_EP = queryBoolParam('strictEp', AUTOMATION_MODE);
+const BENCHMARK_MODE = (queryStringParam('benchmarkMode', queryStringParam('mode', 'strict')) === 'final')
   ? 'final'
   : 'strict';
+const DEFAULT_PDF_PAGES_BATCH = AUTOMATION_MODE && QUERY_EP !== 'wasm' ? 8 : 64;
+const PDF_PAGES_BATCH = queryIntParam('pdfPagesBatch', DEFAULT_PDF_PAGES_BATCH, 1);
 const AUDIT_PROVENANCE = BENCHMARK_MODE === 'strict';
 const CHECK_CONTENT_STABILITY = BENCHMARK_MODE === 'strict';
+const BENCHMARK_RESET_STRATEGY = 'periodic_plus_error';
+const BENCHMARK_RESET_INTERVAL = 25;
+const BENCHMARK_MAX_RETRIES = 1;
 
 // ---------------------------------------------------------------------------
 // OpenCV loader (same pattern as pipelineAdapter.js)
@@ -67,6 +99,11 @@ function waitForOpenCV(timeoutMs = 15000) {
 
 let _runtimeReady = false;
 let _lastEp = null;
+
+function invalidateRuntimeReady() {
+  _runtimeReady = false;
+  _lastEp = null;
+}
 
 async function ensureRuntime(ep) {
   if (_runtimeReady && _lastEp === ep) return;
@@ -120,6 +157,10 @@ let queue = [];
 const fileEls = new Map();
 /** @type {Array<{filename:string, run:number, warmup:boolean, timing:object, content_list:any[]}>} */
 let allResults = [];
+/** @type {Array<object>} failed attempts and final failed runs */
+let benchmarkFailures = [];
+let benchmarkResetCount = 0;
+let benchmarkRuntimeFallbacks = [];
 /** @type {Map<string, object>} cold-start (first warm-up) timing per file */
 const fileColdStarts = new Map();
 /** @type {Map<string, object>} input-file provenance (sha256 + kind) per file */
@@ -129,6 +170,9 @@ let running = false;
 /** Reproducibility metadata + run config captured at the start of a benchmark. */
 let lastEnvironment = null;
 let lastRunConfig = null;
+let lastEffectiveExecutionProvider = null;
+let benchmarkVisibilityTainted = false;
+const benchmarkVisibilityEvents = [];
 
 // ---------------------------------------------------------------------------
 // Logging
@@ -140,6 +184,23 @@ function log(msg, level = 'info') {
   line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
   el.logEl.appendChild(line);
   el.logEl.scrollTop = el.logEl.scrollHeight;
+}
+
+function recordVisibilityTaint(reason = 'visibilitychange') {
+  if (typeof document === 'undefined') return;
+  if (document.visibilityState === 'visible') return;
+  benchmarkVisibilityTainted = true;
+  benchmarkVisibilityEvents.push({
+    at: new Date().toISOString(),
+    reason,
+    visibility_state: document.visibilityState,
+  });
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (running) recordVisibilityTaint('visibilitychange');
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +279,8 @@ function getConfig() {
     // Warm-up is now a COUNT (was a checkbox). First warm-up is preserved as
     // the cold-start measurement; all warm-ups are excluded from steady stats.
     warmup: Math.max(0, parseInt(el.cfgWarmup.value, 10) || 0),
+    strict_ep: STRICT_EP,
+    pdf_pages_batch: PDF_PAGES_BATCH,
     layout_config: {
       execution_provider: ep,
       executionProviders: eps,
@@ -407,6 +470,8 @@ function buildRunConfig(config, ep) {
     repeat: config.repeat,
     warmup_runs: config.warmup,
     warmup_excluded: config.warmup > 0,
+    strict_ep: !!config.strict_ep,
+    pdf_pages_batch: config.pdf_pages_batch ?? PDF_PAGES_BATCH,
     ep_mode: config.ep_mode,
     execution_provider: ep,
     real_eps: {
@@ -523,56 +588,111 @@ function contentStability(runsContent) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Single-file single-run pipeline
-// ---------------------------------------------------------------------------
+function applyExecutionProvider(config, ep) {
+  const isWasm = ep === 'wasm';
+  const eps = isWasm ? ['wasm'] : ['webgpu', 'wasm'];
+  config.execution_provider = ep;
+  config.ep_mode = isWasm ? 'cpu' : 'accelerated';
+  config.executionProviders = eps;
 
-async function runOnce(file, config, signal) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const pdfPagesBatch = PDF_PAGES_BATCH;
+  if (config.layout_config) {
+    config.layout_config.execution_provider = ep;
+    config.layout_config.executionProviders = eps;
+    config.layout_config.engine_cfg = { ...(config.layout_config.engine_cfg ?? {}), use_webgpu: !isWasm };
+    config.layout_config.batch_num = isWasm ? 1 : 4;
+  }
+  if (config.ocr_config) {
+    config.ocr_config.execution_provider = ep;
+    config.ocr_config.executionProviders = eps;
+    config.ocr_config['Det.rec_batch_num'] = isWasm ? 1 : 4;
+  }
+  if (config.formula_config) {
+    config.formula_config.execution_provider = 'wasm';
+    config.formula_config.executionProviders = ['wasm'];
+  }
+  if (config.table_config) {
+    config.table_config.execution_provider = 'wasm';
+    config.table_config.executionProviders = ['wasm'];
+    config.table_config.engine_cfg = { ...(config.table_config.engine_cfg ?? {}), use_webgpu: false };
+  }
+  if (config.orientation_config) {
+    config.orientation_config.execution_provider = ep;
+    config.orientation_config.executionProviders = eps;
+  }
+}
 
-  const t0 = performance.now();
+function fallbackBenchmarkToWasm(config, file, runLabel, err) {
+  if (STRICT_EP || config?.strict_ep) return false;
+  if (config.execution_provider === 'wasm') return false;
+  if (!isMemoryAllocationError(err)) return false;
+  if (isSharedGpuDeviceAvailable?.() !== false) return false;
 
-  const docResult = await docAnalyze(
-    [bytes],
-    {
-      lang_list: ['ch'],
-      parse_method: config.parse_method,
-      formula_enable: config.formula_enable,
-      table_enable: config.table_enable,
-      layout_config: config.layout_config,
-      ocr_config: config.ocr_config,
-      formula_config: config.formula_config,
-      table_config: config.table_config,
-      orientation_config: config.orientation_config,
-      pdf_pages_batch: pdfPagesBatch,
+  applyExecutionProvider(config, 'wasm');
+  lastEffectiveExecutionProvider = 'wasm';
+  const fallback = {
+    filename: file?.name ?? null,
+    run_label: runLabel,
+    from: 'webgpu',
+    to: 'wasm',
+    reason: String(err?.message ?? err),
+    shared_webgpu_device_available: false,
+  };
+  benchmarkRuntimeFallbacks.push(fallback);
+  log('  ⚠ WebGPU reset cannot reclaim ORT-owned device; falling back to WASM for remaining runs.', 'warn');
+  return true;
+}
+
+function isMemoryAllocationError(err) {
+  const msg = String(err?.message ?? err ?? '');
+  return msg.includes('std::bad_alloc') ||
+         msg.includes('bad_alloc') ||
+         msg.toLowerCase().includes('out of memory');
+}
+
+async function resetBenchmarkEngine(reason, config, settleMs = 250) {
+  benchmarkResetCount++;
+  log(`  Resetting engine (${reason})…`, 'warn');
+  try {
+    await engineReset();
+    clearAssetMemoryCache();
+    await new Promise(resolve => setTimeout(resolve, settleMs));
+    log('  Engine reset complete.', 'ok');
+  } catch (err) {
+    log(`  Engine reset failed: ${err?.message ?? err}`, 'err');
+  } finally {
+    invalidateRuntimeReady();
+  }
+
+  if (config?.execution_provider) {
+    try {
+      await ensureRuntime(config.execution_provider);
+    } catch (err) {
+      log(`  Runtime reinit failed after reset: ${err?.message ?? err}`, 'err');
     }
-  );
+  }
+}
 
-  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+function recordBenchmarkFailure(file, runLabel, runNumber, isWarmup, attempt, err, isFinal) {
+  const entry = {
+    filename: file.name,
+    run_label: runLabel,
+    run: runNumber,
+    warmup: isWarmup,
+    attempt,
+    max_attempts: BENCHMARK_MAX_RETRIES + 1,
+    error: String(err?.message ?? err),
+    final: isFinal,
+    recovered: false,
+    visibility_state: typeof document !== 'undefined' ? document.visibilityState : null,
+    visibility_tainted: benchmarkVisibilityTainted,
+    input_file: fileInputProvenance.get(file.name) || null,
+  };
+  benchmarkFailures.push(entry);
+  return entry;
+}
 
-  const [inferResults, allImageLists, allPdfDocs, langList, ocrEnabledList, stageTimings] = docResult;
-  const modelList  = inferResults[0];
-  const imagesList = allImageLists[0];
-  const pageDicts  = allPdfDocs[0];
-  const lang       = langList[0] ?? 'ch';
-  const ocrEnabled = ocrEnabledList[0] ?? false;
-
-  const tPost0 = performance.now();
-  const imageWriter = new MemoryDataWriter();
-  const middleJson = await resultToMiddleJson(
-    modelList, imagesList, pageDicts, imageWriter,
-    { lang, ocr_enable: ocrEnabled, formula_enabled: config.formula_enable, ocr_config: config.ocr_config, image_config: null }
-  );
-  const pdfInfo = middleJson?.pdf_info ?? [];
-  const contentList = unionMake(pdfInfo, MakeMode.CONTENT_LIST, 'images') ?? [];
-  const postMs = performance.now() - tPost0;
-
-  const totalMs = performance.now() - t0;
-  const pageCount = modelList.length;
-
-  // Release image lists
-  for (const list of allImageLists) {
+function releaseRunImageLists(allImageLists) {
+  for (const list of (allImageLists ?? [])) {
     for (const item of (list ?? [])) {
       const canvas = item?.img_pil ?? item?.canvas ?? item;
       if (canvas && typeof canvas === 'object' && 'width' in canvas) {
@@ -580,12 +700,71 @@ async function runOnce(file, config, signal) {
       }
     }
   }
+}
 
-  return {
-    timing: buildUnifiedTiming(file.name, pageCount, totalMs, stageTimings, postMs),
-    content_list: contentList,
-    page_count: pageCount,
-  };
+// ---------------------------------------------------------------------------
+// Single-file single-run pipeline
+// ---------------------------------------------------------------------------
+
+async function runOnce(file, config, signal) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdfPagesBatch = config.pdf_pages_batch ?? PDF_PAGES_BATCH;
+
+  const t0 = performance.now();
+  let allImageLists = null;
+  let imageWriter = null;
+
+  try {
+    const docResult = await docAnalyze(
+      [bytes],
+      {
+        lang_list: ['ch'],
+        parse_method: config.parse_method,
+        formula_enable: config.formula_enable,
+        table_enable: config.table_enable,
+        layout_config: config.layout_config,
+        ocr_config: config.ocr_config,
+        formula_config: config.formula_config,
+        table_config: config.table_config,
+        orientation_config: config.orientation_config,
+        pdf_pages_batch: pdfPagesBatch,
+      }
+    );
+
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    const [inferResults, imageLists, allPdfDocs, langList, ocrEnabledList, stageTimings] = docResult;
+    allImageLists = imageLists;
+    const modelList  = inferResults[0];
+    const imagesList = allImageLists[0];
+    const pageDicts  = allPdfDocs[0];
+    const lang       = langList[0] ?? 'ch';
+    const ocrEnabled = ocrEnabledList[0] ?? false;
+
+    const tPost0 = performance.now();
+    imageWriter = new MemoryDataWriter();
+    const middleJson = await resultToMiddleJson(
+      modelList, imagesList, pageDicts, imageWriter,
+      { lang, ocr_enable: ocrEnabled, formula_enabled: config.formula_enable, ocr_config: config.ocr_config, image_config: null }
+    );
+    const pdfInfo = middleJson?.pdf_info ?? [];
+    const contentList = unionMake(pdfInfo, MakeMode.CONTENT_LIST, 'images') ?? [];
+    const postMs = performance.now() - tPost0;
+
+    const totalMs = performance.now() - t0;
+    const pageCount = modelList.length;
+
+    return {
+      timing: buildUnifiedTiming(file.name, pageCount, totalMs, stageTimings, postMs),
+      content_list: contentList,
+      page_count: pageCount,
+    };
+  } finally {
+    releaseRunImageLists(allImageLists);
+    if (imageWriter?.files && typeof imageWriter.files === 'object') {
+      for (const key of Object.keys(imageWriter.files)) delete imageWriter.files[key];
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -606,19 +785,28 @@ async function runBenchmark() {
   el.resultsPanel.style.display = '';
   el.summaryPanel.style.display = 'none';
   allResults = [];
+  benchmarkFailures = [];
+  benchmarkResetCount = 0;
+  benchmarkRuntimeFallbacks = [];
+  benchmarkVisibilityTainted = false;
+  benchmarkVisibilityEvents.length = 0;
+  recordVisibilityTaint('benchmark-start');
   fileColdStarts.clear();
   fileInputProvenance.clear();
 
   const config = getConfig();
+  lastEffectiveExecutionProvider = config.execution_provider;
   const repeat = config.repeat;
   const warmupRuns = config.warmup;
   const totalRuns = queue.length * (repeat + warmupRuns);
   let doneRuns = 0;
+  let successfulRunsSinceReset = 0;
 
   log(`Starting benchmark: ${queue.length} file(s), ${repeat} run(s) each` +
       `${warmupRuns ? ` + ${warmupRuns} warm-up` : ''}`, 'info');
   log(`EP: ${config.execution_provider} (mode=${config.ep_mode}), ` +
       `formula: ${config.formula_enable}, table: ${config.table_enable}`, 'info');
+  log(`Strict EP: ${config.strict_ep ? 'on' : 'off'}, PDF pages batch: ${config.pdf_pages_batch}`, 'info');
 
   // Load OpenCV + configure ORT (once per session, or if EP changed)
   try {
@@ -644,7 +832,13 @@ async function runBenchmark() {
     lastEnvironment = { error: String(e?.message ?? e) };
   }
 
-  lastEnvironment = { ...(lastEnvironment || {}), benchmark_mode: BENCHMARK_MODE };
+  lastEnvironment = {
+    ...(lastEnvironment || {}),
+    benchmark_mode: BENCHMARK_MODE,
+    automation_mode: AUTOMATION_MODE,
+    strict_ep: config.strict_ep,
+    pdf_pages_batch: config.pdf_pages_batch,
+  };
 
   // Model-file provenance (hash served ONNX, verify against manifest).
   if (AUDIT_PROVENANCE) {
@@ -696,11 +890,13 @@ async function runBenchmark() {
 
     const fileRuns = [];
     let coldStart = null;  // first warm-up run, preserved as cold-start
+    let fileHadFinalError = false;
     const totalRunsForFile = repeat + warmupRuns;
 
     for (let run = 0; run < totalRunsForFile; run++) {
       if (signal.aborted) break;
       const isWarmup = run < warmupRuns;
+      const runNumber = isWarmup ? run + 1 : run - warmupRuns + 1;
       const runLabel = isWarmup
         ? `warm-up ${run + 1}/${warmupRuns}`
         : `run ${run - warmupRuns + 1}/${repeat}`;
@@ -708,44 +904,95 @@ async function runBenchmark() {
       el.progressLabel.textContent = `${file.name} — ${runLabel}`;
       el.progressFill.style.width = `${Math.round(doneRuns / totalRuns * 100)}%`;
 
-      log(`  ${runLabel}…`, 'info');
-      const t0 = performance.now();
-
-      try {
-        const result = await runOnce(file, config, signal);
-        const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
-
-        if (!isWarmup) {
-          setFilePages(file.name, result.page_count);
-          fileRuns.push(result);
-          allResults.push({
-            filename: file.name,
-            run: run - warmupRuns + 1,
-            warmup: false,
-            timing: result.timing,
-            content_list: result.content_list,
-          });
-          appendResultRow(file.name, result.page_count, run - warmupRuns + 1, result.timing);
-          log(`  ✓ ${runLabel}: total=${elapsed}s, inference=${result.timing.total_inference_s}s`, 'ok');
+      const failureStart = benchmarkFailures.length;
+      let runSucceeded = false;
+      for (let attempt = 0; attempt <= BENCHMARK_MAX_RETRIES; attempt++) {
+        if (signal.aborted) break;
+        const attemptNo = attempt + 1;
+        if (attempt === 0) {
+          log(`  ${runLabel}…`, 'info');
         } else {
-          // Preserve the FIRST warm-up run as the cold-start measurement.
-          if (run === 0) coldStart = result.timing;
-          log(`  ✓ ${runLabel}: ${elapsed}s (excluded from steady-state stats)`, 'warn');
+          log(`  ${runLabel} retry ${attempt}/${BENCHMARK_MAX_RETRIES}…`, 'warn');
         }
-      } catch (err) {
-        if (err?.name === 'AbortError') { log('  Aborted.', 'warn'); break; }
-        log(`  ✗ ${runLabel} failed: ${err?.message ?? err}`, 'err');
-        setFileStatus(file.name, 'error', 'error');
+        const visibilityEventStart = benchmarkVisibilityEvents.length;
+        const runStartVisibility = document.visibilityState;
+        recordVisibilityTaint('run-start');
+        const t0 = performance.now();
+
+        try {
+          await ensureRuntime(config.execution_provider);
+          const result = await runOnce(file, config, signal);
+          const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+          result.timing.visibility_tainted =
+            runStartVisibility !== 'visible' ||
+            document.visibilityState !== 'visible' ||
+            benchmarkVisibilityEvents.length > visibilityEventStart;
+
+          if (!isWarmup) {
+            setFilePages(file.name, result.page_count);
+            fileRuns.push(result);
+            allResults.push({
+              filename: file.name,
+              run: runNumber,
+              warmup: false,
+              timing: result.timing,
+              content_list: result.content_list,
+            });
+            appendResultRow(file.name, result.page_count, runNumber, result.timing);
+            log(`  ✓ ${runLabel}: total=${elapsed}s, inference=${result.timing.total_inference_s}s`, 'ok');
+          } else {
+            // Preserve the FIRST warm-up run as the cold-start measurement.
+            if (run === 0) coldStart = result.timing;
+            log(`  ✓ ${runLabel}: ${elapsed}s (excluded from steady-state stats)`, 'warn');
+          }
+
+          for (let i = failureStart; i < benchmarkFailures.length; i++) {
+            benchmarkFailures[i].recovered = true;
+          }
+          successfulRunsSinceReset++;
+          runSucceeded = true;
+          break;
+        } catch (err) {
+          if (err?.name === 'AbortError') { log('  Aborted.', 'warn'); break; }
+          const isFinalAttempt = attempt >= BENCHMARK_MAX_RETRIES;
+          recordBenchmarkFailure(file, runLabel, runNumber, isWarmup, attemptNo, err, isFinalAttempt);
+          log(`  ✗ ${runLabel} attempt ${attemptNo}/${BENCHMARK_MAX_RETRIES + 1} failed: ${err?.message ?? err}`, 'err');
+          fallbackBenchmarkToWasm(config, file, runLabel, err);
+          const resetSettleMs = isMemoryAllocationError(err) ? 1000 : 250;
+
+          if (!isFinalAttempt) {
+            await resetBenchmarkEngine(`error before retry: ${file.name} ${runLabel}`, config, resetSettleMs);
+            successfulRunsSinceReset = 0;
+            continue;
+          }
+
+          fileHadFinalError = true;
+          setFileStatus(file.name, 'error', 'error');
+          await resetBenchmarkEngine(`final error: ${file.name} ${runLabel}`, config, resetSettleMs);
+          successfulRunsSinceReset = 0;
+        }
       }
+
+      if (signal.aborted) break;
 
       doneRuns++;
       el.progressFill.style.width = `${Math.round(doneRuns / totalRuns * 100)}%`;
+
+      if (
+        runSucceeded &&
+        successfulRunsSinceReset >= BENCHMARK_RESET_INTERVAL &&
+        doneRuns < totalRuns &&
+        !signal.aborted
+      ) {
+        await resetBenchmarkEngine(`periodic after ${BENCHMARK_RESET_INTERVAL} successful run(s)`, config);
+        successfulRunsSinceReset = 0;
+      }
     }
 
     // Stash cold-start for this file so export can attach it.
     if (coldStart) fileColdStarts.set(file.name, coldStart);
 
-    if (!signal.aborted) {
+    if (!signal.aborted && !fileHadFinalError) {
       setFileStatus(file.name, 'done', `done (${repeat}×)`);
     }
   }
@@ -762,7 +1009,8 @@ async function runBenchmark() {
   el.btnStart.disabled = false;
   el.btnStop.disabled = true;
   el.btnClear.disabled = false;
-  log(`Benchmark finished. ${allResults.length} result(s) collected.`, 'ok');
+  const finalFailureCount = benchmarkFailures.filter(f => f.final && !f.recovered).length;
+  log(`Benchmark finished. ${allResults.length} result(s) collected, ${finalFailureCount} failed run(s).`, 'ok');
 }
 
 // ---------------------------------------------------------------------------
@@ -846,7 +1094,7 @@ function stddev(arr) {
 // Export
 // ---------------------------------------------------------------------------
 
-async function exportResults() {
+function buildExportPayload() {
   if (!allResults.length) return;
 
   // Build per-file aggregated timing JSONs (mean over runs)
@@ -863,13 +1111,28 @@ async function exportResults() {
       ...(lastEnvironment || {}),
       execution_provider: el.cfgEp.value,
       ep_mode: el.cfgEp.value === 'wasm' ? 'cpu' : 'accelerated',
+      effective_execution_provider: lastEffectiveExecutionProvider ?? el.cfgEp.value,
+      runtime_fallbacks: benchmarkRuntimeFallbacks.map(f => ({ ...f })),
       formula_enable: el.cfgFormula.checked,
       table_enable: el.cfgTable.checked,
       parse_method: el.cfgParse.value,
       repeat: parseInt(el.cfgRepeat.value, 10),
       warmup_runs: parseInt(el.cfgWarmup.value, 10) || 0,
+      strict_ep: STRICT_EP,
+      automation_mode: AUTOMATION_MODE,
+      pdf_pages_batch: PDF_PAGES_BATCH,
+      visibility_tainted: benchmarkVisibilityTainted,
+      visibility_events: benchmarkVisibilityEvents.map(e => ({ ...e })),
+      reset_strategy: BENCHMARK_RESET_STRATEGY,
+      reset_interval: BENCHMARK_RESET_INTERVAL,
+      max_retries: BENCHMARK_MAX_RETRIES,
+      reset_count: benchmarkResetCount,
+      failure_count: benchmarkFailures.length,
+      final_failure_count: benchmarkFailures.filter(f => f.final && !f.recovered).length,
+      runtime_fallback_count: benchmarkRuntimeFallbacks.length,
     },
     run_config: lastRunConfig || buildRunConfig(getConfig(), el.cfgEp.value),
+    failures: benchmarkFailures.map(f => ({ ...f })),
     files: {},
   };
 
@@ -954,6 +1217,14 @@ async function exportResults() {
       content_list: data.content_list,
     };
   }
+
+  return { exportData, byFile };
+}
+
+async function exportResults() {
+  const payload = buildExportPayload();
+  if (!payload) return;
+  const { exportData, byFile } = payload;
 
   const tsStamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
 
@@ -1085,6 +1356,94 @@ function flattenRunConfig(rc) {
 }
 
 // ---------------------------------------------------------------------------
+// Automation helpers
+// ---------------------------------------------------------------------------
+
+function clearBenchmarkState() {
+  if (running) return false;
+  queue = [];
+  fileEls.clear();
+  el.fileList.innerHTML = '';
+  allResults = [];
+  benchmarkFailures = [];
+  benchmarkResetCount = 0;
+  benchmarkRuntimeFallbacks = [];
+  benchmarkVisibilityTainted = false;
+  benchmarkVisibilityEvents.length = 0;
+  lastEffectiveExecutionProvider = null;
+  fileColdStarts.clear();
+  fileInputProvenance.clear();
+  el.resultsBody.innerHTML = '';
+  el.summaryPanel.style.display = 'none';
+  el.resultsPanel.style.display = 'none';
+  el.btnExport.disabled = true;
+  log('Queue cleared.', 'info');
+  return true;
+}
+
+function applyQueryConfig() {
+  const ep = queryStringParam('ep', null);
+  if (ep === 'webgpu' || ep === 'wasm') el.cfgEp.value = ep;
+
+  if (SEARCH_PARAMS.has('repeat')) el.cfgRepeat.value = String(queryIntParam('repeat', 1, 1));
+  if (SEARCH_PARAMS.has('warmup')) el.cfgWarmup.value = String(queryIntParam('warmup', 0, 0));
+  if (SEARCH_PARAMS.has('parse')) el.cfgParse.value = queryStringParam('parse', el.cfgParse.value);
+  if (SEARCH_PARAMS.has('formula')) el.cfgFormula.checked = queryBoolParam('formula', el.cfgFormula.checked);
+  if (SEARCH_PARAMS.has('table')) el.cfgTable.checked = queryBoolParam('table', el.cfgTable.checked);
+
+  if (AUTOMATION_MODE) {
+    log(
+      `Automation config: ep=${el.cfgEp.value}, repeat=${el.cfgRepeat.value}, ` +
+      `warmup=${el.cfgWarmup.value}, mode=${BENCHMARK_MODE}, strictEp=${STRICT_EP}, ` +
+      `pdfPagesBatch=${PDF_PAGES_BATCH}`,
+      'info',
+    );
+  }
+}
+
+function getAutomationStatus() {
+  const finalFailureCount = benchmarkFailures.filter(f => f.final && !f.recovered).length;
+  return {
+    ready: true,
+    running,
+    queue_length: queue.length,
+    result_count: allResults.length,
+    failure_count: benchmarkFailures.length,
+    final_failure_count: finalFailureCount,
+    effective_execution_provider: lastEffectiveExecutionProvider,
+    requested_execution_provider: el.cfgEp.value,
+    strict_ep: STRICT_EP,
+    benchmark_mode: BENCHMARK_MODE,
+    pdf_pages_batch: PDF_PAGES_BATCH,
+    visibility_state: document.visibilityState,
+    visibility_tainted: benchmarkVisibilityTainted,
+    progress_label: el.progressLabel.textContent,
+  };
+}
+
+async function startAutomationBenchmark() {
+  if (running) throw new Error('Benchmark is already running.');
+  if (!queue.length) throw new Error('Benchmark queue is empty.');
+  await runBenchmark();
+  return getAutomationStatus();
+}
+
+function getExportData() {
+  const payload = buildExportPayload();
+  return payload?.exportData ?? null;
+}
+
+window.__RAPIDDOC_BENCHMARK__ = {
+  addFiles,
+  clear: clearBenchmarkState,
+  start: startAutomationBenchmark,
+  status: getAutomationStatus,
+  getExportData,
+  getFailures: () => benchmarkFailures.map(f => ({ ...f })),
+  getLogs: () => el.logEl.textContent,
+};
+
+// ---------------------------------------------------------------------------
 // Event listeners
 // ---------------------------------------------------------------------------
 
@@ -1107,16 +1466,7 @@ el.btnStop.addEventListener('click', () => {
   log('Stop requested.', 'warn');
 });
 el.btnClear.addEventListener('click', () => {
-  if (running) return;
-  queue = [];
-  fileEls.clear();
-  el.fileList.innerHTML = '';
-  allResults = [];
-  el.resultsBody.innerHTML = '';
-  el.summaryPanel.style.display = 'none';
-  el.resultsPanel.style.display = 'none';
-  el.btnExport.disabled = true;
-  log('Queue cleared.', 'info');
+  clearBenchmarkState();
 });
 el.btnExport.addEventListener('click', exportResults);
 
@@ -1128,5 +1478,7 @@ if (typeof navigator !== 'undefined' && navigator.gpu) {
   el.cfgEp.value = 'wasm';
   log('WebGPU not available — default EP set to wasm.', 'warn');
 }
+
+applyQueryConfig();
 
 log('Benchmark UI ready. Drop PDF files to begin.', 'info');

@@ -42,6 +42,17 @@ const REPLACEMENTS = [
 ];
 
 const QQUAD_PATTERN = /\\qquad(?!\s)/g;
+const MALFORMED_ENV_PATTERN = /\\(begin|end)\(([A-Za-z*]+)\}/g;
+const GLUED_SPACING_COMMAND_PATTERN = /\\(qquad|quad)(?=[a-zA-Z])/g;
+const SPLIT_GLUED_SPACING_COMMAND_PATTERN = /\\+\s+(qquad|quad)(?=[a-zA-Z])/g;
+const SPLIT_KNOWN_COMMAND_PATTERN =
+  /\\+\s+(Bar|Hat|Tilde|underbar|slash|textperthousand|sun|textunderscore|fint|vDash|copyright|boldsymbol|tilde|lambda|mathit|qquad|quad)(?![a-zA-Z])/g;
+const BARE_KNOWN_COMMAND_PATTERN =
+  /(?<![\\A-Za-z])(?:mathit|mathrm|mathbf|mathbb|mathcal|mathsf|mathtt|boldsymbol|operatorname|text|textbf|textit|sqrt|overline|underline|hat|tilde|bar|vec|dot|ddot|lambda|sum|infty)(?=\s*(?:\{|[A-Za-z0-9\\]))/g;
+const DUPLICATE_SCRIPT_MARKER_PATTERN = /(?<!\\)([_^])(?:\s*\1)+(?=\s*(?:\{|[A-Za-z0-9\\]))/g;
+const TRAILING_BACKSLASH_PATTERN = /\s*\\+\s*$/;
+const TRAILING_ARGUMENT_COMMAND_PATTERN =
+  /\s*\\(?:mathit|mathrm|mathbf|mathbb|mathcal|mathsf|mathtt|operatorname|text|textbf|textit|sqrt|overline|underline|hat|tilde|bar|vec|dot|ddot|frac|dfrac|tfrac)\s*$/;
 const SPECIAL_CHARS = new Set(['#', '$', '%', '&', '~', '_', '^', '|', '\\', '{', '}', ' ', '\t', '\n', '\r']);
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -262,8 +273,39 @@ export function removeUnsupportedCommands(s) {
 }
 
 /**
- * Main LaTeX cleanup function. Applies all fixes in sequence:
- * braces → left/right → environments → up commands → unsupported → replacements → backslash handling.
+ * Conservative render-safety cleanup for FormulaNet output.
+ * Unlike latexRmWhitespace, this does not rewrite generic backslash spacing.
+ * @param {string} s
+ * @returns {string}
+ */
+export function sanitizeFormulaLatex(s) {
+  if (!s) return s ?? "";
+
+  for (const [pattern, replacement] of REPLACEMENTS) {
+    s = s.replace(pattern, replacement);
+  }
+  s = s.replace(MALFORMED_ENV_PATTERN, "\\$1{$2}");
+  s = s.replace(SPLIT_GLUED_SPACING_COMMAND_PATTERN, "\\$1 ");
+  s = s.replace(SPLIT_KNOWN_COMMAND_PATTERN, "\\$1");
+  s = s.replace(BARE_KNOWN_COMMAND_PATTERN, "\\$&");
+  s = s.replace(GLUED_SPACING_COMMAND_PATTERN, "\\$1 ");
+  s = s.replace(DUPLICATE_SCRIPT_MARKER_PATTERN, "$1");
+  s = fixLatexEnvironments(s);
+  s = fixUnbalancedBraces(s);
+
+  let previous = "";
+  while (s !== previous) {
+    previous = s;
+    s = s
+      .replace(TRAILING_BACKSLASH_PATTERN, "")
+      .replace(TRAILING_ARGUMENT_COMMAND_PATTERN, "");
+  }
+
+  return s.trimEnd();
+}
+
+/**
+ * Main LaTeX cleanup function. Applies all fixes in sequence.
  * @param {string} s
  * @returns {string}
  */

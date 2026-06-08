@@ -3,6 +3,7 @@ import {
   fixLatexEnvironments,
   removeUpCommands,
   removeUnsupportedCommands,
+  sanitizeFormulaLatex,
 } from "../../../fix_utils.js";
 
 /**
@@ -16,6 +17,7 @@ export function fixLatex(formula) {
   result = fixLatexEnvironments(result);
   result = removeUpCommands(result);
   result = removeUnsupportedCommands(result);
+  result = sanitizeFormulaLatex(result);
   return result;
 }
 

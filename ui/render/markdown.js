@@ -14,6 +14,7 @@ import { marked } from 'marked';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { scheduleIdleWork } from '../perf/idleScheduler.js';
+import { sanitizeFormulaLatex } from '../../rapid_doc/model/formula/fix_utils.js';
 
 /**
  * @typedef {{
@@ -53,6 +54,12 @@ const KATEX_MACROS = {
   '\\mbox': '\\text',
 };
 
+function hasKatexRenderError(html) {
+  return html.includes('katex-error')
+    || html.includes('mathcolor="#cc0000"')
+    || html.includes('<merror');
+}
+
 /**
  * Render markdown into the markdownContent element.
  * Preserves the canonical render-pipeline order.
@@ -75,7 +82,7 @@ export function displayMarkdown(markdown, pageCount = 1, contentList = null) {
 
     // Protect display math ($$...$$) — must come before inline ($...$)
     protectedSource = protectedSource.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-      const trimmed = latex.trim();
+      const trimmed = sanitizeFormulaLatex(latex.trim());
       const idx = latexBlocks.length;
       latexBlocks.push({ latex: trimmed, display: true });
       const safe = trimmed.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -84,7 +91,7 @@ export function displayMarkdown(markdown, pageCount = 1, contentList = null) {
 
     // Protect inline math ($...$)
     protectedSource = protectedSource.replace(/(?<!\$)\$(?!\$)([\s\S]+?)(?<!\$)\$(?!\$)/g, (_, latex) => {
-      const trimmed = latex.trim();
+      const trimmed = sanitizeFormulaLatex(latex.trim());
       if (!trimmed) return `$${latex}$`;
       const idx = latexBlocks.length;
       latexBlocks.push({ latex: trimmed, display: false });
@@ -106,13 +113,15 @@ export function displayMarkdown(markdown, pageCount = 1, contentList = null) {
       const block = latexBlocks[parseInt(mathEl.dataset.idx)];
       if (!block) continue;
       try {
-        mathEl.innerHTML = katex.renderToString(block.latex, {
+        const renderedMath = katex.renderToString(block.latex, {
           displayMode: block.display,
           throwOnError: false,
           strict: false,
           trust: false,
           macros: KATEX_MACROS,
         });
+        if (hasKatexRenderError(renderedMath)) throw new Error('KaTeX render contained error markup');
+        mathEl.innerHTML = renderedMath;
       } catch {
         const code = document.createElement('code');
         code.style.cssText = 'background:rgba(0,0,0,.05);padding:2px 4px;border-radius:3px;font-size:.9em;';

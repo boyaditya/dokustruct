@@ -193,7 +193,7 @@ function createInitialState() {
     tableModelType: 'unet_slanet_plus',
     tableForceOcr: false,
     tableUseWordBox: false,
-    tableFormulaEnable: false,
+    tableFormulaEnable: true,
     tableImageEnable: false,
     skipTextInImage: true,
     tableUseImg2table: false,

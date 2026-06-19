@@ -94,8 +94,15 @@ export function applyMaskBoxesToImage(bgrMat, maskBoxes) {
     const height = y1 - y0;
     if (width <= 0 || height <= 0) continue;
 
-    // Lazy-clone on first valid mask
-    if (!maskedMat) maskedMat = bgrMat.clone();
+    // Lazy-create an INDEPENDENT copy on first valid mask. We use an explicit
+    // copyTo into a fresh Mat instead of bgrMat.clone(): in opencv.js the
+    // cloned Mat can alias the source's underlying WASM data buffer, so masking
+    // the "clone" also white-fills the original table image — which then
+    // reaches the table-structure model and corrupts row recovery.
+    if (!maskedMat) {
+      maskedMat = new cv.Mat();
+      bgrMat.copyTo(maskedMat);
+    }
 
     try {
       const roi = maskedMat.roi(new cv.Rect(x0, y0, width, height));
@@ -803,7 +810,7 @@ export async function processSingleTable(
   let adjustedMfdetrecRes = [];
   if (tableFormulaEnable) {
     adjustedMfdetrecRes = getAdjustedMfdetrecRes(
-      combineMfdetrecAndCheckbox(tableResDict), usefulList, { returnText: true }
+      combineMfdetrecAndCheckbox(tableResDict), usefulList, true
     ) || [];
   }
 

@@ -10,7 +10,7 @@ import { getLatexDelimiterConfig } from "../../utils/config_reader.js";
 import { isIn } from "../../utils/boxbase.js";
 import { pointsToBbox, bboxToPoints } from "../../utils/ocr_utils.js";
 import { deleteMat } from "../../utils/resource_utils.js";
-import { formatPipelineError } from "../../utils/browser_utils.js";
+import { formatPipelineError, yieldToBrowser } from "../../utils/browser_utils.js";
 import { AbortException } from "../../utils/exceptions.js";
 
 const logger = getLogger("RapidTableModel");
@@ -261,7 +261,10 @@ export class RapidTableModel {
     }
 
     if (Array.isArray(mfdRes)) {
-      const delimiters = getLatexDelimiterConfig() || { inline: { left: "\\(", right: "\\)" } };
+      // Default to `$`/`$` to match the Python baseline (mkcontent
+      // default_delimiters) and the JS mkcontent inline default. The previous
+      // `\(`/`\)` fallback diverged from Python and from non-table inline math.
+      const delimiters = getLatexDelimiterConfig() || { inline: { left: "$", right: "$" } };
       const inlineLeftDelimiter = delimiters.inline.left;
       const inlineRightDelimiter = delimiters.inline.right;
 
@@ -420,7 +423,10 @@ export class RapidTableModel {
           results[i] = { html: "", cellBboxes: [], elapse: 0 };
         }
 
-        await new Promise(resolve => setTimeout(resolve, 0));
+        // Yield between table predictions without being throttled in
+        // background tabs (MessageChannel-based; setTimeout(0) would be clamped
+        // to ~1s when the tab is hidden, stalling the benchmark).
+        await yieldToBrowser();
       }
     };
 

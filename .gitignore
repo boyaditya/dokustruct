@@ -78,3 +78,21 @@ scripts/*
 mineru.net*/
 RapidOrientation-main/
 RapidTable-main/
+
+# Benchmark generated artifacts (large / reproducible from dataset + scripts)
+benchmark/omnidocbench_gt/
+benchmark/sample/
+benchmark/js_results/*
+!benchmark/js_results/.gitkeep
+benchmark/py_results/*
+!benchmark/py_results/.gitkeep
+benchmark/js_accuracy/
+benchmark/py_accuracy/
+benchmark/js_timing/
+benchmark/py_timing/
+benchmark/diffs/
+benchmark/*.xlsx
+benchmark/_*.txt
+
+OmniDocBench/
+benchmark/results*

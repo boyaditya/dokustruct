@@ -570,13 +570,12 @@ export class AppState {
   get formulaConfig() {
     const s = this.#state;
     const executionProvider = s.activeExecutionProvider ?? 'wasm';
-    const isLatexOcr = s.formulaModelType === 'latex_ocr';
     return {
       execution_provider: executionProvider,
       executionProviders: executionProvider === 'wasm' ? ['wasm'] : ['webgpu', 'wasm'],
       formula_level: s.formulaLevel,
       modelType: s.formulaModelType,
-      batch_num: isLatexOcr && executionProvider === 'webgpu' ? 2 : (executionProvider === 'wasm' ? 2 : 1),
+      batch_num: executionProvider === 'wasm' ? 2 : 1,
     };
   }
 

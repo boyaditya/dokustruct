@@ -3,7 +3,6 @@
 import { AtomicModel } from "./model_list.js";
 import { RapidLayoutModel } from "../../model/layout/rapid_layout.js";
 import { RapidFormulaModel } from "../../model/formula/rapid_formula_model.js";
-import { LatexOCRModel } from "../../model/formula/latex_ocr_model.js";
 import { RapidOcrModel } from "../../model/ocr/rapid_ocr.js";
 import { RapidTableModel } from "../../model/table/rapid_table.js";
 import { RapidOrientationModel } from "../../model/orientation/rapid_orientation_model.js";
@@ -16,9 +15,6 @@ const DISPOSABLE_KEYS = [
   "session",
   "detSession",
   "recSession",
-  "resizerSession",
-  "encoderSession",
-  "decoderSession",
   "textDetector",
   "textRecognizer",
   "layoutModel",
@@ -149,33 +145,12 @@ export async function tableModelInit(lang = null, ocrConfig = null, tableConfig 
 /**
  * Initialize a formula recognition model.
  * @param {object|null} formulaConfig
- * @returns {Promise<RapidFormulaModel|LatexOCRModel>}
+ * @returns {Promise<RapidFormulaModel>}
  */
 export async function formulaModelInit(formulaConfig = null) {
   // Browser default uses S model for cleaner/faster UI output.
   // Python parity callers should pass M explicitly.
   const modelType = formulaConfig?.modelType || "pp_formulanet_plus_s";
-
-  if (modelType === "latex_ocr") {
-    try {
-      const useWebGpu = formulaConfig?.execution_provider !== "wasm";
-      const latexConfig = { useWebGpu };
-      if (formulaConfig?.maxLen != null) latexConfig.maxLen = formulaConfig.maxLen;
-      return await LatexOCRModel.create(latexConfig);
-    } catch (err) {
-      if (err instanceof AbortException) throw err;
-      console.warn(formatPipelineError({
-        stage: "model-load",
-        module: "formulaModelInit",
-        message: `LaTeX-OCR failed: ${err.message}. Falling back to PP-FormulaNet.`,
-        recoverable: true,
-      }));
-      return RapidFormulaModel.create({
-        ...formulaConfig,
-        modelType: "pp_formulanet_plus_s",
-      });
-    }
-  }
 
   return RapidFormulaModel.create(formulaConfig);
 }

@@ -53,15 +53,6 @@ describe('asset manifest resolution', () => {
     expect(ppFormula).toContain('formula_vocab');
     expect(ppFormula).not.toContain('formula_pp_formulanet_plus_l');
 
-    const latex = getRequiredAssets({
-      formula_enable: true,
-      formula_config: { modelType: 'latex_ocr' },
-      layout_config: { model_type: 'pp_doclayoutv2' },
-      table_config: { model_type: 'unet_slanet_plus' },
-    });
-    expect(latex).toContain('formula_latex_ocr_encoder');
-    expect(latex).toContain('formula_latex_ocr_decoder');
-    expect(latex).not.toContain('formula_vocab');
   });
 
   it('matches local model URLs even when cache-busting query strings are present', () => {
@@ -78,7 +69,6 @@ describe('asset manifest resolution', () => {
   it('keeps Hugging Face as fallback for model and data assets', () => {
     expect(getAssetSourceUrls('ocr_dict_ch').at(-1)).toBe(`${HF_ASSET_BASE}/ocr/ppocrv5_dict.txt`);
     expect(getAssetSourceUrls('table_paddle_cls').at(-1)).toBe(`${HF_ASSET_BASE}/table/table_cls/paddle_cls.onnx`);
-    expect(getAssetSourceUrls('formula_latex_ocr_tokenizer').at(-1)).toBe(`${HF_ASSET_BASE}/formula/LaTeX-OCR/tokenizer.json`);
   });
 
   it('keeps runtime assets local-first with runtime source fallback', () => {

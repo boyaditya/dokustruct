@@ -250,47 +250,7 @@ export const ASSET_MANIFEST = Object.freeze({
     sha256: '6a64ac1bde7d52ebf91da36e30e0ea36df0771d9b5f734f58fa60662f0e9e84b',
     optional: true,
   }),
-  formula_latex_ocr_resizer: asset({
-    id: 'formula_latex_ocr_resizer',
-    label: 'LaTeX-OCR image resizer',
-    pack: 'formula',
-    url: hfAsset('formula/LaTeX-OCR/image_resizer.onnx'),
-    localUrl: '/models/formula/LaTeX-OCR/image_resizer.onnx',
-    sizeBytes: 38_967_751,
-    sha256: 'e0b075c39700f64d50400f39c8fc186bbb3b5d84d31864008313f376603aca9d',
-    optional: true,
-  }),
-  formula_latex_ocr_encoder: asset({
-    id: 'formula_latex_ocr_encoder',
-    label: 'LaTeX-OCR encoder',
-    pack: 'formula',
-    url: hfAsset('formula/LaTeX-OCR/encoder.onnx'),
-    localUrl: '/models/formula/LaTeX-OCR/encoder.onnx',
-    sizeBytes: 89_008_136,
-    sha256: '01bf5dc25539ca0cd5b1bd29296ea495977a6ba5f629dc4178277809d26e5e7d',
-    optional: true,
-  }),
-  formula_latex_ocr_decoder: asset({
-    id: 'formula_latex_ocr_decoder',
-    label: 'LaTeX-OCR decoder',
-    pack: 'formula',
-    url: hfAsset('formula/LaTeX-OCR/decoder.onnx'),
-    localUrl: '/models/formula/LaTeX-OCR/decoder.onnx',
-    sizeBytes: 50_952_726,
-    sha256: 'bd695497bf1b22279b7626f5916c79226e1e244c84355f8da7edfd2d921d0072',
-    optional: true,
-  }),
-  formula_latex_ocr_tokenizer: asset({
-    id: 'formula_latex_ocr_tokenizer',
-    label: 'LaTeX-OCR tokenizer',
-    pack: 'formula',
-    url: hfAsset('formula/LaTeX-OCR/tokenizer.json'),
-    localUrl: '/models/formula/LaTeX-OCR/tokenizer.json',
-    sizeBytes: 24_174,
-    mimeType: 'application/json',
-    sha256: '1dc27b18d6a518d0d5ff3f4bb7bd98521fe80ad39e5b2a246d4109f1bb9d5019',
-    optional: true,
-  }),
+
 });
 
 export const UI_MODEL_URL_MAP = ASSET_MANIFEST;
@@ -386,16 +346,7 @@ export function getRequiredAssets(config = {}) {
 export const getRequiredModels = getRequiredAssets;
 
 export function getFormulaAssets(config = {}) {
-  // Browser asset resolver defaults to S model; Python parity callers should pass M explicitly.
   const formulaType = config.formula_config?.modelType ?? config.formula_config?.model_type ?? 'pp_formulanet_plus_s';
-  if (formulaType === 'latex_ocr') {
-    return [
-      'formula_latex_ocr_resizer',
-      'formula_latex_ocr_encoder',
-      'formula_latex_ocr_decoder',
-      'formula_latex_ocr_tokenizer',
-    ];
-  }
   const modelId = `formula_${formulaType}`;
   return ASSET_MANIFEST[modelId] ? [modelId, 'formula_vocab'] : [];
 }

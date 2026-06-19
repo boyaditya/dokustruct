@@ -226,12 +226,19 @@ function createInitialState() {
     timings: {
       preprocessing: 0,
       model_init: 0,
+      pdf_load: 0,
+      orientation: 0,
       layout: 0,
+      region_collect: 0,
+      ocr_det: 0,
+      ocr_rec: 0,
       ocr: 0,
       formula: 0,
       table: 0,
       reading_order: 0,
       postprocessing: 0,
+      total_inference: 0,
+      other: 0,
       total: 0,
     },
     activeExecutionProvider: null,
@@ -640,7 +647,7 @@ export class AppState {
 
   /**
    * Record timing for a single pipeline stage.
-    * @param {'preprocessing'|'layout'|'ocr'|'formula'|'table'|'reading_order'|'postprocessing'|'total'} stage
+    * @param {'preprocessing'|'model_init'|'pdf_load'|'orientation'|'layout'|'region_collect'|'ocr_det'|'ocr_rec'|'ocr'|'formula'|'table'|'reading_order'|'postprocessing'|'total_inference'|'other'|'total'} stage
    * @param {number} ms
    */
   recordTiming(stage, ms) {
@@ -649,7 +656,7 @@ export class AppState {
 
   /**
    * Record timing for startup/runtime/model preparation.
-   * @param {'preprocessing'|'layout'|'ocr'|'formula'|'table'|'reading_order'|'postprocessing'|'total'} stage
+   * @param {'preprocessing'|'model_init'|'pdf_load'|'orientation'|'layout'|'region_collect'|'ocr_det'|'ocr_rec'|'ocr'|'formula'|'table'|'reading_order'|'postprocessing'|'total_inference'|'other'|'total'} stage
    * @param {number} ms
    */
   recordStartupTiming(stage, ms) {

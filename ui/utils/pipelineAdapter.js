@@ -666,7 +666,15 @@ export class PipelineAdapter {
       state.recordTiming('formula', 0);
       state.recordTiming('table', 0);
       state.recordTiming('reading_order', 0);
-      state.recordTiming('model_init', 0);
+      state.recordTiming('model_init', Number((state.get('startupTimings') || {}).layout || 0));
+      state.recordTiming('total_inference', 0);
+      state.recordTiming('pdf_load', 0);
+      state.recordTiming('orientation', 0);
+      state.recordTiming('region_collect', 0);
+      state.recordTiming('ocr_det', 0);
+      state.recordTiming('ocr_rec', 0);
+      const otherMs = Math.max(0, total - (tPost1 - tPost0));
+      state.recordTiming('other', otherMs);
       state.updateMemory();
 
       state.finishProcessing(results);
@@ -679,8 +687,15 @@ export class PipelineAdapter {
         formula:        0,
         table:          0,
         reading_order:  0,
-        model_init:     0,
+        model_init:     Number((state.get('startupTimings') || {}).layout || 0),
+        pdf_load:       0,
+        orientation:    0,
+        region_collect: 0,
+        ocr_det:        0,
+        ocr_rec:        0,
+        total_inference: 0,
         postprocessing: tPost1 - tPost0,
+        other:          otherMs,
         total,
       };
     } catch (err) {
@@ -900,22 +915,32 @@ export class PipelineAdapter {
       const measuredLayout = tLay1 - tLay0;
       const stageTimings = rawResult?._timings ?? null;
 
-      const layoutMs      = Number(stageTimings?.layout        ?? measuredLayout);
-      const formulaMs     = Number(stageTimings?.formula       ?? 0);
-      const tableMs       = Number(stageTimings?.table         ?? 0);
-      const readingOrderMs= Number(stageTimings?.reading_order ?? 0);
+      const layoutMs       = Number(stageTimings?.layout         ?? measuredLayout);
+      const formulaMs      = Number(stageTimings?.formula        ?? 0);
+      const tableMs        = Number(stageTimings?.table          ?? 0);
+      const readingOrderMs = Number(stageTimings?.reading_order  ?? 0);
       // OCR is now split into det + rec (both inference). Combine for the UI's
       // single OCR stage. Fall back to the legacy single "ocr" key, and treat
       // any legacy "postprocessing" (which used to hold OCR-rec) as rec time.
-      const ocrDetMs      = Number(stageTimings?.ocr_det ?? stageTimings?.ocr ?? 0);
-      const ocrRecMs      = Number(stageTimings?.ocr_rec ?? stageTimings?.postprocessing ?? 0);
-      const ocrMs         = ocrDetMs + ocrRecMs;
+      const ocrDetMs       = Number(stageTimings?.ocr_det ?? stageTimings?.ocr ?? 0);
+      const ocrRecMs       = Number(stageTimings?.ocr_rec ?? stageTimings?.postprocessing ?? 0);
+      const ocrMs          = ocrDetMs + ocrRecMs;
       // Engine no longer reports a separate heavy "postprocessing"; the
       // lightweight middle-json/markdown build is measured by the UI below.
-      const postCoreMs    = 0;
+      const postCoreMs     = 0;
       // model_init: time spent loading/initialising models inside the engine.
       // Reported separately so it can be excluded from inference totals.
-      const modelInitMs   = Number(stageTimings?.model_init    ?? 0);
+      const st = state.get('startupTimings') || {};
+      // Engine reports model_init ≈0 when models are pre-warmed. Take the
+      // larger of engine measurement and warmup timing to get the true cost.
+      const modelInitMs    = Math.max(
+        Number(stageTimings?.model_init ?? 0),
+        Number(st.layout || 0)
+      );
+      // Extra engine stages (not displayed individually but needed for `other` attribution)
+      const pdfLoadMs      = Number(stageTimings?.pdf_load       ?? 0);
+      const orientationMs  = Number(stageTimings?.orientation    ?? 0);
+      const regionCollectMs= Number(stageTimings?.region_collect ?? 0);
       postBreakdown.engine_postprocessing_ms = toFiniteMs(postCoreMs);
 
       state.recordTiming('layout', layoutMs);
@@ -923,12 +948,21 @@ export class PipelineAdapter {
       state.recordTiming('table', tableMs);
       state.recordTiming('reading_order', readingOrderMs);
       state.recordTiming('model_init', modelInitMs);
+      state.recordTiming('pdf_load', pdfLoadMs);
+      state.recordTiming('orientation', orientationMs);
+      state.recordTiming('region_collect', regionCollectMs);
+      state.recordTiming('ocr_det', ocrDetMs);
+      state.recordTiming('ocr_rec', ocrRecMs);
 
       if (signal.aborted) return null;
 
       // ── Step 6: OCR stage (reported by engine timing, fallback 0) ──
       state.beginStage('ocr');
       state.recordTiming('ocr', ocrMs);
+
+      // Inference = layout + OCR + formula + table (pure model inference, excludes init/pdf/post)
+      const totalInferenceMs = layoutMs + ocrMs + formulaMs + tableMs;
+      state.recordTiming('total_inference', totalInferenceMs);
 
       // ── Step 7: postprocessing ─────────────────────────────────────────────
       const tPost0 = performance.now();
@@ -953,6 +987,15 @@ export class PipelineAdapter {
 
       const total = performance.now() - t0;
       state.recordTiming('total', total);
+
+      // Compute `other` as balancing figure: only visible pill stages.
+      // model_init (pre-pipeline warmup) and hidden engine stages
+      // (pdf_load, orientation, region_collect, reading_order) are excluded
+      // so Total = Layout + OCR + Formula + Table + Post + Other.
+      const attributedMs = layoutMs + ocrMs + formulaMs + tableMs + postprocessingTotal;
+      const otherMs = Math.max(0, total - attributedMs);
+      state.recordTiming('other', otherMs);
+
       state.updateMemory();
 
       // ── Step 8: done ───────────────────────────────────────────────────────
@@ -961,13 +1004,20 @@ export class PipelineAdapter {
 
       return {
         preprocessing:  state.get('timings').preprocessing,
-        layout: layoutMs,
+        model_init:     modelInitMs,
+        pdf_load:       pdfLoadMs,
+        orientation:    orientationMs,
+        layout:         layoutMs,
+        region_collect: regionCollectMs,
         ocr:            ocrMs,
+        ocr_det:        ocrDetMs,
+        ocr_rec:        ocrRecMs,
         formula:        formulaMs,
         table:          tableMs,
-        reading_order:   readingOrderMs,
-        model_init:     modelInitMs,
+        reading_order:  readingOrderMs,
+        total_inference: totalInferenceMs,
         postprocessing: postprocessingTotal,
+        other:          otherMs,
         total,
       };
     } catch (err) {

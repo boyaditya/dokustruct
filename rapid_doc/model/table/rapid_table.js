@@ -397,8 +397,12 @@ export class RapidTableModel {
       ocrResults = [];
     }
 
-    const requestedConcurrency = opts.maxConcurrency ?? images.length;
-    const maxConcurrency = Math.max(1, Math.trunc(Number(requestedConcurrency || images.length)));
+    // WASM: ORT session.run is not thread-safe for concurrent calls on the
+    // same session. The table model's ProviderConfig forces WASM, so default
+    // to serial execution. Callers that know they are safe can opt in via
+    // opts.maxConcurrency.
+    const requestedConcurrency = opts.maxConcurrency ?? 1;
+    const maxConcurrency = Math.max(1, Math.trunc(Number(requestedConcurrency)));
     const results = new Array(images.length);
     let next = 0;
 

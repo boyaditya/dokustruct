@@ -25,7 +25,14 @@ import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 const _profile = detectProfile();
 function getMaxConcurrentBatches(useWebGpu) {
   if (useWebGpu) return Math.min(2, _profile.MAX_CONCURRENT_BATCHES);
-  return _profile.MAX_CONCURRENT_BATCHES;
+  // WASM: ONNX Runtime session.run() is NOT thread-safe for concurrent calls
+  // on the same session. The GPU mutex (acquireGlobalGpu) serialises WebGPU
+  // calls; WASM has no equivalent protection. Cap at 1 to prevent corrupted
+  // recognition output from interleaved session.run() invocations. Throughput
+  // is preserved because recBatchNum (default 6) already batches multiple
+  // crops into a single session.run() call, and the WASM thread pool handles
+  // intra-call parallelism.
+  return 1;
 }
 
 /**

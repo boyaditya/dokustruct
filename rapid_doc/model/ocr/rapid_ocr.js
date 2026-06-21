@@ -24,7 +24,7 @@ import { checkImg, preprocessImage, sortedBoxes, mergeDetBoxes, updateDetBoxes, 
 import { configureOrtWasmRuntime } from '../../utils/ort_runtime.js';
 import { deleteMat, deleteMatList } from '../../utils/resource_utils.js';
 import { AbortException } from '../../utils/exceptions.js';
-import { detectProfile } from '../../utils/browser_utils.js';
+import { REC_BATCH_NUM } from '../../utils/browser_utils.js';
 
 import { DetPreProcess } from './ocr_preprocess.js';
 import { DetPostProcess } from './ocr_postprocess.js';
@@ -57,8 +57,8 @@ export class RapidOcrModel {
     /** @type {TextRecognizer}*/ this.textRecognizer = null;
     this.dropScore = 0.5;
     this.enableMergeDetBoxes = true;
-    // FIX P10: default recBatchNum from device-tier profile; overridable via config.
-    this.recBatchNum = detectProfile().REC_BATCH_NUM;
+    // FIX P10: default recBatchNum; overridable via config.
+    this.recBatchNum = REC_BATCH_NUM;
   }
 
   // ── Factory ─────────────────────────────────────────────────────────────────
@@ -74,9 +74,8 @@ export class RapidOcrModel {
 
     inst.dropScore = params.dropScore ?? cfg['Rec.drop_score'] ?? cfg.drop_score ?? cfg.dropScore ?? 0.5;
     inst.enableMergeDetBoxes = params.enableMergeDetBoxes ?? cfg.enable_merge_det_boxes ?? cfg.enableMergeDetBoxes ?? true;
-    // FIX P10: resolve recBatchNum with profile default as the fallback (overridable via config).
-    const profileDefault = detectProfile().REC_BATCH_NUM;
-    inst.recBatchNum = params.recBatchNum ?? cfg['Rec.rec_batch_num'] ?? cfg.rec_batch_num ?? profileDefault;
+    // recBatchNum default; overridable via config.
+    inst.recBatchNum = params.recBatchNum ?? cfg['Rec.rec_batch_num'] ?? cfg.rec_batch_num ?? REC_BATCH_NUM;
 
     const epList = resolveExecutionProviders(params, cfg);
     const useWebGpu = epList.includes('webgpu');

@@ -2,69 +2,16 @@
  * Browser-specific utilities consolidated from multiple pipeline files.
  * Replaces duplicated yieldToBrowser in batch_analyze.js and pipeline_analyze.js.
  * Provides consistent error formatting for pipeline stages.
- * Provides BrowserPerformanceProfile for adaptive resource scaling (Audit P10).
  */
 
-// ─── Browser Performance Profile (Audit P10) ─────────────────────────────────
+// ─── Standard performance constants ──────────────────────────────────────────
+// Standard desktop-tier values used uniformly across all devices.
+// User-provided config always overrides these defaults (backward-compatible).
 
-/**
- * Device-tier performance profiles for adaptive resource scaling.
- * Controls batch sizes, DPI thresholds, and concurrency limits based on
- * detected device capability (deviceMemory API).
- *
- * Used by:
- *  - ocr_text_recognizer.js  → MAX_CONCURRENT_BATCHES
- *  - rapid_ocr.js            → recBatchNum default
- *  - rapid_layout.js         → DPI_DOWNSCALE_THRESHOLD
- *  - pipelineAdapter.js      → pdf_pages_batch default
- *
- * User-provided config always overrides these defaults (backward-compatible).
- */
-export const BrowserPerformanceProfile = Object.freeze({
-  MOBILE: Object.freeze({
-    MAX_CONCURRENT_BATCHES: 2,
-    REC_BATCH_NUM: 4,
-    DPI_DOWNSCALE_THRESHOLD: 1600,
-    PDF_PAGES_BATCH: 2,
-  }),
-  DESKTOP: Object.freeze({
-    MAX_CONCURRENT_BATCHES: 5,
-    REC_BATCH_NUM: 6,
-    DPI_DOWNSCALE_THRESHOLD: 2200,
-    PDF_PAGES_BATCH: 4,
-  }),
-  HIGH_END: Object.freeze({
-    MAX_CONCURRENT_BATCHES: 10,
-    REC_BATCH_NUM: 12,
-    DPI_DOWNSCALE_THRESHOLD: 3000,
-    PDF_PAGES_BATCH: 8,
-  }),
-});
-
-/**
- * Detect the browser performance tier using the Navigator Device Memory API.
- * Falls back to DESKTOP in non-browser environments (Node.js, workers without navigator).
- *
- * Tier mapping:
- *  - MOBILE:   deviceMemory ≤ 4 GB
- *  - HIGH_END: deviceMemory ≥ 16 GB
- *  - DESKTOP:  everything else (including unknown / API not available)
- *
- * Note: this detects *system RAM*, not VRAM. The HIGH_END tier targets
- * desktops where the GPU is also high-end. Systems with abundant system
- * RAM but mid-range or older GPUs may want to clamp REC_BATCH_NUM further.
- * WebGPU paths halve concurrency in `ocr_text_recognizer.js` to compensate.
- *
- * @returns {typeof BrowserPerformanceProfile[keyof typeof BrowserPerformanceProfile]}
- */
-export function detectProfile() {
-  if (typeof navigator === 'undefined') return BrowserPerformanceProfile.DESKTOP;
-  // navigator.deviceMemory is only available in Chromium-based browsers.
-  // If absent, default to DESKTOP (safe middle tier).
-  if (navigator.deviceMemory && navigator.deviceMemory <= 4) return BrowserPerformanceProfile.MOBILE;
-  if (navigator.deviceMemory && navigator.deviceMemory >= 16) return BrowserPerformanceProfile.HIGH_END;
-  return BrowserPerformanceProfile.DESKTOP;
-}
+export const MAX_CONCURRENT_BATCHES = 5;
+export const REC_BATCH_NUM = 6;
+export const DPI_DOWNSCALE_THRESHOLD = 2200;
+export const PDF_PAGES_BATCH = 4;
 
 // ─── Background-throttle-resistant yield ─────────────────────────────────────
 //

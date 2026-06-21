@@ -8,7 +8,7 @@
 import * as ort from 'onnxruntime-web';
 import { acquireGlobalGpu } from '../../utils/ort_runtime.js';
 import { AbortException } from '../../utils/exceptions.js';
-import { formatPipelineError, detectProfile, yieldToBrowser } from '../../utils/browser_utils.js';
+import { formatPipelineError, MAX_CONCURRENT_BATCHES, yieldToBrowser } from '../../utils/browser_utils.js';
 import { RecPreProcess } from './ocr_preprocess.js';
 import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 
@@ -22,9 +22,8 @@ import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 // `maxBufferSize` and surface as a lost-device. The serialized global GPU
 // mutex (see ort_runtime.js acquireGlobalGpu) only serializes the run
 // itself; queueing the next inputs can still allocate.
-const _profile = detectProfile();
 function getMaxConcurrentBatches(useWebGpu) {
-  if (useWebGpu) return Math.min(2, _profile.MAX_CONCURRENT_BATCHES);
+  if (useWebGpu) return Math.min(2, MAX_CONCURRENT_BATCHES);
   // WASM: ONNX Runtime session.run() is NOT thread-safe for concurrent calls
   // on the same session. The GPU mutex (acquireGlobalGpu) serialises WebGPU
   // calls; WASM has no equivalent protection. Cap at 1 to prevent corrupted

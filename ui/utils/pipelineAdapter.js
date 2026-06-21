@@ -22,7 +22,7 @@ import {
   getAssetsStatus,
 } from '../../rapid_doc/utils/download_file.js';
 import { getFormulaAssets, summarizeAssets } from '../../rapid_doc/utils/model_url_map.js';
-import { detectProfile } from '../../rapid_doc/utils/browser_utils.js';
+import { PDF_PAGES_BATCH } from '../../rapid_doc/utils/browser_utils.js';
 
 // ---------------------------------------------------------------------------
 // Image helpers
@@ -407,9 +407,9 @@ async function destroyPdfProxy(pdfDoc) {
 function getDefaultPdfPagesBatch(state) {
   const ep = String(state.get('activeExecutionProvider') || '').toLowerCase();
   if (ep === 'webgpu') {
-    return Math.max(1, Math.floor(detectProfile().PDF_PAGES_BATCH / 2));
+    return Math.max(1, Math.floor(PDF_PAGES_BATCH / 2));
   }
-  return detectProfile().PDF_PAGES_BATCH;
+  return PDF_PAGES_BATCH;
 }
 
 function markdownHasImageRefs(markdown) {

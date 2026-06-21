@@ -4,14 +4,11 @@ import { RapidLayout } from './rapid_layout_self/main.js';
 import { RapidLayoutInput, ModelType } from './rapid_layout_self/utils/typings.js';
 import { CategoryId } from '../../utils/enum_class.js';
 import { deleteMat } from '../../utils/resource_utils.js';
-import { formatPipelineError, detectProfile } from '../../utils/browser_utils.js';
+import { formatPipelineError, DPI_DOWNSCALE_THRESHOLD } from '../../utils/browser_utils.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const INLINE_FORMULA_IOU_THRESH = 0.9;
-// DPI_DOWNSCALE_THRESHOLD scales with detected device tier.
-// Higher-end devices can handle larger images before downscaling kicks in.
-const DPI_DOWNSCALE_THRESHOLD = detectProfile().DPI_DOWNSCALE_THRESHOLD;
 const DPI_SCALE_FACTOR = 144;
 
 // ─── Inline helpers ───────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import { RapidOcrModel } from "../../model/ocr/rapid_ocr.js";
 import { RapidTableModel } from "../../model/table/rapid_table.js";
 import { RapidOrientationModel } from "../../model/orientation/rapid_orientation_model.js";
 import { makeHashable } from "../../utils/hash_utils.js";
-import { formatPipelineError, detectProfile } from "../../utils/browser_utils.js";
+import { formatPipelineError } from "../../utils/browser_utils.js";
 import { AbortException } from "../../utils/exceptions.js";
 
 const DISPOSED_MARK = Symbol.for("rapiddoc.disposed");
@@ -441,7 +441,6 @@ export class MineruPipelineModel {
     this.applyTable = true;
     this.lang = null;
     this.device = "cpu";
-    this.performanceProfile = detectProfile();
   }
 
   /**

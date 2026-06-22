@@ -1,0 +1,35 @@
+{
+  "name": "rapiddoc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RapidDoc — browser-native document intelligence engine",
+  "scripts": {
+    "dev": "vite --open false",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest --run",
+    "bench:js:supervised": "node benchmark/js_supervised_runner.mjs",
+    "lint": "eslint rapid_doc/ ui/",
+    "lint:bbox": "eslint rapid_doc/ --rule 'rapiddoc/no-math-round-bbox: warn'"
+  },
+  "dependencies": {
+    "dompurify": "^3.3.0",
+    "franc-min": "^6.2.0",
+    "js-yaml": "^4.1.1",
+    "jszip": "^3.10.1",
+    "katex": "^0.16.25",
+    "lucide": "^0.555.0",
+    "marked": "^14.1.0",
+    "onnxruntime-web": "^1.24.3",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.5.136"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "fast-check": "^4.8.0",
+    "playwright": "^1.60.0",
+    "vite": "^7.3.1",
+    "vitest": "^4.1.6"
+  }
+}

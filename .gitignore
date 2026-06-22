@@ -22,6 +22,12 @@ debug/
 .DS_Store
 .env
 
+# Agent/IDE config files (internal dev only)
+.kiro/
+.agents/
+.commandcode/
+.opencode/
+
 bad_words/
 bak/
 
@@ -36,6 +42,8 @@ ocr_demo
 /app/common/__init__.py
 /magic_pdf/config/__init__.py
 source.dev.env
+
+magic.json
 
 tmp
 
@@ -65,8 +73,12 @@ RapidLaTeXOCR-main/
 dist/
 .vite/
 
+# Generated Python package metadata
+rapid_doc.egg-info/
+
 # Local model binaries (too large for normal git push)
 public/models/
+public/test_docs/
 scripts/
 !scripts/
 scripts/*
@@ -96,3 +108,5 @@ benchmark/_*.txt
 
 OmniDocBench/
 benchmark/results*
+
+graphify-out/

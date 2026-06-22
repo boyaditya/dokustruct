@@ -10,10 +10,8 @@
     "preview": "vite preview",
     "test": "vitest --run",
     "bench:js:supervised": "node benchmark/js_supervised_runner.mjs",
-    "lint": "eslint rapid_doc/ ui/ --ext .js",
-    "lint:bbox": "eslint rapid_doc/ --ext .js --rule \"rapiddoc/no-math-round-bbox: warn\"",
-    "parity:audit:static": "node scripts/parity_audit.mjs --static",
-    "parity:audit:sample": "node scripts/parity_audit.mjs --sample"
+    "lint": "eslint rapid_doc/ ui/",
+    "lint:bbox": "eslint rapid_doc/ --rule 'rapiddoc/no-math-round-bbox: warn'"
   },
   "dependencies": {
     "dompurify": "^3.3.0",

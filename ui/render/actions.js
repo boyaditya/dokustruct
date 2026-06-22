@@ -25,7 +25,7 @@ const _ctx = {
 };
 
 /**
- * Wire the actions render context. Called once from app-v2.js init().
+ * Wire the actions render context. Called once from app.js init().
  * @param {ActionsRenderContext} ctx
  */
 export function initActionsRenderer(ctx) {

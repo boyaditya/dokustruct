@@ -2,8 +2,8 @@
  * ui/linking/context.js
  *
  * All linking submodules read/write through this single object so they can be
- * extracted from ui/app-v2.js without requiring prop-drilling or global leakage.
- * app-v2.js initialises the context once via `initLinkingContext(el, getters)`.
+ * extracted from ui/app.js without requiring prop-drilling or global leakage.
+ * app.js initialises the context once via `initLinkingContext(el, getters)`.
  */
 
 /**
@@ -41,7 +41,7 @@ export const ctx = {
   isSyncingScroll: false,
   syncedLinkId: null,
   currentPage: 1,
-  // These are wired by app-v2.js after init
+  // These are wired by app.js after init
   updatePageInfo: () => {},
   scrollOutputToLink: () => false,
   scrollOutputToNearestPageLink: () => false,
@@ -53,11 +53,11 @@ export const ctx = {
 };
 
 /**
- * Wire the linking context to the live app-v2.js state.
+ * Wire the linking context to the live app.js state.
  * Called once during init() after DOM elements are resolved.
  *
- * @param {object} elRef - The `el` object from app-v2.js
- * @param {object} fns - Scroll/nav helpers from app-v2.js
+ * @param {object} elRef - The `el` object from app.js
+ * @param {object} fns - Scroll/nav helpers from app.js
  */
 export function initLinkingContext(elRef, fns) {
   ctx.el = elRef;

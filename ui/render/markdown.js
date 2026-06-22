@@ -40,7 +40,7 @@ const _ctx = {
 };
 
 /**
- * Wire the render context. Called once from app-v2.js init().
+ * Wire the render context. Called once from app.js init().
  * @param {MarkdownRenderContext} ctx
  */
 export function initMarkdownRenderer(ctx) {

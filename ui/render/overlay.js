@@ -43,7 +43,7 @@ const _ctx = {
 };
 
 /**
- * Wire the overlay render context. Called once from app-v2.js init().
+ * Wire the overlay render context. Called once from app.js init().
  * @param {OverlayRenderContext} ctx
  */
 export function initOverlayRenderer(ctx) {

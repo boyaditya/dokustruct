@@ -1,7 +1,7 @@
 /**
  * ui/history/storage.js
  *
- * Extracted from ui/app-v2.js. Signature unchanged (Requirement 7.2).
+ * Extracted from ui/app.js. Signature unchanged (Requirement 7.2).
  */
 
 const HISTORY_ASSET_DB = 'docparsing_history_assets';

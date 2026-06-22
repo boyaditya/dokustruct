@@ -65,7 +65,7 @@ rapid_doc/           ← JS source (browser port)
 └── index.js            — Public barrel exports
 
 ui/                 ← Frontend SPA (vanilla JS, no framework)
-├── app-v2.js           — Main entry point
+├── app.js           — Main entry point
 ├── state/              — Central state management
 ├── render/             — Rendering subsystem
 ├── lifecycle/          — Lifecycle management

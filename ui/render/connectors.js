@@ -25,7 +25,7 @@ const _ctx = {
 };
 
 /**
- * Wire the connectors render context. Called once from app-v2.js init().
+ * Wire the connectors render context. Called once from app.js init().
  * @param {ConnectorsRenderContext} ctx
  */
 export function initConnectorsRenderer(ctx) {
@@ -225,6 +225,6 @@ export function scheduleRenderMergeConnectors() {
 
 /**
  * Sync the global connector layer dimensions to the current pageStack size.
- * Called from syncOverlayToCanvas in app-v2.js.
+ * Called from syncOverlayToCanvas in app.js.
  */
 export { syncGlobalMergeConnectorLayer };

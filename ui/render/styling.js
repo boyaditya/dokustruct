@@ -32,7 +32,7 @@ const _ctx = {
 };
 
 /**
- * Wire the styling render context. Called once from app-v2.js init().
+ * Wire the styling render context. Called once from app.js init().
  * @param {StylingRenderContext} ctx
  */
 export function initStylingRenderer(ctx) {

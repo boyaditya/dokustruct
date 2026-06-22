@@ -1,7 +1,7 @@
 /**
  * ui/history/reload.js
  *
- * Extracted from ui/app-v2.js. Signature unchanged (Requirement 7.2).
+ * Extracted from ui/app.js. Signature unchanged (Requirement 7.2).
  * Disposer chain wired for deterministic resource cleanup (Requirement 4.7).
  */
 

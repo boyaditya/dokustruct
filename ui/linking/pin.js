@@ -1,7 +1,7 @@
 /**
  * ui/linking/pin.js
  *
- * Extracted from ui/app-v2.js. Single pinReleaseListener slot with
+ * Extracted from ui/app.js. Single pinReleaseListener slot with
  * local-closure capture (FIX L4-bis) and group-aware outside-click (FIX L8).
  */
 

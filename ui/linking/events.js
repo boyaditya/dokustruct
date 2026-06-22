@@ -1,7 +1,7 @@
 /**
  * ui/linking/events.js
  *
- * Extracted from ui/app-v2.js. Includes keyboard parity (focusin/focusout)
+ * Extracted from ui/app.js. Includes keyboard parity (focusin/focusout)
  * per Requirement 2.6.
  */
 

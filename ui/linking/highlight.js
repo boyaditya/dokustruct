@@ -1,7 +1,7 @@
 /**
  * ui/linking/highlight.js
  *
- * setLinkedHighlight / clearLinkedHighlight extracted from ui/app-v2.js.
+ * setLinkedHighlight / clearLinkedHighlight extracted from ui/app.js.
  * Routes through rafCoalescer (Requirement 3.2) and short-circuits on
  * identity match (Requirement 2.4 / B-LINK-1 fix).
  */

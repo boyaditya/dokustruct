@@ -1,7 +1,7 @@
 /**
  * ui/history/list.js
  *
- * Extracted from ui/app-v2.js. Signature unchanged (Requirement 7.2).
+ * Extracted from ui/app.js. Signature unchanged (Requirement 7.2).
  * Virtualization applied when history item count > 100 (Requirement 3.7).
  */
 

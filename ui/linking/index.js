@@ -1,7 +1,7 @@
 /**
  * ui/linking/index.js
  *
- * Re-exports all public linking API so app-v2.js can import from one place.
+ * Re-exports all public linking API so app.js can import from one place.
  * Also provides ensureLinkingActive / ensureLinkingInactive (Requirement 2.5).
  */
 

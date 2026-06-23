@@ -34,9 +34,9 @@
       <div class="file-list-section">
         <div class="file-list-header">
           <div class="file-list-header-top">
-          <i data-lucide="folder"></i>
-          <span id="queueTitle">Processed documents</span>
-        </div>
+            <i data-lucide="folder"></i>
+            <span id="queueTitle">Processed documents</span>
+          </div>
           <div class="file-list-header-note">Saved in browser only</div>
         </div>
         <div class="file-list" id="fileList">
@@ -139,34 +139,6 @@
           </div>
         </div>
       </details>
-
-      <div class="model-status-card setup-runtime-chip" id="modelStatusSummary">
-        <span class="status-dot"></span>
-        <strong>Engine</strong>
-        <span>Starting engine...</span>
-      </div>
-
-      <section class="asset-gate-card" id="assetGateCard" aria-label="Model downloads">
-        <div class="asset-gate-header">
-          <div>
-            <strong>Models</strong>
-            <span id="assetGateSummary">Checking required models...</span>
-            <small>Everything runs locally in your browser. Downloaded models never leave this device.</small>
-          </div>
-          <span class="asset-gate-badge" id="assetGateBadge">Needed</span>
-        </div>
-        <div class="asset-progress" id="assetProgressTrack" aria-hidden="true">
-          <div class="asset-progress-fill" id="assetProgressFill"></div>
-        </div>
-        <div class="asset-progress-meta">
-          <span id="assetProgressLabel">Preparing document processing components.</span>
-          <span id="assetProgressPercent">0%</span>
-        </div>
-        <button class="btn-secondary asset-download-btn" id="assetDownloadBtn" type="button">
-          <i data-lucide="download"></i>
-          <span>Download required components</span>
-        </button>
-      </section>
     </div>
   </section>
 
@@ -236,6 +208,24 @@
 
       <aside class="setup-settings-pane" id="setupSettingsPane">
         <div id="setupSettingsMount"></div>
+        <section class="asset-gate-card" id="assetGateCard" aria-label="Status">
+          <div class="asset-gate-header">
+            <span class="status-dot" id="assetGateDot"></span>
+            <span id="assetGateBadge" class="asset-gate-label">Initializing...</span>
+            <span class="asset-gate-summary" id="assetGateSummary"></span>
+          </div>
+          <div class="asset-progress" id="assetProgressTrack" aria-hidden="true">
+            <div class="asset-progress-fill" id="assetProgressFill"></div>
+          </div>
+          <div class="asset-progress-meta">
+            <span id="assetProgressLabel"></span>
+            <span id="assetProgressPercent">0%</span>
+          </div>
+          <button class="btn-secondary asset-download-btn" id="assetDownloadBtn" type="button">
+            <i data-lucide="download"></i>
+            <span>Download</span>
+          </button>
+        </section>
         <div class="setup-run-footer">
           <button class="btn-primary setup-run-btn" id="startBtn" type="button" disabled>
             <i data-lucide="play"></i>

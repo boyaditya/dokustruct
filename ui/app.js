@@ -840,10 +840,10 @@ async function init() {
   el.timingsToggle = document.getElementById('timingsToggle');
   el.timingsPanel = document.getElementById('timingsPanel');
   el.timingsContent = document.getElementById('timingsContent');
-  el.modelStatusSummary = document.getElementById('modelStatusSummary');
   el.assetGateCard = document.getElementById('assetGateCard');
-  el.assetGateSummary = document.getElementById('assetGateSummary');
+  el.assetGateDot = document.getElementById('assetGateDot');
   el.assetGateBadge = document.getElementById('assetGateBadge');
+  el.assetGateSummary = document.getElementById('assetGateSummary');
   el.assetProgressTrack = document.getElementById('assetProgressTrack');
   el.assetProgressFill = document.getElementById('assetProgressFill');
   el.assetProgressLabel = document.getElementById('assetProgressLabel');
@@ -1462,8 +1462,7 @@ function isCurrentRuntimeReady() {
 function canRunExtraction() {
   return selectedFiles.length > 0
     && !appState.get('isProcessing')
-    && requiredAssetsReady
-    && isCurrentRuntimeReady();
+    && appState.get('warmupStatus') === 'ready';
 }
 
 function cancelPendingWarmup({ resetStatus = false } = {}) {
@@ -1612,51 +1611,110 @@ function renderAssetGate({ error = null } = {}) {
   const totalCount = ids.length;
   const missingCount = Math.max(0, totalCount - cachedCount);
   const downloading = Boolean(assetDownloadController);
+  const warmupStatus = appState.get('warmupStatus') || 'idle';
+  const runtimeStatus = appState.get('runtimeStatus') || 'idle';
+  const warmupError = appState.get('warmupError');
+  const engineReady = warmupStatus === 'ready';
+  const engineFailed = warmupStatus === 'error';
+  const engineLoading = isWarmupActive();
 
-  let summaryText = 'Checking required models...';
-  if (summary) {
+  let dotClass = '';
+  let badgeText = '';
+  let summaryText = '';
+  let showProgress = false;
+  let showButton = false;
+
+  if (error) {
+    dotClass = 'error';
+    badgeText = 'Failed';
+    summaryText = 'Could not check required components';
+    showButton = true;
+  } else if (downloading) {
+    dotClass = 'loading';
+    badgeText = 'Downloading...';
+    const size = formatFileSize(summary?.sizeBytes || 0);
+    summaryText = missingCount
+      ? `${missingCount} component(s) to download, ${size}`
+      : 'Downloading...';
+    showProgress = true;
+  } else if (engineFailed) {
+    dotClass = 'error';
+    badgeText = 'Failed';
+    summaryText = warmupError || 'Engine failed to start';
+    showButton = true;
+  } else if (engineReady && requiredAssetsReady) {
+    dotClass = 'ready';
+    badgeText = 'Ready';
+    const size = formatFileSize(summary?.sizeBytes || 0);
+    summaryText = `Engine ready · ${totalCount} component(s), ${size}`;
+  } else if (engineLoading) {
+    dotClass = 'loading';
+    badgeText = 'Preparing...';
+    summaryText = 'Starting engine...';
+    showProgress = true;
+  } else if (summary) {
+    dotClass = missingCount ? '' : 'ready';
+    badgeText = missingCount ? 'Needed' : 'Ready';
     const size = formatFileSize(summary.sizeBytes || 0);
     summaryText = missingCount
       ? `${missingCount} component(s) to download, ${size}`
       : `${totalCount} component(s) ready, ${size}`;
+    showButton = Boolean(missingCount);
+    showProgress = Boolean(missingCount);
+  } else {
+    dotClass = 'loading';
+    badgeText = 'Initializing...';
+    summaryText = '';
   }
-  if (error) summaryText = 'Could not check required components';
 
-  if (el.assetGateSummary) el.assetGateSummary.textContent = summaryText;
+  if (el.assetGateDot) {
+    el.assetGateDot.className = 'status-dot' + (dotClass ? ' ' + dotClass : '');
+  }
   if (el.assetGateBadge) {
-    el.assetGateBadge.textContent = error ? 'Failed' : requiredAssetsReady ? 'Ready' : downloading ? 'Downloading...' : 'Needed';
-    el.assetGateBadge.classList.toggle('is-ready', requiredAssetsReady && !error);
-    el.assetGateBadge.classList.toggle('is-error', Boolean(error));
+    el.assetGateBadge.textContent = badgeText;
+  }
+  if (el.assetGateSummary) {
+    el.assetGateSummary.textContent = summaryText;
   }
 
-  const isReady = requiredAssetsReady && !downloading && !error;
   if (el.assetProgressTrack) {
-    el.assetProgressTrack.classList.toggle('hidden', isReady);
+    el.assetProgressTrack.classList.toggle('hidden', !showProgress);
   }
   if (el.assetProgressLabel) {
-    el.assetProgressLabel.classList.toggle('hidden', isReady);
+    el.assetProgressLabel.classList.toggle('hidden', !showProgress);
   }
   if (el.assetProgressPercent) {
-    el.assetProgressPercent.classList.toggle('hidden', isReady);
-  }
-  if (el.assetDownloadBtn) {
-    el.assetDownloadBtn.classList.toggle('hidden', isReady);
+    el.assetProgressPercent.classList.toggle('hidden', !showProgress);
   }
 
-  if (!isReady) {
-    if (!downloading) {
+  if (showProgress) {
+    if (downloading) {
+      updateAssetProgress({
+        percent: 0,
+        label: '',
+        indeterminate: true,
+      });
+    } else if (engineLoading) {
+      updateAssetProgress({
+        percent: 0,
+        label: 'Loading models...',
+        indeterminate: true,
+      });
+    } else {
       const pct = totalCount ? (cachedCount / totalCount) * 100 : 0;
       updateAssetProgress({
-        percent: requiredAssetsReady ? 100 : pct,
-        label: 'Preparing document processing components.',
+        percent: pct,
+        label: badgeText === 'Needed' ? 'Components need to download' : '',
         indeterminate: false,
       });
     }
-    if (el.assetDownloadBtn) {
-      el.assetDownloadBtn.disabled = downloading || !totalCount;
-      const label = el.assetDownloadBtn.querySelector('span');
-      if (label) label.textContent = downloading ? 'Downloading...' : 'Download components';
-    }
+  }
+
+  if (el.assetDownloadBtn) {
+    el.assetDownloadBtn.classList.toggle('hidden', !showButton);
+    el.assetDownloadBtn.disabled = downloading || !totalCount;
+    const label = el.assetDownloadBtn.querySelector('span');
+    if (label) label.textContent = downloading ? 'Downloading...' : 'Retry';
   }
 
   refreshIcons();
@@ -4619,11 +4677,10 @@ function updateUI() {
   const isProcessing = appState.get('isProcessing');
   
   if (el.startBtn) {
-    el.startBtn.disabled = !canRunExtraction();
-    el.startBtn.title = hasFiles && !requiredAssetsReady
-      ? 'Download required assets first'
-      : hasFiles && !isCurrentRuntimeReady()
-      ? 'Runtime and models are still preparing'
+    const canRun = canRunExtraction();
+    el.startBtn.disabled = !canRun;
+    el.startBtn.title = canRun ? '' : hasFiles && appState.get('warmupStatus') !== 'ready'
+      ? 'Models are still preparing, please wait...'
       : '';
   }
   if (el.uploadBtn) el.uploadBtn.disabled = Boolean(isProcessing);
@@ -4717,12 +4774,16 @@ function subscribeToState() {
   _stateBag.subscribe(appState, 'assetStatus', renderAssetGate);
   _stateBag.subscribe(appState, 'assetProgress', updateAssetProgress);
   _stateBag.subscribe(appState, 'runtimeStatus', () => {
-    updateModelStatusSummary();
     updateWarmupProgressUi();
+    renderAssetGate();
+    updateUI();
   });
-  _stateBag.subscribe(appState, 'warmupStatus', () => {
-    updateModelStatusSummary();
+  _stateBag.subscribe(appState, 'warmupStatus', (status) => {
     updateWarmupProgressUi();
+    renderAssetGate();
+    if (status === 'ready' && el.startBtn) {
+      el.startBtn.disabled = false;
+    }
     updateUI();
   });
   _stateBag.subscribe(appState, 'startupTimings', () => {

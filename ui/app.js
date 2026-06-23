@@ -685,13 +685,11 @@ function normalizeHistoryStageTimings(stageTimings = null, processingTotalMs = 0
 
 function formatRunConfigSummary(runConfig = currentRunConfig) {
   if (!runConfig) return '';
-  const formula = runConfig.formulaEnable ? 'Formula on' : 'Formula off';
-  const table = runConfig.tableEnable ? 'Table on' : 'Table off';
   return [
-    runConfig.layoutModelLabel || '-',
     runConfig.ocrLabel || '-',
-    formula,
-    table,
+    runConfig.executionProviderLabel || '-',
+    runConfig.formulaLabel || '',
+    runConfig.tableLabel || '',
   ].filter(Boolean).join(' · ');
 }
 
@@ -1552,12 +1550,12 @@ function updateWarmupProgressUi() {
   if (!el.progressTitle || !el.progressMessage) return;
   if (!appState.get('isProcessing')) return;
   if (status === 'runtime_loading') {
-    el.progressTitle.textContent = 'Starting extraction...';
-    el.progressMessage.textContent = 'Preparing document processing steps.';
+    el.progressTitle.textContent = 'Preparing engine...';
+    el.progressMessage.textContent = 'Loading models and setting up the processing engine.';
     updateProgress(4);
   } else if (status === 'model_warming') {
-    el.progressTitle.textContent = 'Starting extraction...';
-    el.progressMessage.textContent = 'Preparing document processing steps.';
+    el.progressTitle.textContent = 'Preparing engine...';
+    el.progressMessage.textContent = 'Loading models and setting up the processing engine.';
     updateProgress(8);
   }
 }
@@ -1624,19 +1622,19 @@ function renderAssetGate({ error = null } = {}) {
   const formulaCount = summary?.formulaIds?.length || 0;
   const downloading = Boolean(assetDownloadController);
 
-  let summaryText = 'Checking required assets...';
+  let summaryText = 'Checking required models...';
   if (summary) {
     const size = formatFileSize(summary.sizeBytes || 0);
     summaryText = missingCount
-      ? `${missingCount} missing from ${totalCount} assets, ${size}`
-      : `${totalCount} assets cached, ${size}`;
-    if (formulaCount) summaryText += ', formula included';
+      ? `${missingCount} model(s) need to download, ${size}`
+      : `${totalCount} model(s) ready, ${size}`;
+    if (formulaCount) summaryText += ', with optional formula models';
   }
-  if (error) summaryText = 'Asset check failed';
+  if (error) summaryText = 'Could not check required models';
 
   if (el.assetGateSummary) el.assetGateSummary.textContent = summaryText;
   if (el.assetGateBadge) {
-    el.assetGateBadge.textContent = error ? 'Error' : requiredAssetsReady ? 'Ready' : downloading ? 'Downloading' : 'Required';
+    el.assetGateBadge.textContent = error ? 'Failed' : requiredAssetsReady ? 'Ready' : downloading ? 'Downloading...' : 'Needed';
     el.assetGateBadge.classList.toggle('is-ready', requiredAssetsReady && !error);
     el.assetGateBadge.classList.toggle('is-error', Boolean(error));
   }
@@ -1645,11 +1643,11 @@ function renderAssetGate({ error = null } = {}) {
   if (el.assetCorePackStatus) {
     el.assetCorePackStatus.textContent = summary
       ? corePack.missingCount
-        ? `${corePack.missingCount} missing, ${formatFileSize(corePack.sizeBytes)}`
-        : `Cached, ${formatFileSize(corePack.sizeBytes)}`
-      : 'Checking cache...';
+        ? `${corePack.missingCount} model(s) to download, ${formatFileSize(corePack.sizeBytes)}`
+        : `Ready, ${formatFileSize(corePack.sizeBytes)}`
+      : 'Checking models...';
   }
-  updateAssetPackBadge(el.assetCorePackBadge, summary ? (corePack.missingCount ? 'Required' : 'Ready') : 'Checking', {
+  updateAssetPackBadge(el.assetCorePackBadge, summary ? (corePack.missingCount ? 'Needed' : 'Ready') : 'Checking', {
     ready: Boolean(summary && !corePack.missingCount),
     required: Boolean(summary && corePack.missingCount),
   });
@@ -1660,20 +1658,20 @@ function renderAssetGate({ error = null } = {}) {
   const showFormulaPack = Boolean(formulaSummary?.ids?.length);
   if (el.assetFormulaPack) el.assetFormulaPack.hidden = !showFormulaPack;
   if (showFormulaPack) {
-    if (el.assetFormulaPackTitle) el.assetFormulaPackTitle.textContent = formulaEnabled ? 'Formula pack' : 'Optional formula pack';
+    if (el.assetFormulaPackTitle) el.assetFormulaPackTitle.textContent = formulaEnabled ? 'Formula models' : 'Optional formula models';
     if (el.assetFormulaPackStatus) {
       if (formulaEnabled) {
         el.assetFormulaPackStatus.textContent = formulaPack.missingCount
-          ? `${formulaPack.missingCount} missing, ${formatFileSize(formulaPack.sizeBytes)}`
-          : `Cached, ${formatFileSize(formulaPack.sizeBytes)}`;
+          ? `${formulaPack.missingCount} model(s) to download, ${formatFileSize(formulaPack.sizeBytes)}`
+          : `Ready, ${formatFileSize(formulaPack.sizeBytes)}`;
       } else {
         el.assetFormulaPackStatus.textContent = formulaPack.missingCount
-          ? `Predownload available, ${formatFileSize(formulaPack.sizeBytes)}`
-          : `Cached for later, ${formatFileSize(formulaPack.sizeBytes)}`;
+          ? `Download optional, ${formatFileSize(formulaPack.sizeBytes)}`
+          : `Available, ${formatFileSize(formulaPack.sizeBytes)}`;
       }
     }
     if (el.assetFormulaDownloadBtn) {
-      el.assetFormulaDownloadBtn.textContent = formulaEnabled ? 'Included' : formulaPack.missingCount ? 'Predownload' : 'Cached';
+      el.assetFormulaDownloadBtn.textContent = formulaEnabled ? 'Included' : formulaPack.missingCount ? 'Download now' : 'Ready';
       el.assetFormulaDownloadBtn.disabled = downloading || formulaEnabled || !formulaPack.missingCount;
     }
   }
@@ -1682,7 +1680,7 @@ function renderAssetGate({ error = null } = {}) {
     const pct = totalCount ? (cachedCount / totalCount) * 100 : 0;
     updateAssetProgress({
       percent: requiredAssetsReady ? 100 : pct,
-      label: requiredAssetsReady ? 'Required assets are cached.' : 'Download required assets before runtime warmup.',
+      label: requiredAssetsReady ? 'Required models are ready.' : 'Download required models before starting the engine.',
       indeterminate: false,
     });
   }
@@ -1690,7 +1688,7 @@ function renderAssetGate({ error = null } = {}) {
   if (el.assetDownloadBtn) {
     el.assetDownloadBtn.disabled = downloading || requiredAssetsReady || !totalCount;
     const label = el.assetDownloadBtn.querySelector('span');
-    if (label) label.textContent = downloading ? 'Downloading assets' : requiredAssetsReady ? 'Assets cached' : 'Download required assets';
+    if (label) label.textContent = downloading ? 'Downloading models...' : requiredAssetsReady ? 'Models ready' : 'Download required models';
   }
 
   if (el.assetList) {
@@ -1699,7 +1697,7 @@ function renderAssetGate({ error = null } = {}) {
     if (!detailRows.length) {
       const empty = document.createElement('div');
       empty.className = 'asset-row asset-row--empty';
-      empty.textContent = 'No ONNX model assets for this selection.';
+      empty.textContent = 'No models needed for this configuration.';
       el.assetList.append(empty);
     } else {
       for (const row of detailRows) {
@@ -1738,7 +1736,7 @@ function updateAssetProgress(event = {}) {
     const loaded = event.loadedBytes ? `${formatFileSize(event.loadedBytes)} downloaded` : '';
     el.assetProgressLabel.textContent = event.label
       ? `${event.label}${loaded ? ` - ${loaded}` : ''}`
-      : 'Required assets are ready to download.';
+      : 'Required models are ready to download.';
   }
 }
 
@@ -1798,11 +1796,11 @@ async function downloadFormulaAssets() {
     for (const id of summary.ids || []) {
       appState.setModelStatus(id, summary.status?.[id]?.cached ? 'cached' : 'not_downloaded', summary.status?.[id]?.cached ? 100 : 0);
     }
-    showLoading('Formula assets cached');
+    showLoading('Formula models ready');
     renderAssetGate();
   } catch (error) {
     console.error(`${UI_LOG_PREFIX} Formula asset download failed:`, error);
-    showLoading(`Formula asset download failed: ${error.message}`, 3000);
+    showLoading(`Formula model download failed: ${error.message}`, 3000);
     renderAssetGate({ error });
   } finally {
     assetDownloadController = null;
@@ -3544,17 +3542,17 @@ function updateModelStatusSummary() {
     const statusText = warmupStatus === 'ready'
       ? 'Ready'
       : warmupStatus === 'runtime_loading'
-        ? 'Preparing runtime...'
+        ? 'Starting engine...'
         : warmupStatus === 'model_warming'
-          ? 'Warming models...'
+          ? 'Preparing models...'
           : warmupStatus === 'error'
-            ? 'Warmup failed'
+            ? 'Engine failed to start'
             : runtimeStatus === 'ready'
-              ? 'Runtime ready'
-              : 'Runtime not loaded';
+              ? 'Engine ready'
+              : 'Engine not started';
     el.modelStatusSummary.innerHTML = `
       <span class="status-dot ${warmupStatus === 'ready' || runtimeStatus === 'ready' ? 'ready' : warmupStatus === 'error' ? 'error' : isWarmupActive() ? 'loading' : ''}"></span>
-      <strong>${warmupStatus === 'model_warming' ? 'Models' : 'Runtime'}</strong>
+      <strong>Engine</strong>
       <span>${statusText}</span>
     `;
     el.modelStatusSummary.title = warmupError || statusText;
@@ -3568,19 +3566,19 @@ function updateModelStatusSummary() {
   const warming = warmupStatus === 'runtime_loading' || warmupStatus === 'model_warming';
   const percent = active ? Math.round(progress[active[0]] || 0) : null;
   const statusText = failed.length
-    ? `${failed.length} model issue${failed.length > 1 ? 's' : ''}`
+    ? 'Model download issue'
     : active
       ? `Downloading ${percent}%`
       : cancelled.length && !warming
         ? 'Cancelled'
       : warmupStatus === 'model_warming'
-        ? `${cached.length}/${entries.length} cached, warming sessions`
+        ? `Preparing ${entries.length - cached.length} remaining model(s)`
         : warmupStatus === 'ready'
           ? 'Ready'
-          : `${cached.length}/${entries.length} cached`;
+          : `${cached.length} of ${entries.length} models ready`;
   el.modelStatusSummary.innerHTML = `
     <span class="status-dot ${failed.length ? 'error' : (active || warming) ? 'loading' : 'ready'}"></span>
-    <strong>Models</strong>
+    <strong>Engine</strong>
     <span>${statusText}</span>
   `;
   el.modelStatusSummary.title = warmupError || statusText;
@@ -4715,23 +4713,21 @@ function subscribeToState() {
   _stateBag.subscribe(appState, 'processingStage', (stage) => {
     const titles = {
       preprocessing: 'Preparing pages',
-      layout: 'Detecting layout',
-      ocr: 'Running OCR',
-      formula: 'Recognizing formulas',
+      layout: 'Analyzing structure',
+      ocr: 'Reading text',
+      formula: 'Extracting formulas',
       table: 'Extracting tables',
-      reading_order: 'Ordering content',
-      reading_order: 'Ordering content',
-      postprocessing: 'Building output',
+      reading_order: 'Arranging content',
+      postprocessing: 'Generating output',
     };
     const messages = {
-      preprocessing: 'Preparing each page for extraction.',
-      layout: 'Detecting document regions and reading structure.',
-      ocr: 'Reading text from detected regions.',
-      formula: 'Recognizing formula content.',
-      table: 'Extracting table structure.',
-      reading_order: 'Ordering blocks into readable content.',
-      reading_order: 'Ordering blocks into readable content.',
-      postprocessing: 'Building Markdown and JSON artifacts.',
+      preprocessing: 'Loading and preparing each page for processing.',
+      layout: 'Identifying document sections like headings, paragraphs, and images.',
+      ocr: 'Extracting text from each document section.',
+      formula: 'Parsing mathematical formulas and equations.',
+      table: 'Detecting and reconstructing table rows and columns.',
+      reading_order: 'Organizing extracted content into the correct reading order.',
+      postprocessing: 'Creating Markdown and JSON output files.',
     };
     
     if (el.progressTitle) {

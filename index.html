@@ -70,131 +70,117 @@
       </button>
     </div>
     <div class="drawer-body settings-control-stack" id="optionsContent">
-      <div class="settings-control-row">
-        <div class="settings-control-copy">
-          <strong>Layout</strong>
-          <span>Detect document regions.</span>
-        </div>
-        <label class="settings-field" for="layoutModel">
-          <span>Layout model</span>
-          <select id="layoutModel">
-            <option value="v2">PP-DocLayoutV2</option>
-            <option value="v3">PP-DocLayoutV3</option>
-            <option value="plus_l">PP-DocLayout Plus L</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="settings-control-row">
-        <div class="settings-control-copy">
-          <strong>OCR</strong>
-          <span>Choose OCR language.</span>
-        </div>
-        <label class="settings-field" for="ocrModel">
-          <span>OCR language</span>
-          <select id="ocrModel">
-            <option value="ch_v5">Chinese + English</option>
-            <option value="en_v5">English Only</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="settings-control-row">
-        <div class="settings-control-copy">
-          <strong>Runtime EP</strong>
-          <span>Execution provider</span>
-        </div>
-        <label class="settings-field" for="executionProvider">
-          <span>Provider</span>
-          <select id="executionProvider">
-            <option value="webgpu">WebGPU + WASM fallback</option>
-            <option value="wasm">WASM only</option>
-          </select>
-        </label>
-      </div>
-
       <div class="settings-control-row settings-control-row--toggle">
         <div class="settings-control-copy">
-          <strong>Formula</strong>
-          <span>Enable math formula recognition.</span>
+          <strong>Math Formulas</strong>
+          <span>Detect and extract mathematical formulas and equations.</span>
         </div>
         <label class="settings-toggle" for="formulaEnable">
           <input type="checkbox" id="formulaEnable"/>
           <span class="settings-switch" aria-hidden="true"></span>
           <span>Enable</span>
         </label>
-        <label class="settings-field" for="formulaModel">
-          <span>Formula model</span>
-          <select id="formulaModel">
-            <option value="pp_formulanet_plus_s" selected>PP-FormulaNet Plus S (Fast)</option>
-            <option value="pp_formulanet_plus_m">PP-FormulaNet Plus M (Balanced)</option>
-          </select>
-        </label>
       </div>
 
       <div class="settings-control-row settings-control-row--toggle">
         <div class="settings-control-copy">
-          <strong>Table</strong>
-          <span>Recover table structure when needed.</span>
+          <strong>Tables</strong>
+          <span>Detect and preserve table structure including rows, columns, and headers.</span>
         </div>
         <label class="settings-toggle" for="tableEnable">
           <input type="checkbox" id="tableEnable"/>
           <span class="settings-switch" aria-hidden="true"></span>
           <span>Enable</span>
         </label>
-        <label class="settings-field" for="tableModel">
-          <span>Table model</span>
-          <select id="tableModel">
-            <option value="unet_slanet_plus">UNET + SLANet Plus</option>
-            <option value="ppstructure_zh">PP-OCR Table</option>
-          </select>
-        </label>
       </div>
+
+      <details class="settings-advanced">
+        <summary>Advanced settings</summary>
+        <div class="settings-advanced-body">
+          <div class="adv-row">
+            <span>Language</span>
+            <select id="ocrModel">
+              <option value="ch_v5">Chinese + English</option>
+              <option value="en_v5">English Only</option>
+            </select>
+          </div>
+          <div class="adv-row">
+            <span>Engine</span>
+            <select id="executionProvider">
+              <option value="webgpu">WebGPU + WASM fallback</option>
+              <option value="wasm">WASM only</option>
+            </select>
+          </div>
+          <div class="adv-separator"></div>
+          <div class="adv-row">
+            <span>Structure model</span>
+            <select id="layoutModel">
+              <option value="v2">PP-DocLayoutV2</option>
+              <option value="v3">PP-DocLayoutV3</option>
+              <option value="plus_l">PP-DocLayout Plus L</option>
+            </select>
+          </div>
+          <div class="adv-row">
+            <span>Formula model</span>
+            <select id="formulaModel">
+              <option value="pp_formulanet_plus_s" selected>PP-FormulaNet Plus S (Fast)</option>
+              <option value="pp_formulanet_plus_m">PP-FormulaNet Plus M (Balanced)</option>
+            </select>
+          </div>
+          <div class="adv-row">
+            <span>Table model</span>
+            <select id="tableModel">
+              <option value="unet_slanet_plus">UNET + SLANet Plus</option>
+              <option value="ppstructure_zh">PP-OCR Table</option>
+            </select>
+          </div>
+        </div>
+      </details>
 
       <div class="model-status-card setup-runtime-chip" id="modelStatusSummary">
         <span class="status-dot"></span>
-        <strong>Runtime</strong>
-        <span>Preparing document runtime...</span>
+        <strong>Engine</strong>
+        <span>Starting engine...</span>
       </div>
 
-      <section class="asset-gate-card" id="assetGateCard" aria-label="Required assets">
+      <section class="asset-gate-card" id="assetGateCard" aria-label="Model downloads">
         <div class="asset-gate-header">
           <div>
-            <strong>Assets</strong>
-            <span id="assetGateSummary">Checking required assets...</span>
-            <small>Models are downloaded once and cached in this browser.</small>
+            <strong>Models</strong>
+            <span id="assetGateSummary">Checking required models...</span>
+            <small>Everything runs locally in your browser. Downloaded models never leave this device.</small>
           </div>
-          <span class="asset-gate-badge" id="assetGateBadge">Pending</span>
+          <span class="asset-gate-badge" id="assetGateBadge">Needed</span>
         </div>
         <div class="asset-pack-grid" id="assetPackGrid">
           <div class="asset-pack-row" id="assetCorePack">
             <div>
-              <strong>Core pack</strong>
-              <span id="assetCorePackStatus">Checking cache...</span>
+              <strong>Core models (always needed)</strong>
+              <span id="assetCorePackStatus">Checking models...</span>
             </div>
-            <span class="asset-pack-badge" id="assetCorePackBadge">Required</span>
+            <span class="asset-pack-badge" id="assetCorePackBadge">Needed</span>
           </div>
           <div class="asset-pack-row" id="assetFormulaPack">
             <div>
-              <strong id="assetFormulaPackTitle">Formula pack</strong>
-              <span id="assetFormulaPackStatus">Optional until Formula is enabled.</span>
+              <strong id="assetFormulaPackTitle">Optional formula models</strong>
+              <span id="assetFormulaPackStatus">Download optional when formula detection is enabled.</span>
             </div>
-            <button class="asset-pack-action" id="assetFormulaDownloadBtn" type="button">Predownload</button>
+            <button class="asset-pack-action" id="assetFormulaDownloadBtn" type="button">Download now</button>
           </div>
         </div>
         <div class="asset-progress" id="assetProgressTrack" aria-hidden="true">
           <div class="asset-progress-fill" id="assetProgressFill"></div>
         </div>
         <div class="asset-progress-meta">
-          <span id="assetProgressLabel">Download required assets before runtime warmup.</span>
+          <span id="assetProgressLabel">Download required models before starting the engine.</span>
           <span id="assetProgressPercent">0%</span>
         </div>
         <button class="btn-secondary asset-download-btn" id="assetDownloadBtn" type="button">
           <i data-lucide="download"></i>
-          <span>Download required assets</span>
+          <span>Download required models</span>
         </button>
         <details class="asset-details" id="assetDetails">
-          <summary>ONNX model details</summary>
+          <summary>Technical model details</summary>
           <div class="asset-list" id="assetList"></div>
         </details>
       </section>
@@ -240,7 +226,11 @@
         <div class="setup-pane-header">
           <div>
             <h1>Extract document content</h1>
-            <p>Upload files, choose extraction settings, then run.</p>
+            <p>Upload your document, adjust settings to match your content, then run extraction.</p>
+            <div class="privacy-chip">
+              <i data-lucide="shield"></i>
+              <span>Fully local — your files stay on your device.</span>
+            </div>
           </div>
         </div>
 
@@ -253,7 +243,7 @@
               </span>
               <span class="dropzone-copy">
                 <strong id="dropzoneTitle">Drop files here</strong>
-                <small id="dropzoneHint">PDF and common image formats</small>
+                <small id="dropzoneHint">Supports PDF, PNG, JPG, and other common formats</small>
               </span>
             </button>
             <div class="setup-file-cards" id="setupFileCards"></div>
@@ -301,14 +291,14 @@
       </div>
       <div class="workspace-timing-strip" id="timingStrip" aria-label="Processing timing stages">
         <span class="timing-pill timing-total"><span>Total</span><strong id="timingTotal">-</strong></span>
-        <span class="timing-pill"><span>Layout</span><strong id="timingLayout">-</strong></span>
-        <span class="timing-pill"><span>OCR</span><strong id="timingOcr">-</strong></span>
-        <span class="timing-pill"><span>Formula</span><strong id="timingFormula">-</strong></span>
-        <span class="timing-pill"><span>Table</span><strong id="timingTable">-</strong></span>
-        <span class="timing-pill"><span>Post</span><strong id="timingPostprocessing">-</strong></span>
+        <span class="timing-pill"><span>Structure</span><strong id="timingLayout">-</strong></span>
+        <span class="timing-pill"><span>Text</span><strong id="timingOcr">-</strong></span>
+        <span class="timing-pill"><span>Formulas</span><strong id="timingFormula">-</strong></span>
+        <span class="timing-pill"><span>Tables</span><strong id="timingTable">-</strong></span>
+        <span class="timing-pill"><span>Output</span><strong id="timingPostprocessing">-</strong></span>
         <span class="timing-pill"><span>Other</span><strong id="timingOther">-</strong></span>
         <span class="timing-separator"></span>
-        <span class="timing-pill timing-pill-prep"><span>Warmup</span><strong id="timingModelInit">-</strong></span>
+        <span class="timing-pill timing-pill-prep"><span>Engine</span><strong id="timingModelInit">-</strong></span>
       </div>
       <div class="workspace-toolbar-row workspace-toolbar-sub">
         <div class="viewer-controls input-toolbar">
@@ -356,6 +346,10 @@
             <div class="empty-viewer" id="emptyViewer">
               <strong>No document selected</strong>
               <p>Create a task and upload a PDF or image to preview it here.</p>
+              <div class="privacy-chip" style="margin-top: 16px;">
+                <i data-lucide="shield"></i>
+                <span>Private &amp; local — your documents never leave this browser.</span>
+              </div>
             </div>
             <div class="page-stack" id="pageStack">
               <div class="document-page" data-page-index="0">
@@ -413,4 +407,9 @@
 
 <script type="module" src="ui/app.js"></script>
 </body>
+</html>
+
+</body>
+</html>
+y>
 </html>

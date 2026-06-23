@@ -4090,3 +4090,120 @@ json-viewer {
 #scrollToTopBtn.hidden {
     display: none;
 }
+
+/* ===== PRIVACY / LOCAL-FIRST MESSAGING ===== */
+.privacy-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid rgba(5, 150, 105, 0.3);
+    border-radius: 999px;
+    background: rgba(5, 150, 105, 0.06);
+    color: #065f46;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.privacy-chip i {
+    width: 14px;
+    height: 14px;
+}
+
+.settings-privacy-note {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: #f0fdf4;
+    color: #065f46;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.settings-privacy-note i {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.settings-privacy-note strong {
+    color: #065f46;
+}
+
+/* ===== ADVANCED SETTINGS (COLLAPSIBLE) ===== */
+.settings-advanced {
+    flex: 0 0 auto;
+    padding: 10px 12px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: var(--white);
+    font-size: 12px;
+}
+
+.settings-advanced summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 12px;
+    user-select: none;
+}
+
+.settings-advanced summary:hover {
+    color: var(--text);
+}
+
+.settings-advanced[open] summary {
+    margin-bottom: 10px;
+    color: var(--text);
+}
+
+.settings-advanced-body {
+    display: grid;
+    gap: 6px;
+}
+
+.adv-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 32px;
+}
+
+.adv-row span {
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.adv-row select {
+    min-width: 0;
+    width: auto;
+    flex: 0 1 auto;
+    max-width: 65%;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--white);
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.adv-row select:hover {
+    border-color: var(--primary);
+}
+
+.adv-separator {
+    height: 1px;
+    background: var(--border-light);
+    margin: 4px 0;
+}

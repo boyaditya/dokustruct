@@ -842,18 +842,11 @@ async function init() {
   el.assetGateCard = document.getElementById('assetGateCard');
   el.assetGateSummary = document.getElementById('assetGateSummary');
   el.assetGateBadge = document.getElementById('assetGateBadge');
-  el.assetCorePackStatus = document.getElementById('assetCorePackStatus');
-  el.assetCorePackBadge = document.getElementById('assetCorePackBadge');
-  el.assetFormulaPack = document.getElementById('assetFormulaPack');
-  el.assetFormulaPackTitle = document.getElementById('assetFormulaPackTitle');
-  el.assetFormulaPackStatus = document.getElementById('assetFormulaPackStatus');
-  el.assetFormulaDownloadBtn = document.getElementById('assetFormulaDownloadBtn');
   el.assetProgressTrack = document.getElementById('assetProgressTrack');
   el.assetProgressFill = document.getElementById('assetProgressFill');
   el.assetProgressLabel = document.getElementById('assetProgressLabel');
   el.assetProgressPercent = document.getElementById('assetProgressPercent');
   el.assetDownloadBtn = document.getElementById('assetDownloadBtn');
-  el.assetList = document.getElementById('assetList');
   el.layoutModel = document.getElementById('layoutModel');
   el.ocrModel = document.getElementById('ocrModel');
   el.executionProvider = document.getElementById('executionProvider');
@@ -1578,7 +1571,11 @@ async function refreshAssetRequirements({ allowWarmup = true } = {}) {
     appState.set('assetStatus', summary.status || {});
     renderAssetGate();
     updateUI();
-    if (allowWarmup && requiredAssetsReady) scheduleBackgroundWarmup();
+    if (allowWarmup && requiredAssetsReady) {
+      scheduleBackgroundWarmup();
+    } else if (allowWarmup && !requiredAssetsReady && selectedFiles.length > 0 && !assetDownloadController) {
+      downloadRequiredAssets().catch(() => {});
+    }
   } catch (error) {
     if (token !== assetRefreshToken) return;
     requiredAssetsReady = false;
@@ -1604,13 +1601,6 @@ function summarizeAssetPack(summary, ids = summary?.ids || []) {
   };
 }
 
-function updateAssetPackBadge(node, label, { ready = false, required = false } = {}) {
-  if (!node) return;
-  node.textContent = label;
-  node.classList.toggle('is-ready', ready);
-  node.classList.toggle('is-required', required && !ready);
-}
-
 function renderAssetGate({ error = null } = {}) {
   if (!el.assetGateCard) return;
   const summary = assetSummary;
@@ -1619,18 +1609,16 @@ function renderAssetGate({ error = null } = {}) {
   const cachedCount = ids.filter(id => statuses[id]?.cached).length;
   const totalCount = ids.length;
   const missingCount = Math.max(0, totalCount - cachedCount);
-  const formulaCount = summary?.formulaIds?.length || 0;
   const downloading = Boolean(assetDownloadController);
 
   let summaryText = 'Checking required models...';
   if (summary) {
     const size = formatFileSize(summary.sizeBytes || 0);
     summaryText = missingCount
-      ? `${missingCount} model(s) need to download, ${size}`
-      : `${totalCount} model(s) ready, ${size}`;
-    if (formulaCount) summaryText += ', with optional formula models';
+      ? `${missingCount} component(s) to download, ${size}`
+      : `${totalCount} component(s) ready, ${size}`;
   }
-  if (error) summaryText = 'Could not check required models';
+  if (error) summaryText = 'Could not check required components';
 
   if (el.assetGateSummary) el.assetGateSummary.textContent = summaryText;
   if (el.assetGateBadge) {
@@ -1639,81 +1627,33 @@ function renderAssetGate({ error = null } = {}) {
     el.assetGateBadge.classList.toggle('is-error', Boolean(error));
   }
 
-  const corePack = summarizeAssetPack(summary, summary?.coreIds || []);
-  if (el.assetCorePackStatus) {
-    el.assetCorePackStatus.textContent = summary
-      ? corePack.missingCount
-        ? `${corePack.missingCount} model(s) to download, ${formatFileSize(corePack.sizeBytes)}`
-        : `Ready, ${formatFileSize(corePack.sizeBytes)}`
-      : 'Checking models...';
+  const isReady = requiredAssetsReady && !downloading && !error;
+  if (el.assetProgressTrack) {
+    el.assetProgressTrack.classList.toggle('hidden', isReady);
   }
-  updateAssetPackBadge(el.assetCorePackBadge, summary ? (corePack.missingCount ? 'Needed' : 'Ready') : 'Checking', {
-    ready: Boolean(summary && !corePack.missingCount),
-    required: Boolean(summary && corePack.missingCount),
-  });
-
-  const formulaSummary = formulaAssetSummary;
-  const formulaPack = summarizeAssetPack(formulaSummary, formulaSummary?.ids || []);
-  const formulaEnabled = Boolean(formulaSummary?.enabled);
-  const showFormulaPack = Boolean(formulaSummary?.ids?.length);
-  if (el.assetFormulaPack) el.assetFormulaPack.hidden = !showFormulaPack;
-  if (showFormulaPack) {
-    if (el.assetFormulaPackTitle) el.assetFormulaPackTitle.textContent = formulaEnabled ? 'Formula models' : 'Optional formula models';
-    if (el.assetFormulaPackStatus) {
-      if (formulaEnabled) {
-        el.assetFormulaPackStatus.textContent = formulaPack.missingCount
-          ? `${formulaPack.missingCount} model(s) to download, ${formatFileSize(formulaPack.sizeBytes)}`
-          : `Ready, ${formatFileSize(formulaPack.sizeBytes)}`;
-      } else {
-        el.assetFormulaPackStatus.textContent = formulaPack.missingCount
-          ? `Download optional, ${formatFileSize(formulaPack.sizeBytes)}`
-          : `Available, ${formatFileSize(formulaPack.sizeBytes)}`;
-      }
-    }
-    if (el.assetFormulaDownloadBtn) {
-      el.assetFormulaDownloadBtn.textContent = formulaEnabled ? 'Included' : formulaPack.missingCount ? 'Download now' : 'Ready';
-      el.assetFormulaDownloadBtn.disabled = downloading || formulaEnabled || !formulaPack.missingCount;
-    }
+  if (el.assetProgressLabel) {
+    el.assetProgressLabel.classList.toggle('hidden', isReady);
   }
-
-  if (!downloading) {
-    const pct = totalCount ? (cachedCount / totalCount) * 100 : 0;
-    updateAssetProgress({
-      percent: requiredAssetsReady ? 100 : pct,
-      label: requiredAssetsReady ? 'Required models are ready.' : 'Download required models before starting the engine.',
-      indeterminate: false,
-    });
+  if (el.assetProgressPercent) {
+    el.assetProgressPercent.classList.toggle('hidden', isReady);
   }
-
   if (el.assetDownloadBtn) {
-    el.assetDownloadBtn.disabled = downloading || requiredAssetsReady || !totalCount;
-    const label = el.assetDownloadBtn.querySelector('span');
-    if (label) label.textContent = downloading ? 'Downloading models...' : requiredAssetsReady ? 'Models ready' : 'Download required models';
+    el.assetDownloadBtn.classList.toggle('hidden', isReady);
   }
 
-  if (el.assetList) {
-    el.assetList.replaceChildren();
-    const detailRows = getAssetDetailRows(ids, statuses);
-    if (!detailRows.length) {
-      const empty = document.createElement('div');
-      empty.className = 'asset-row asset-row--empty';
-      empty.textContent = 'No models needed for this configuration.';
-      el.assetList.append(empty);
-    } else {
-      for (const row of detailRows) {
-        const item = document.createElement('div');
-        item.className = 'asset-row';
-
-        const title = document.createElement('strong');
-        title.textContent = `${row.prefix} - ${row.label}`;
-        title.title = title.textContent;
-
-        const meta = document.createElement('span');
-        meta.textContent = `${formatFileSize(row.sizeBytes)} - ${row.status}`;
-
-        item.append(title, meta);
-        el.assetList.append(item);
-      }
+  if (!isReady) {
+    if (!downloading) {
+      const pct = totalCount ? (cachedCount / totalCount) * 100 : 0;
+      updateAssetProgress({
+        percent: requiredAssetsReady ? 100 : pct,
+        label: 'Preparing document processing components.',
+        indeterminate: false,
+      });
+    }
+    if (el.assetDownloadBtn) {
+      el.assetDownloadBtn.disabled = downloading || !totalCount;
+      const label = el.assetDownloadBtn.querySelector('span');
+      if (label) label.textContent = downloading ? 'Downloading...' : 'Download components';
     }
   }
 
@@ -1736,7 +1676,7 @@ function updateAssetProgress(event = {}) {
     const loaded = event.loadedBytes ? `${formatFileSize(event.loadedBytes)} downloaded` : '';
     el.assetProgressLabel.textContent = event.label
       ? `${event.label}${loaded ? ` - ${loaded}` : ''}`
-      : 'Required models are ready to download.';
+      : 'Preparing document processing components.';
   }
 }
 
@@ -1763,16 +1703,26 @@ async function downloadRequiredAssets() {
     renderAssetGate();
     updateUI();
     if (requiredAssetsReady) {
-      showLoading('Assets cached');
+      showLoading('Components ready');
       scheduleBackgroundWarmup(0);
     }
   } catch (error) {
     console.error(`${UI_LOG_PREFIX} Asset download failed:`, error);
-    showLoading(`Asset download failed: ${error.message}`, 3000);
+    showLoading(`Download failed: ${error.message}`, 3000);
     renderAssetGate({ error });
   } finally {
     assetDownloadController = null;
     await refreshAssetRequirements({ allowWarmup: false });
+    // Auto-download formula assets if formula is enabled and they're missing
+    if (!assetDownloadController && selectedFiles.length > 0) {
+      const fSummary = formulaAssetSummary;
+      if (fSummary?.enabled && fSummary?.ids?.length) {
+        const fPack = summarizeAssetPack(fSummary, fSummary.ids);
+        if (fPack.missingCount > 0) {
+          downloadFormulaAssets().catch(() => {});
+        }
+      }
+    }
   }
 }
 

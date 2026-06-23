@@ -632,7 +632,7 @@ function getCurrentRunConfig() {
   return {
     layoutModel: el.layoutModel?.value || 'v2',
     layoutModelLabel: getSelectOptionLabel(el.layoutModel),
-    ocrModel: el.ocrModel?.value || 'ch_v5',
+    ocrModel: el.ocrModel?.value || 'ch',
     ocrLabel: getSelectOptionLabel(el.ocrModel),
     executionProvider: el.executionProvider?.value || appState.get('activeExecutionProvider') || 'wasm',
     executionProviderLabel: getSelectOptionLabel(el.executionProvider),
@@ -1394,12 +1394,12 @@ function updateConfig() {
   };
   
   const langMap = {
-    'ch_v5': 'ch',
-    'en_v5': 'en',
+    'ch': 'ch',
+    'en': 'en',
   };
   
   const layoutValue = el.layoutModel?.value || 'v2';
-  const ocrValue = el.ocrModel?.value || 'ch_v5';
+  const ocrValue = el.ocrModel?.value || 'en';
   const executionProviderValue = el.executionProvider?.value || appState.get('activeExecutionProvider') || 'wasm';
   const formulaEnabled = el.formulaEnable?.checked || false;
   const formulaModelValue = el.formulaModel?.value || 'pp_formulanet_plus_s';

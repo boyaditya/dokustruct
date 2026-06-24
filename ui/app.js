@@ -703,6 +703,7 @@ let currentFileType = null; // 'image' or 'pdf'
 let sourceCanvas = null;
 let pdfDocument = null;
 let pdfLoadingTask = null;
+let activePdfRenderTasks = [];
 let currentZoom = 0.3;
 let currentPage = 1;
 let totalPages = 1;
@@ -759,6 +760,12 @@ function releaseCanvas(canvas) {
 }
 
 async function cleanupPdfPreview() {
+  // Cancel all active render tasks
+  for (const task of activePdfRenderTasks) {
+    try { task.cancel?.(); } catch { /* ignore */ }
+  }
+  activePdfRenderTasks = [];
+  
   if (pdfLoadingTask) {
     try { await pdfLoadingTask.destroy?.(); } catch { /* ignore */ }
     pdfLoadingTask = null;
@@ -1958,6 +1965,10 @@ async function loadFile(file, { replaceQueue = true } = {}) {
     refreshAssetRequirements();
     showLoading('File loaded successfully');
   } catch (err) {
+    // Suppress RenderingCancelledException - this is expected when switching files quickly
+    if (err?.name === 'RenderingCancelledException') {
+      return;
+    }
     console.error(`${UI_LOG_PREFIX} Preview error:`, err);
     sourceCanvas = null;
     pdfDocument = null;
@@ -2092,6 +2103,11 @@ async function loadPdfPreview(file) {
       el.currentFileMeta.textContent = `${totalPages} pages`;
     }
   } catch (err) {
+    // Suppress RenderingCancelledException - this is expected when switching files quickly
+    if (err?.name === 'RenderingCancelledException') {
+      console.log(`${UI_LOG_PREFIX} PDF rendering cancelled (file switch in progress)`);
+      return;
+    }
     console.error(`${UI_LOG_PREFIX} PDF load error:`, err);
     throw err;
   }
@@ -2112,10 +2128,30 @@ async function renderPdfPage(pageNum, record = null) {
   target.sourceSize = { width: viewport.width, height: viewport.height };
   
   const ctx = canvas.getContext('2d');
-  await page.render({
+  const renderTask = page.render({
     canvasContext: ctx,
     viewport: viewport,
-  }).promise;
+  });
+  
+  // Track this render task so it can be cancelled if needed
+  activePdfRenderTasks.push(renderTask);
+  
+  try {
+    await renderTask.promise;
+    // Remove from active tasks on completion
+    const taskIndex = activePdfRenderTasks.indexOf(renderTask);
+    if (taskIndex >= 0) activePdfRenderTasks.splice(taskIndex, 1);
+  } catch (err) {
+    // Remove from active tasks on error
+    const taskIndex = activePdfRenderTasks.indexOf(renderTask);
+    if (taskIndex >= 0) activePdfRenderTasks.splice(taskIndex, 1);
+    
+    // Suppress RenderingCancelledException - this is expected when switching files quickly
+    if (err?.name === 'RenderingCancelledException') {
+      return;
+    }
+    throw err;
+  }
   
   canvas.style.display = 'block';
   applyZoom();

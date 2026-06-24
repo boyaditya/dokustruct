@@ -776,8 +776,14 @@ export class PipelineAdapter {
       state.updateMemory();
 
       // Progress callback from engine
-      const onProgress = (current, total) => {
-        state.updateProgress(current, total);
+      const onProgress = (stage, current, total, percent) => {
+        // Use ProgressTracker percentage for accurate progress
+        if (typeof percent === 'number') {
+          state.patch({ 
+            progressPercent: percent,
+            progressStage: stage,
+          });
+        }
         state.updateMemory();
       };
 

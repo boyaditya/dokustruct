@@ -435,11 +435,24 @@ async function _runBatchProcessing(imagesWithExtraInfo, opts) {
   const allResults = [];
   let processedCount = 0;
 
+  // Create a single ProgressTracker for all batches
+  const { ProgressTracker } = await import('./progress_tracker.js');
+  const progressTracker = new ProgressTracker(on_progress);
+  
+  // Pre-calculate total work for ALL batches
+  const totalPages = imagesWithExtraInfo.length;
+  const hasOrientation = layout_config?.use_doc_orientation_classify ?? layout_config?.useDocOrientationClassify ?? false;
+  
+  console.log(`[_runBatchProcessing] Creating shared ProgressTracker for ${totalPages} total pages`);
+  console.log(`[_runBatchProcessing] hasOrientation=${hasOrientation}, batches=${batchImages.length}`);
+  
+  progressTracker.initStage('orientation', hasOrientation ? totalPages : 0);
+  progressTracker.initStage('layout', totalPages);
+
   for (let index = 0; index < batchImages.length; index++) {
     const batchImage = batchImages[index];
     const batchLang = batchImage[0]?.[3] ?? lang_list?.[0] ?? 'ch';
     processedCount += batchImage.length;
-    on_progress?.(processedCount, imagesWithExtraInfo.length);
     console.info(
       `[docAnalyze] Batch ${index + 1}/${batchImages.length}: ` +
       `${processedCount}/${imagesWithExtraInfo.length} pages`
@@ -449,6 +462,9 @@ async function _runBatchProcessing(imagesWithExtraInfo, opts) {
       lang: batchLang,
       formula_enable, table_enable, layout_config, ocr_config,
       formula_config, table_config, orientation_config, checkbox_config,
+      on_stage_progress: on_progress,
+      progress_tracker: progressTracker,  // Pass shared tracker
+      batch_offset: index * MIN_BATCH_INFERENCE_SIZE,  // Pass offset for accurate counting
     });
     allResults.push(...batchResults);
     await yieldToBrowser();
@@ -515,6 +531,20 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
 
   const slicedPdfBytesList = await _sliceAllPdfsForWindow(pdfBytesList, start_page_id, end_page_id);
 
+  // Count total pages BEFORE entering window loop
+  const { loadImagesFromPdf } = await import('../../utils/pdf_image_tools.js');
+  let totalPages = 0;
+  for (const pdfBytes of slicedPdfBytesList) {
+    try {
+      const [imagesList, pdfDocProxy] = await loadImagesFromPdf(pdfBytes, { imageType: 0 });
+      totalPages += imagesList.length;
+      await destroyPdfProxy(pdfDocProxy);
+    } catch (err) {
+      console.warn('[_docAnalyzeWindowed] Failed to count pages:', err);
+      totalPages += Math.max(1, Math.floor((pdfBytes.byteLength || pdfBytes.length) / 100000));
+    }
+  }
+
   const allInferResults = pdfBytesList.map(() => []);
   const allImageListsAccum = pdfBytesList.map(() => []);
   const allPdfDocsAccum = pdfBytesList.map(() => []);
@@ -523,6 +553,14 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   const finished = new Array(pdfBytesList.length).fill(false);
   let tmpStartPageId = 0;
   let batchIdx = 0;
+
+  // Create shared ProgressTracker and initialize with total pages
+  const { ProgressTracker } = await import('./progress_tracker.js');
+  const progressTracker = new ProgressTracker(on_progress);
+  
+  const hasOrientation = layout_config?.use_doc_orientation_classify ?? layout_config?.useDocOrientationClassify ?? false;
+  progressTracker.initStage('orientation', hasOrientation ? totalPages : 0);
+  progressTracker.initStage('layout', totalPages);
 
   while (!finished.every(Boolean)) {
     const activeIndexes = finished.map((f, i) => f ? -1 : i).filter(i => i >= 0);
@@ -538,6 +576,8 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
         start_page_id: tmpStartPageId,
         end_page_id: tmpStartPageId + pdf_pages_batch - 1,
         on_progress,
+        progress_tracker: progressTracker,
+        batch_offset: tmpStartPageId,
       });
 
     _accumulateTimings(pipelineTimings, windowTimings);
@@ -597,6 +637,7 @@ async function _docAnalyzeSingleWindow(pdfBytesList, opts) {
     lang_list, parse_method, force_ocr, formula_enable, table_enable,
     layout_config, ocr_config, formula_config, table_config, orientation_config, checkbox_config,
     start_page_id = 0, end_page_id = null, on_progress = null,
+    progress_tracker = null, batch_offset = 0,
   } = opts;
 
   const pipelineTimings = _newTimings();
@@ -608,7 +649,6 @@ async function _docAnalyzeSingleWindow(pdfBytesList, opts) {
   const { allPagesInfo, allImageLists, allPdfDocs, ocrEnabledList } = await _loadAllPdfPages(
     slicedList, langList, parse_method, force_ocr
   );
-  // stage timings are tracked in milliseconds (consistent with batch _stageTimings)
   pipelineTimings.pdf_load = performance.now() - tPdfLoad0;
 
   if (!allPagesInfo.length) {
@@ -623,8 +663,10 @@ async function _docAnalyzeSingleWindow(pdfBytesList, opts) {
     lang: imagesWithExtraInfo[0]?.[3] ?? langList[0] ?? 'ch',
     formula_enable, table_enable, layout_config, ocr_config,
     formula_config, table_config, orientation_config, checkbox_config,
+    on_stage_progress: on_progress,
+    progress_tracker,
+    batch_offset,
   });
-  on_progress?.(imagesWithExtraInfo.length, imagesWithExtraInfo.length);
   await yieldToBrowser();
 
   _accumulateTimings(pipelineTimings, batchResults?._stageTimings);
@@ -657,6 +699,9 @@ export async function batchImageAnalyze(
     table_config = null,
     orientation_config = null,
     checkbox_config = null,
+    on_stage_progress = null,
+    progress_tracker = null,
+    batch_offset = 0,
   } = {}
 ) {
   const { BatchAnalyze } = await import("./batch_analyze.js");
@@ -668,7 +713,10 @@ export async function batchImageAnalyze(
   const batchModel = new BatchAnalyze(
     modelManager, batchRatio,
     formula_enable, table_enable,
-    layout_config, ocr_config, formula_config, table_config, checkbox_config, orientation_config
+    layout_config, ocr_config, formula_config, table_config, checkbox_config, orientation_config,
+    on_stage_progress,
+    progress_tracker,
+    batch_offset
   );
   batchModel.lang = lang;
 

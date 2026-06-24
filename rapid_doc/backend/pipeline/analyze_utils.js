@@ -285,8 +285,9 @@ function processDetGroupResults(groupCrops, batchResults) {
  * @param {object[]} ocrResAllPage
  * @param {AtomModelSingleton} atomModelManager
  * @param {object} ocrConfig
+ * @param {Function|null} onProgress - Progress callback (current, total)
  */
-export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig) {
+export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig, onProgress = null) {
   const ocrDetBaseBatchSize = (ocrConfig || {})["Det.rec_batch_num"] || 1;
   const allCroppedInfo = collectOcrDetCrops(ocrResAllPage, ocrConfig);
 
@@ -298,6 +299,9 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
     const lang = info[5];
     (langGroups[lang] = langGroups[lang] || []).push(info);
   }
+
+  let processedCrops = 0;
+  const totalCrops = allCroppedInfo.length;
 
   for (const [lang, langCropList] of Object.entries(langGroups)) {
     if (!langCropList.length) continue;
@@ -320,6 +324,9 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
       try {
         const batchResults = await ocrModel.detBatchPredict(batchImages, detBatchSize);
         processDetGroupResults(groupCrops, batchResults);
+        
+        processedCrops += groupCrops.length;
+        onProgress?.(processedCrops, totalCrops);
       } catch (err) {
         if (err instanceof AbortException) throw err;
         console.warn(formatPipelineError({
@@ -333,6 +340,9 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig)
           if (detImage !== bgrImage) deleteMat(detImage);
           deleteMat(bgrImage);
         }
+        
+        processedCrops += groupCrops.length;
+        onProgress?.(processedCrops, totalCrops);
       } finally {
         deleteMatList(batchImages.filter(
           p => p && typeof cv !== 'undefined' && p instanceof cv.Mat
@@ -373,8 +383,9 @@ function applyOcrScoreFiltering(item, ocrText, ocrScore) {
  * Post-process OCR recognition for spans that contain np_img.
  * @param {object[][]} imagesLayoutRes
  * @param {object} ocrConfig
+ * @param {Function|null} onProgress - Progress callback (current, total)
  */
-export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig) {
+export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig, onProgress = null) {
   const atomModelManager = AtomModelSingleton.getInstance();
 
   const needOcrByLang = {};
@@ -398,6 +409,9 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig) {
   }
 
   if (!Object.keys(imgCropByLang).length) return;
+
+  let processedSpans = 0;
+  const totalSpans = Object.values(imgCropByLang).reduce((sum, arr) => sum + arr.length, 0);
 
   for (const [lang, imgCropList] of Object.entries(imgCropByLang)) {
     if (!imgCropList.length) continue;
@@ -426,6 +440,9 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig) {
         const [ocrText, ocrScore] = ocrResList[i] || ['', 0];
         applyOcrScoreFiltering(needOcrList[i], ocrText, ocrScore);
       }
+      
+      processedSpans += imgCropList.length;
+      onProgress?.(processedSpans, totalSpans);
     } catch (err) {
       if (err instanceof AbortException) throw err;
       console.warn(formatPipelineError({
@@ -433,6 +450,9 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig) {
         message: `OCR recognition failed for lang=${lang}: ${err.message}`,
         recoverable: true,
       }));
+      
+      processedSpans += imgCropList.length;
+      onProgress?.(processedSpans, totalSpans);
     } finally {
       deleteMatList(imgCropList);
     }

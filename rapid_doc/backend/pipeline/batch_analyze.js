@@ -15,6 +15,7 @@ import { AtomicModel } from "./model_list.js";
 import { getRotateImage, restorePoly } from "../../utils/boxbase.js";
 import { deleteMat, clearLayoutImageList } from "../../utils/resource_utils.js";
 import { yieldToBrowser, formatPipelineError } from "../../utils/browser_utils.js";
+import { ProgressTracker } from "./progress_tracker.js";
 
 /**
  * Batch analysis processor — orchestrates layout, formula, OCR, and table models.
@@ -31,6 +32,9 @@ export class BatchAnalyze {
    * @param {object|null} tableConfig
    * @param {object|null} checkboxConfig
    * @param {object|null} orientationConfig
+   * @param {Function|null} onStageProgress - Callback for stage progress (stage, current, total, percent)
+   * @param {ProgressTracker|null} progressTracker - Shared progress tracker instance (optional)
+   * @param {number} batchOffset - Offset for progress tracking when processing multiple batches
    */
   constructor(
     modelManager,
@@ -43,6 +47,9 @@ export class BatchAnalyze {
     tableConfig = null,
     checkboxConfig = null,
     orientationConfig = null,
+    onStageProgress = null,
+    progressTracker = null,
+    batchOffset = 0,
   ) {
     this.modelManager = modelManager;
     this.batchRatio = batchRatio;
@@ -93,6 +100,9 @@ export class BatchAnalyze {
 
     this.model = null;
     this.lang = null;
+    this.onStageProgress = onStageProgress;
+    this.progressTracker = progressTracker;  // Use shared tracker if provided
+    this.batchOffset = batchOffset;  // Offset for multi-batch processing
     this.lastStageTimings = {
       layout: 0,
       formula: 0,
@@ -115,6 +125,13 @@ export class BatchAnalyze {
    */
   async call(imagesWithExtraInfo) {
     if (!imagesWithExtraInfo.length) return [];
+
+    // Use shared progress tracker if provided, otherwise create new one
+    if (!this.progressTracker) {
+      this.progressTracker = new ProgressTracker((stage, current, total, percent) => {
+        this.onStageProgress?.(stage, current, total, percent);
+      });
+    }
 
     const stageTimings = {
       layout: 0,
@@ -155,6 +172,16 @@ export class BatchAnalyze {
     const npImages = matResults.map(r => r.mat);
     const ownedMats = matResults.map(r => r.owned);
 
+    // Initialize work units only if stages not yet initialized (first batch only)
+    const numPages = npImages.length;
+    
+    const needsInit = !this.progressTracker.stages['layout'];
+    if (needsInit) {
+      // Fallback: initialize if shared tracker didn't pre-initialize
+      this.progressTracker.initStage('orientation', this.useDocOrientationClassify ? numPages : 0);
+      this.progressTracker.initStage('layout', numPages);
+    }
+
     try {
       const tOri0 = performance.now();
       const imgOriOrientationList = await this._runOrientationClassify(npImages, pdfDictList, ownedMats);
@@ -171,6 +198,24 @@ export class BatchAnalyze {
       const [ocrResAllPage, tableResAllPage, formulaResAllPage] =
         await this._collectDetectionRegions(imagesLayoutRes, npImages, imagesWithExtraInfo);
       stageTimings.region_collect = performance.now() - tRegion0;
+
+      // Calculate EXACT work units for progress tracking
+      // OCR det: count actual crops that will be processed
+      const numOcrDetCrops = this._countOcrDetCrops(ocrResAllPage);
+      const numFormulas = formulaResAllPage.length;
+      const numTables = tableResAllPage.length;
+      
+      // Initialize progress tracking with exact counts
+      if (this.formulaEnable && numFormulas > 0) {
+        this.progressTracker.initStage('formula', numFormulas);
+      }
+      if (numOcrDetCrops > 0) {
+        this.progressTracker.initStage('ocr_det', numOcrDetCrops);
+      }
+      if (this.tableEnable && numTables > 0) {
+        this.progressTracker.initStage('table', numTables);
+      }
+      // Note: ocr_rec stage initialized after detection completes
 
       // 3. Formula recognition
       if (this.formulaEnable) {
@@ -192,6 +237,12 @@ export class BatchAnalyze {
       }
       await yieldToBrowser();
 
+      // After OCR detection, count recognition spans
+      const numOcrRecSpans = this._countOcrRecSpans(imagesLayoutRes);
+      if (numOcrRecSpans > 0) {
+        this.progressTracker.initStage('ocr_rec', numOcrRecSpans);
+      }
+
       // 5. Table recognition
       if (this.tableEnable) {
         const tTable0 = performance.now();
@@ -200,10 +251,11 @@ export class BatchAnalyze {
       }
       await yieldToBrowser();
 
-      // 6. OCR text recognition (rec inference) — this is real model inference,
-      // historically mislabeled "postprocessing".
+      // 6. OCR text recognition (rec inference)
       const tRec0 = performance.now();
-      await runOcrRecPostprocess(imagesLayoutRes, this.ocrConfig);
+      await runOcrRecPostprocess(imagesLayoutRes, this.ocrConfig, (current, total) => {
+        this.progressTracker?.update('ocr_rec', current, total);
+      });
       stageTimings.ocr_rec = performance.now() - tRec0;
       await yieldToBrowser();
 
@@ -268,6 +320,9 @@ export class BatchAnalyze {
       }
       pdfDictList[i].rotate_label = rotateLabel;
       imgOriOrientationList.push([h, w, rotateLabel]);
+      
+      // Update progress with batch offset
+      this.progressTracker?.update('orientation', this.batchOffset + i + 1);
     }
 
     return imgOriOrientationList;
@@ -278,10 +333,30 @@ export class BatchAnalyze {
   // ---------------------------------------------------------------------------
 
   async _runLayoutDetection(npImages, pdfDictList, scaleList) {
-    let imagesLayoutRes = await this.model.layoutModel.batchPredict(
-      npImages, this.layoutBaseBatchSize
-    );
-    imagesLayoutRes = imagesLayoutRes.map(item => filterOverlapBoxes(item, this.useCustomOcr));
+    const totalPages = npImages.length;
+    let processedPages = 0;
+    
+    // Batch processing dengan progress tracking
+    const batchSize = this.layoutBaseBatchSize;
+    const batches = [];
+    for (let i = 0; i < npImages.length; i += batchSize) {
+      batches.push({ images: npImages.slice(i, i + batchSize), startIdx: i });
+    }
+    
+    const allResults = [];
+    for (const batch of batches) {
+      const batchResults = await this.model.layoutModel.batchPredict(batch.images, batchSize);
+      allResults.push(...batchResults);
+      processedPages += batch.images.length;
+      
+      // Update progress with batch offset
+      this.progressTracker?.update('layout', this.batchOffset + processedPages);
+      
+      // Yield untuk smooth UI update
+      await yieldToBrowser();
+    }
+    
+    let imagesLayoutRes = allResults.map(item => filterOverlapBoxes(item, this.useCustomOcr));
 
     if (this.useDetMode === 'txt') {
       imagesLayoutRes = removeLayoutInOriImages(imagesLayoutRes, pdfDictList, scaleList);
@@ -440,14 +515,30 @@ export class BatchAnalyze {
     if (!formulaImgs.length) return;
 
     try {
-      const formulaResults = await this.model.formulaModel.batchPredict(
-        formulaImgs, this.formulaBaseBatchSize
-      );
-      const recFormulas = formulaResults.recFormulas ?? [];
+      const totalFormulas = formulaImgs.length;
+      const batchSize = this.formulaBaseBatchSize;
+      const batches = [];
+      for (let i = 0; i < formulaImgs.length; i += batchSize) {
+        batches.push({ images: formulaImgs.slice(i, i + batchSize), startIdx: i });
+      }
+      
+      const allRecFormulas = [];
+      let processedFormulas = 0;
+      
+      for (const batch of batches) {
+        const batchResults = await this.model.formulaModel.batchPredict(batch.images, batchSize);
+        const batchRecFormulas = batchResults.recFormulas ?? [];
+        allRecFormulas.push(...batchRecFormulas);
+        processedFormulas += batch.images.length;
+        this.progressTracker?.update('formula', processedFormulas, totalFormulas);
+        
+        // Yield untuk smooth UI update
+        await yieldToBrowser();
+      }
 
       for (let i = 0; i < formulaResAllPage.length; i++) {
         const d = formulaResAllPage[i];
-        const res = recFormulas[i];
+        const res = allRecFormulas[i];
         if (res != null) {
           d.formula_res.latex = res;
         } else {
@@ -492,13 +583,28 @@ export class BatchAnalyze {
 
     const images = allOcrRegions.map(r => r.image);
     try {
-      const ocrTexts = await this.model.ocrModel.batchPredict(
-        images, { batchSize: this.ocrDetBaseBatchSize }
-      );
+      const totalRegions = images.length;
+      const batchSize = this.ocrDetBaseBatchSize;
+      const batches = [];
+      for (let i = 0; i < images.length; i += batchSize) {
+        batches.push({ images: images.slice(i, i + batchSize), startIdx: i });
+      }
+      
+      const allTexts = [];
+      let processedRegions = 0;
+      
+      for (const batch of batches) {
+        const batchTexts = await this.model.ocrModel.batchPredict(
+          batch.images, { batchSize }
+        );
+        allTexts.push(...batchTexts);
+        processedRegions += batch.images.length;
+        this.onStageProgress?.('ocr_det', processedRegions, totalRegions);
+      }
 
       for (let i = 0; i < allOcrRegions.length; i++) {
         const region = allOcrRegions[i];
-        const text = ocrTexts[i];
+        const text = allTexts[i];
         const res = region.res;
 
         region.layoutRes.push({
@@ -534,7 +640,61 @@ export class BatchAnalyze {
       await extractTextFromPdf(ocrResAllPage, pdfDictList, scaleList);
     }
 
-    await runOcrDetBatch(ocrResAllPage, atomModelManager, this.ocrConfig);
+    await runOcrDetBatch(ocrResAllPage, atomModelManager, this.ocrConfig, (current, total) => {
+      this.progressTracker?.update('ocr_det', current, total);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helper methods for exact work unit counting
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Count exact number of OCR detection crops that will be processed.
+   * Mirrors logic in collectOcrDetCrops from analyze_utils.js
+   */
+  _countOcrDetCrops(ocrResAllPage) {
+    const useDetMode = this.ocrConfig?.use_det_mode || "auto";
+    let count = 0;
+
+    for (const ocrResDict of ocrResAllPage) {
+      for (const res of ocrResDict.ocr_res_list) {
+        let ocrEnable = ocrResDict.ocr_enable;
+
+        if (!ocrResDict.ocr_enable) {
+          if (res.need_ocr_det) {
+            ocrEnable = true;
+          } else if (useDetMode === 'txt' || (useDetMode !== 'ocr' && !res.need_ocr_det)) {
+            continue;
+          }
+        }
+
+        count++;
+      }
+    }
+
+    return count;
+  }
+
+  /**
+   * Count exact number of OCR recognition spans that will be processed.
+   * Counts items with np_img that need recognition.
+   * Note: This must be called AFTER OCR detection has run.
+   */
+  _countOcrRecSpans(imagesLayoutRes) {
+    let count = 0;
+
+    for (const layoutRes of imagesLayoutRes) {
+      for (const item of layoutRes) {
+        if (item.category_id === CategoryId.OcrText && 
+            item.np_img !== undefined && 
+            item.lang !== undefined) {
+          count++;
+        }
+      }
+    }
+
+    return count;
   }
 
   // ---------------------------------------------------------------------------
@@ -641,6 +801,7 @@ export class BatchAnalyze {
           tableResDict.rect_table_img = null;
         }
         done++;
+        this.progressTracker?.update('table', done, total);
         if (done % 5 === 0) console.info(`[BatchAnalyze] Table Predict ${done}/${total}`);
         if (done % 2 === 0) await yieldToBrowser();
       }

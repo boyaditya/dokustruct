@@ -3498,6 +3498,7 @@ function displayJSON(contentList, target = 'content') {
 // ===== PROGRESS UPDATE =====
 function updateProgress(progress) {
   const percent = Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : 0;
+  
   if (el.progressFill) {
     el.progressFill.style.width = `${percent}%`;
   }
@@ -4745,23 +4746,6 @@ function subscribeToState() {
     if (el.progressMessage) {
       el.progressMessage.textContent = messages[stage] || 'Extracting content from the current document.';
     }
-    
-    // Update progress based on stage
-    const stageProgress = {
-      preprocessing: 15,
-      layout: 35,
-      ocr: 60,
-      formula: 75,
-      table: 85,
-      reading_order: 90,
-      reading_order: 90,
-      postprocessing: 95,
-    };
-    
-    const progress = stageProgress[stage] || 0;
-    if (progress > 0) {
-      updateProgress(progress);
-    }
   });
   
   _stateBag.subscribe(appState, 'timings', (timings) => {
@@ -4790,11 +4774,26 @@ function subscribeToState() {
     updateTimingsDisplay();
   });
   
-  _stateBag.subscribe(appState, 'progress', (progress) => {
-    if (typeof progress === 'number') {
-      updateProgress(progress);
-    } else if (progress && progress.total > 0) {
-      updateProgress((progress.current / progress.total) * 100);
+  _stateBag.subscribe(appState, 'progressPercent', (percent) => {
+    console.log(`[UI] progressPercent subscriber called: ${percent}`);
+    if (typeof percent === 'number' && percent >= 0) {
+      updateProgress(percent);
+    }
+  });
+  
+  _stateBag.subscribe(appState, 'progressStage', (stage) => {
+    if (stage && el.progressMessage) {
+      const stageMessages = {
+        orientation: 'Detecting document orientation...',
+        layout: 'Detecting layout structure...',
+        region_collect: 'Collecting content regions...',
+        formula: 'Recognizing formulas...',
+        ocr_det: 'Detecting text regions...',
+        ocr_rec: 'Recognizing text...',
+        table: 'Recognizing tables...',
+        seal_ocr: 'Processing seals...',
+      };
+      el.progressMessage.textContent = stageMessages[stage] || 'Processing document...';
     }
   });
   

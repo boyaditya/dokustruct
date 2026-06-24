@@ -215,6 +215,8 @@ function createInitialState() {
     isProcessing: false,
     processingStage: null,     // 'loading_models'|'preprocessing'|'layout'|'ocr'|'postprocessing'|'done'
     progress: { current: 0, total: 0 },
+    progressPercent: 0,        // Accurate progress percentage from ProgressTracker (0-100)
+    progressStage: null,       // Current stage being processed (orientation|layout|formula|ocr_det|ocr_rec|table)
     abortController: null,
 
     // ── Results ────────────────────────────────────────────────────────────

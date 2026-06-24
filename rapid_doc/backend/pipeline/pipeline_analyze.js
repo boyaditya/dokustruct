@@ -17,7 +17,7 @@ import { AbortException } from "../../utils/exceptions.js";
 import { makeHashable } from "../../utils/hash_utils.js";
 import { classify } from "../../utils/pdf_classify.js";
 import { loadImagesFromPdf, getOriImage } from "../../utils/pdf_image_tools.js";
-import { cleanMemory, getBatchRatio, initVramDetection } from "../../utils/model_utils.js";
+import { cleanMemory } from "../../utils/model_utils.js";
 import { getPage } from "../../utils/pdf_text_tool.js";
 import { AtomicModel } from "./model_list.js";
 import { yieldToBrowser, formatPipelineError } from "../../utils/browser_utils.js";
@@ -662,9 +662,8 @@ export async function batchImageAnalyze(
   const { BatchAnalyze } = await import("./batch_analyze.js");
 
   const modelManager = ModelSingleton.getInstance();
-  await initVramDetection();
 
-  const batchRatio = getBatchRatio();
+  const batchRatio = 1;
 
   const batchModel = new BatchAnalyze(
     modelManager, batchRatio,

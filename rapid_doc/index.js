@@ -135,7 +135,7 @@ export { makeHashable, bytesMd5, strMd5, strSha256 } from './utils/hash_utils.js
 
 export { RapidOcrModel } from './model/ocr/rapid_ocr.js';
 export { AtomModelSingleton, disposeModelResource, ocrModelInit } from './backend/pipeline/model_init.js';
-export { initVramDetection, getBatchRatio } from './utils/model_utils.js';
+export { cleanMemory } from './utils/model_utils.js';
 
 // ---------------------------------------------------------------------------
 // Utilities — output conversion

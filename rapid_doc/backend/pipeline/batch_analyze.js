@@ -277,6 +277,10 @@ export class BatchAnalyze {
       }
 
       this.lastStageTimings = stageTimings;
+      
+      // Mark progress as complete (will report 100%)
+      this.progressTracker?.complete();
+      
       return imagesLayoutRes;
     } finally {
       // Release any cv.Mat objects that we created from OffscreenCanvas/ImageBitmap

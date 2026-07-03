@@ -226,6 +226,10 @@
             <span>Download</span>
           </button>
         </section>
+        <div class="setup-file-loading hidden" id="setupFileLoading">
+          <span class="spinner"></span>
+          <span id="setupFileLoadingText">Loading document...</span>
+        </div>
         <div class="setup-run-footer">
           <button class="btn-primary setup-run-btn" id="startBtn" type="button" disabled>
             <i data-lucide="play"></i>
@@ -364,9 +368,9 @@
               <div class="progress-fill" id="progressFill"></div>
             </div>
             <div class="progress-percent" id="progressPercent">0%</div>
-            <button class="btn-secondary progress-cancel" id="progressCancelBtn" type="button">
-              <i data-lucide="square"></i>
-              <span>Cancel</span>
+            <button class="progress-cancel" id="progressCancelBtn" type="button" title="Cancel processing">
+              <i data-lucide="x"></i>
+              Cancel
             </button>
           </div>
         </div>

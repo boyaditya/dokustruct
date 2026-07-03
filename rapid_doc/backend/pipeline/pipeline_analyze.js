@@ -563,13 +563,15 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   let tmpStartPageId = 0;
   let batchIdx = 0;
 
-  // Create shared ProgressTracker and initialize with total pages
-  const { ProgressTracker } = await import('./progress_tracker.js');
-  const progressTracker = new ProgressTracker(on_progress);
-  
-  const hasOrientation = layout_config?.use_doc_orientation_classify ?? layout_config?.useDocOrientationClassify ?? false;
-  progressTracker.initStage('orientation', hasOrientation ? totalPages : 0);
-  progressTracker.initStage('layout', totalPages);
+  // Page-based progress: simple, accurate, understandable
+  // (replaces weighted ProgressTracker which gives misleading % on image-heavy PDFs)
+  let completedPages = 0;
+  const firePageProgress = () => {
+    if (on_progress && totalPages > 0) {
+      const pct = Math.round((completedPages / totalPages) * 100);
+      on_progress('pages', completedPages, totalPages, pct);
+    }
+  };
 
   while (!finished.every(Boolean)) {
     const activeIndexes = finished.map((f, i) => f ? -1 : i).filter(i => i >= 0);
@@ -584,9 +586,6 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
         orientation_config, checkbox_config,
         start_page_id: tmpStartPageId,
         end_page_id: tmpStartPageId + pdf_pages_batch - 1,
-        on_progress,
-        progress_tracker: progressTracker,
-        batch_offset: tmpStartPageId,
       });
 
     _accumulateTimings(pipelineTimings, windowTimings);
@@ -647,6 +646,11 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
       }
     }
 
+    // Page-based progress: update after each window completes
+    const windowPages = activeIndexes.reduce((sum, _, ai) => sum + (inferResults[ai]?.length || 0), 0);
+    completedPages += windowPages;
+    firePageProgress();
+
     // ── Incremental callback for streaming UX ──
     if (on_window_result && accumulatedPdfInfo.length > 0) {
       try {
@@ -662,12 +666,14 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
           `contentList ${windowContentList.length} items, ` +
           `unionMake took ${(tWindowUnion1 - tWindowUnion0).toFixed(0)}ms`
         );
+        // Pass imageWriter so the adapter can collect cut images incrementally
         on_window_result({
           markdown: windowMarkdown,
           contentList: windowContentList,
           pageCount: accumulatedPdfInfo.length,
           totalWindows,
           windowIndex: batchIdx,
+          imageWriter,
         });
         // Force a paint frame so the UI renders before next window's heavy work
         await yieldToBrowser();
@@ -698,6 +704,11 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   if (accumulatedPdfInfo.length > 0) {
     paraSplit(accumulatedPdfInfo);
     crossPageTableMerge(accumulatedPdfInfo);
+  }
+
+  // Mark progress as 100%
+  if (on_progress && totalPages > 0) {
+    on_progress('pages', totalPages, totalPages, 100);
   }
 
   return {

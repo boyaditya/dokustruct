@@ -785,14 +785,24 @@ export class PipelineAdapter {
       state.beginStage('layout');
       state.updateMemory();
 
-      // Progress callback from engine
+      // Progress callback from engine — page-based for windowed mode
       const onProgress = (stage, current, total, percent) => {
-        // Use ProgressTracker percentage for accurate progress
         if (typeof percent === 'number') {
           state.patch({ 
             progressPercent: percent,
             progressStage: stage,
+            progressCurrent: current,
+            progressTotal: total,
           });
+          // Direct DOM update — bypasses subscriber batching for reliable sync
+          const bar = document.getElementById('progressFill');
+          const pct = document.getElementById('progressPercent');
+          const title = document.getElementById('progressTitle');
+          if (bar) bar.style.width = `${percent}%`;
+          if (pct) pct.textContent = `${Math.round(percent)}%`;
+          if (title && total > 0) {
+            title.textContent = `Page ${current} of ${total}`;
+          }
         }
         state.updateMemory();
       };
@@ -802,10 +812,17 @@ export class PipelineAdapter {
 
       // Streaming callback for windowed processing — updates UI incrementally
       const pdfPagesBatch = config.pdf_pages_batch ?? 0;
+      // Capture imageWriter ref set by per-window resultToMiddleJson in the engine.
+      // We won't have it yet during the first callback, so we poll it from the docResult after completion.
+      let streamingImageWriter = null;
       const onWindowResult = pdfPagesBatch > 0
-        ? ({ markdown, contentList, pageCount }) => {
+        ? async ({ markdown, contentList, pageCount, imageWriter }) => {
+            streamingImageWriter = streamingImageWriter || imageWriter;
             console.log(`[adapter] onWindowResult fired — markdown: ${(markdown || '').length} chars, pages: ${pageCount}, contentList: ${contentList?.length ?? 0} items`);
-            state.updatePartialResults({ markdown, contentList, pageCount });
+            const images = streamingImageWriter
+              ? await this._collectImageMap(streamingImageWriter)
+              : {};
+            state.updatePartialResults({ markdown, contentList, pageCount, images });
             state.updateMemory();
           }
         : null;

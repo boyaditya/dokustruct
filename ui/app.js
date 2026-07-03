@@ -96,6 +96,8 @@ const refreshIcons = () => {
     createIcons({ icons: lucideIcons });
   } catch (error) {
     console.warn(`${UI_LOG_PREFIX} Failed to render icons:`, error);
+  } finally {
+    if (currentFileType === 'pdf') hideProgress();
   }
 };
 
@@ -863,6 +865,8 @@ async function init() {
   el.formulaModel = document.getElementById('formulaModel');
   el.tableEnable = document.getElementById('tableEnable');
   el.tableModel = document.getElementById('tableModel');
+  el.setupFileLoading = document.getElementById('setupFileLoading');
+  el.setupFileLoadingText = document.getElementById('setupFileLoadingText');
   el.startBtn = document.getElementById('startBtn');
   el.downloadBtn = document.getElementById('downloadBtn');
   el.toggleSidebar = document.getElementById('toggleSidebar');
@@ -1955,6 +1959,8 @@ async function loadFile(file, { replaceQueue = true } = {}) {
   
   // Load preview
   try {
+    if (el.setupFileLoading) el.setupFileLoading.classList.remove('hidden');
+    if (el.setupFileLoadingText) el.setupFileLoadingText.textContent = `Parsing ${file.name}...`;
     if (currentFileType === 'pdf') {
       await loadPdfPreview(file);
     } else {
@@ -1975,6 +1981,8 @@ async function loadFile(file, { replaceQueue = true } = {}) {
     showEmptyViewer();
     refreshAssetRequirements();
     showLoading('File loaded (preview unavailable)');
+  } finally {
+    if (el.setupFileLoading) el.setupFileLoading.classList.add('hidden');
   }
 }
 
@@ -2075,7 +2083,9 @@ async function buildSourceCanvas(file) {
 async function loadPdfPreview(file) {
   try {
     const pdfjsLib = await getPdfjsLib();
+    if (el.setupFileLoadingText) el.setupFileLoadingText.textContent = `Reading ${file.name}...`;
     const arrayBuffer = await file.arrayBuffer();
+    if (el.setupFileLoadingText) el.setupFileLoadingText.textContent = `Opening document...`;
     const myTask = pdfjsLib.getDocument({ data: arrayBuffer });
     pdfLoadingTask = myTask;
     
@@ -2089,9 +2099,17 @@ async function loadPdfPreview(file) {
     currentPage = 1;
 
     resetPageStack();
+    const updateFileLoadProgress = (pageNum) => {
+      if (el.setupFileLoadingText) {
+        const pct = Math.round((pageNum / totalPages) * 100);
+        el.setupFileLoadingText.textContent = `Rendering page ${pageNum} of ${totalPages} (${pct}%)`;
+      }
+    };
+    updateFileLoadProgress(1);
     for (let pageNum = 1; pageNum <= totalPages; pageNum += 1) {
       const record = pageNum === 1 ? getPageRecord(0) : createDocumentPage(pageNum - 1);
       await renderPdfPage(pageNum, record);
+      if (pageNum % 5 === 0 || pageNum === totalPages) updateFileLoadProgress(pageNum);
     }
     showPageStack();
     updatePageInfo();
@@ -2300,6 +2318,8 @@ async function runPipeline() {
   updateRunSummary(currentRunConfig);
   setWorkspaceMode('workspace');
   showProgress();
+  if (el.progressTitle) el.progressTitle.textContent = 'Preparing models...';
+  if (el.progressMessage) el.progressMessage.textContent = 'Loading AI models and warming up runtime.';
   
   try {
     if (warmupTimer) {
@@ -4764,32 +4784,8 @@ function subscribeToState() {
     updateUI();
   });
   
-  _stateBag.subscribe(appState, 'processingStage', (stage) => {
-    const titles = {
-      preprocessing: 'Preparing pages',
-      layout: 'Analyzing structure',
-      ocr: 'Reading text',
-      formula: 'Extracting formulas',
-      table: 'Extracting tables',
-      reading_order: 'Arranging content',
-      postprocessing: 'Generating output',
-    };
-    const messages = {
-      preprocessing: 'Loading and preparing each page for processing.',
-      layout: 'Identifying document sections like headings, paragraphs, and images.',
-      ocr: 'Extracting text from each document section.',
-      formula: 'Parsing mathematical formulas and equations.',
-      table: 'Detecting and reconstructing table rows and columns.',
-      reading_order: 'Organizing extracted content into the correct reading order.',
-      postprocessing: 'Creating Markdown and JSON output files.',
-    };
-    
-    if (el.progressTitle) {
-      el.progressTitle.textContent = titles[stage] || 'Processing document';
-    }
-    if (el.progressMessage) {
-      el.progressMessage.textContent = messages[stage] || 'Extracting content from the current document.';
-    }
+  _stateBag.subscribe(appState, 'processingStage', () => {
+    // Silenced — page-based progress via progressStage replaces this
   });
   
   _stateBag.subscribe(appState, 'timings', (timings) => {
@@ -4819,25 +4815,13 @@ function subscribeToState() {
   });
   
   _stateBag.subscribe(appState, 'progressPercent', (percent) => {
-    console.log(`[UI] progressPercent subscriber called: ${percent}`);
     if (typeof percent === 'number' && percent >= 0) {
+      const current = appState.get('progressCurrent') || 0;
+      const total = appState.get('progressTotal') || 0;
       updateProgress(percent);
-    }
-  });
-  
-  _stateBag.subscribe(appState, 'progressStage', (stage) => {
-    if (stage && el.progressMessage) {
-      const stageMessages = {
-        orientation: 'Detecting document orientation...',
-        layout: 'Detecting layout structure...',
-        region_collect: 'Collecting content regions...',
-        formula: 'Recognizing formulas...',
-        ocr_det: 'Detecting text regions...',
-        ocr_rec: 'Recognizing text...',
-        table: 'Recognizing tables...',
-        seal_ocr: 'Processing seals...',
-      };
-      el.progressMessage.textContent = stageMessages[stage] || 'Processing document...';
+      if (el.progressTitle && total > 0) {
+        el.progressTitle.textContent = `Page ${current} of ${total}`;
+      }
     }
   });
   

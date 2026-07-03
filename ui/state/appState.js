@@ -216,7 +216,9 @@ function createInitialState() {
     processingStage: null,     // 'loading_models'|'preprocessing'|'layout'|'ocr'|'postprocessing'|'done'
     progress: { current: 0, total: 0 },
     progressPercent: 0,        // Accurate progress percentage from ProgressTracker (0-100)
-    progressStage: null,       // Current stage being processed (orientation|layout|formula|ocr_det|ocr_rec|table)
+    progressStage: null,       // Current stage being processed (pages|layout|formula|ocr_det|ocr_rec|table)
+    progressCurrent: 0,        // Current page/work unit
+    progressTotal: 0,          // Total pages/work units
     abortController: null,
 
     // ── Results ────────────────────────────────────────────────────────────
@@ -697,7 +699,7 @@ export class AppState {
    * accumulating incrementally while remaining pages are still processing.
    * @param {{ markdown: string, contentList: object[], pageCount: number }} partial
    */
-  updatePartialResults({ markdown, contentList, pageCount }) {
+  updatePartialResults({ markdown, contentList, pageCount, images = {} }) {
     const prevResults = this.#state.results || {};
     this.patch({
       results: {
@@ -705,6 +707,7 @@ export class AppState {
         markdown,
         content_list: contentList,
         page_count: pageCount,
+        images: { ...(prevResults.images || {}), ...images },
       },
       showOutputPanel: true,
     });

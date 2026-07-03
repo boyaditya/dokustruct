@@ -2398,8 +2398,8 @@ function hideProgress() {
 }
 
 // ===== RESULTS DISPLAY =====
-function displayResults(results) {
-  hideProgress();
+function displayResults(results, opts = {}) {
+  const { keepProgress = false } = opts;
   
   if (!results) return;
   if (currentFile) {
@@ -2407,35 +2407,43 @@ function displayResults(results) {
     results.fileSize = currentFile.size;
   }
   setWorkspaceMode('workspace');
-  prepareLinkedBlocks(results);
+  
+  try {
+    prepareLinkedBlocks(results);
+  } catch (e) { console.warn('[displayResults] prepareLinkedBlocks error:', e?.message); }
   syncedPageIndex = null;
   syncedLinkId = null;
   totalPages = results.page_count || totalPages || 1;
   currentPage = 1;
   updatePageInfo();
   
-  // Display markdown with page separators
-  if (results.markdown) {
-    displayMarkdown(results.markdown, results.page_count || 1, results.content_list);
-  }
+  // Display markdown with page separators (always call, even for empty string)
+  const markdown = results.markdown ?? '';
+  displayMarkdown(markdown, results.page_count || 1, results.content_list);
   
-  displayJSON(results.content_list, 'content');
-  renderLayoutOverlay();
+  try {
+    displayJSON(results.content_list, 'content');
+  } catch (e) { console.warn('[displayResults] displayJSON error:', e?.message); }
+  
+  try {
+    renderLayoutOverlay();
+  } catch (e) { console.warn('[displayResults] renderLayoutOverlay error:', e?.message); }
+  
   currentStageTimings = getStageTimingsFromResults(results);
   results.processingTotalMs = Number(currentStageTimings.total || results.processingTotalMs || 0);
   updateTimingsDisplay(currentStageTimings);
   updateRunSummary(currentRunConfig);
   
-  // Save to history
-  if (currentFile) {
-    saveToHistory(currentFile, results);
+  if (!keepProgress) {
+    hideProgress();
+    if (currentFile) saveToHistory(currentFile, results);
+    if (el.downloadBtn) el.downloadBtn.disabled = false;
   }
-  
-  // Enable buttons
-  if (el.downloadBtn) el.downloadBtn.disabled = false;
   updateUI();
   
-  showLoading('Processing complete!');
+  if (!keepProgress) {
+    showLoading('Processing complete!');
+  }
 }
 
 function displayMarkdown(markdown, pageCount = 1, contentList = null) {
@@ -4834,9 +4842,17 @@ function subscribeToState() {
   });
   
   _stateBag.subscribe(appState, 'results', (results) => {
-    if (results) {
-      displayResults(results);
+    if (!results) return;
+    try {
+      const isProcessing = appState.get('isProcessing');
+      console.log(`[UI] results subscriber fired — isProcessing=${isProcessing}, markdown: ${(results.markdown || '').length} chars, pages: ${results.page_count}`);
+      if (!isProcessing) {
+        hideProgress();
+      }
+      displayResults(results, { keepProgress: isProcessing });
       updateTimingsDisplay();
+    } catch (e) {
+      console.error('[UI] results subscriber threw:', e);
     }
   });
   

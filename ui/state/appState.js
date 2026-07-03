@@ -692,6 +692,25 @@ export class AppState {
   }
 
   /**
+   * Update partial results during windowed processing.
+   * Shows the output panel on first call so the user can see content
+   * accumulating incrementally while remaining pages are still processing.
+   * @param {{ markdown: string, contentList: object[], pageCount: number }} partial
+   */
+  updatePartialResults({ markdown, contentList, pageCount }) {
+    const prevResults = this.#state.results || {};
+    this.patch({
+      results: {
+        ...prevResults,
+        markdown,
+        content_list: contentList,
+        page_count: pageCount,
+      },
+      showOutputPanel: true,
+    });
+  }
+
+  /**
    * Mark processing as failed (not user-cancelled).
    * @param {Error|string} error
    */

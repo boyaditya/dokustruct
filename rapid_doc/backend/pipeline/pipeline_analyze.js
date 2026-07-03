@@ -21,7 +21,12 @@ import { cleanMemory } from "../../utils/model_utils.js";
 import { getPage } from "../../utils/pdf_text_tool.js";
 import { AtomicModel } from "./model_list.js";
 import { yieldToBrowser, formatPipelineError } from "../../utils/browser_utils.js";
-import { releaseImageBitmap } from "../../utils/resource_utils.js";
+import { releaseImageBitmap, releaseCanvas } from "../../utils/resource_utils.js";
+import { resultToMiddleJson } from "./model_json_to_middle_json.js";
+import { unionMake } from "./pipeline_middle_json_mkcontent.js";
+import { paraSplit } from "./para_split.js";
+import { crossPageTableMerge } from "../utils/utils.js";
+import { MemoryDataWriter } from "../../data/data_reader_writer/index.js";
 
 const PDF_IMAGE_DPI = 200;
 const PDF_POINTS_PER_INCH = 72;
@@ -259,17 +264,19 @@ export async function docAnalyze(
     end_page_id = null,
     pdf_pages_batch = 0,
     on_progress = null,
+    on_window_result = null,
   } = {}
 ) {
   const normalizedPdfBytesList = await _normalizeInputBytes(pdfBytesList);
 
   // Windowed processing for large PDFs
   if (pdf_pages_batch > 0) {
+    console.log(`[docAnalyze] Windowed mode — pdf_pages_batch=${pdf_pages_batch}, pages=${normalizedPdfBytesList.length} PDF(s), has on_window_result=${!!on_window_result}`);
     return await _docAnalyzeWindowed(normalizedPdfBytesList, {
       lang_list, parse_method, formula_enable, table_enable,
       force_ocr, layout_config, ocr_config, formula_config, table_config,
       orientation_config, checkbox_config,
-      start_page_id, end_page_id, pdf_pages_batch, on_progress,
+      start_page_id, end_page_id, pdf_pages_batch, on_progress, on_window_result,
     });
   }
 
@@ -523,7 +530,7 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   const {
     lang_list: langListOpt, parse_method, force_ocr, formula_enable, table_enable,
     layout_config, ocr_config, formula_config, table_config, orientation_config, checkbox_config,
-    start_page_id, end_page_id, pdf_pages_batch, on_progress,
+    start_page_id, end_page_id, pdf_pages_batch, on_progress, on_window_result,
   } = opts;
 
   const langList = langListOpt || new Array(pdfBytesList.length).fill('ch');
@@ -545,9 +552,11 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
     }
   }
 
-  const allInferResults = pdfBytesList.map(() => []);
-  const allImageListsAccum = pdfBytesList.map(() => []);
-  const allPdfDocsAccum = pdfBytesList.map(() => []);
+  const totalWindows = Math.ceil(totalPages / (pdf_pages_batch || 1));
+
+  // Per-window accumulation: only compact pdf_info (not raw canvas/inference data)
+  const accumulatedPdfInfo = [];
+  const imageWriter = new MemoryDataWriter();
   const ocrEnabledList = [];
 
   const finished = new Array(pdfBytesList.length).fill(false);
@@ -582,19 +591,95 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
 
     _accumulateTimings(pipelineTimings, windowTimings);
 
+    // ── Per-window conversion to middle JSON (the key fix for memory) ──
     for (let ai = 0; ai < activeIndexes.length; ai++) {
       const origIdx = activeIndexes[ai];
-      const pageResults = inferResults[ai] || [];
-      allInferResults[origIdx].push(...pageResults);
-      allImageListsAccum[origIdx].push(...(allImageLists[ai] || []));
-      allPdfDocsAccum[origIdx].push(...(allPdfDocs[ai] || []));
+      const modelList = inferResults[ai] || [];
+      const imagesList = allImageLists[ai] || [];
+      const pageDictList = allPdfDocs[ai] || [];
+      const lang = langList[origIdx] || 'ch';
 
       if (batchIdx === 0 && ocrEnabled[ai] !== undefined) {
         ocrEnabledList[origIdx] = ocrEnabled[ai];
       }
 
-      if (pageResults.length < pdf_pages_batch) {
+      if (modelList.length === 0) {
+        if (modelList.length < pdf_pages_batch) finished[origIdx] = true;
+        continue;
+      }
+
+      try {
+        const middleJson = await resultToMiddleJson(
+          modelList,
+          imagesList,
+          pageDictList,
+          imageWriter,
+          {
+            lang,
+            ocr_enable: ocrEnabled[ai] ?? ocrEnabledList[origIdx] ?? false,
+            formula_enabled: formula_enable,
+            ocr_config,
+            image_config: null,
+            batch_idx: batchIdx,
+            pdf_pages_batch,
+            skipCrossPageMerge: true, // defer crossPageTableMerge until all windows complete
+            // paraSplit runs per-window so unionMake produces readable markdown immediately
+          }
+        );
+
+        accumulatedPdfInfo.push(...(middleJson.pdf_info || []));
+      } catch (err) {
+        if (err instanceof AbortException) throw err;
+        console.warn(
+          `[Pipeline] resultToMiddleJson failed for window ${batchIdx + 1}, ` +
+          `PDF ${origIdx}: ${err?.message || err}`
+        );
+      }
+
+      // ── Eager disposal: zero OffscreenCanvas dimensions, release GPU buffers ──
+      for (const img of imagesList) {
+        releaseCanvas(img?.img_pil);
+        releaseCanvas(img);
+      }
+
+      if (modelList.length < pdf_pages_batch) {
         finished[origIdx] = true;
+      }
+    }
+
+    // ── Incremental callback for streaming UX ──
+    if (on_window_result && accumulatedPdfInfo.length > 0) {
+      try {
+        const tWindowUnion0 = performance.now();
+        const windowMarkdown = unionMake(accumulatedPdfInfo, 'mm_markdown', 'images') || '';
+        const windowContentList = unionMake(accumulatedPdfInfo, 'content_list', 'images') || [];
+        const tWindowUnion1 = performance.now();
+        console.log(
+          `[_docAnalyzeWindowed] Firing on_window_result — ` +
+          `window ${batchIdx + 1}/${totalWindows}, ` +
+          `pages ${accumulatedPdfInfo.length}, ` +
+          `markdown ${windowMarkdown.length} chars, ` +
+          `contentList ${windowContentList.length} items, ` +
+          `unionMake took ${(tWindowUnion1 - tWindowUnion0).toFixed(0)}ms`
+        );
+        on_window_result({
+          markdown: windowMarkdown,
+          contentList: windowContentList,
+          pageCount: accumulatedPdfInfo.length,
+          totalWindows,
+          windowIndex: batchIdx,
+        });
+        // Force a paint frame so the UI renders before next window's heavy work
+        await yieldToBrowser();
+        if (typeof requestAnimationFrame !== 'undefined') {
+          await new Promise(r => requestAnimationFrame(r));
+          await new Promise(r => requestAnimationFrame(r));
+        }
+      } catch (err) {
+        console.warn(
+          `[Pipeline] on_window_result callback failed for window ${batchIdx + 1}: ` +
+          `${err?.message || err}`, err
+        );
       }
     }
 
@@ -609,7 +694,20 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
     await yieldToBrowser();
   }
 
-  return [allInferResults, allImageListsAccum, allPdfDocsAccum, langList, ocrEnabledList, pipelineTimings];
+  // ── Final cross-page processing (deferred from per-window skipGlobalPost) ──
+  if (accumulatedPdfInfo.length > 0) {
+    paraSplit(accumulatedPdfInfo);
+    crossPageTableMerge(accumulatedPdfInfo);
+  }
+
+  return {
+    _windowed: true,
+    pdf_info: accumulatedPdfInfo,
+    imageWriter,
+    langList,
+    ocrEnabledList,
+    pipelineTimings,
+  };
 }
 
 /**

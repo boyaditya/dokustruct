@@ -464,6 +464,16 @@ export class PipelineAdapter {
     this._preparePromise = null;
   }
 
+  /**
+   * Returns true if the current config uses windowed (streaming) processing.
+   * Can be called before a run starts — depends only on execution provider.
+   * @param {import('../state/appState.js').AppState} [state]
+   * @returns {boolean}
+   */
+  _isWindowedMode(state = appState) {
+    return getDefaultPdfPagesBatch(state) > 0;
+  }
+
   // ── Registration ──────────────────────────────────────────────────────────
 
   /**
@@ -790,11 +800,22 @@ export class PipelineAdapter {
       // Invoke engine. The API surface may differ; try multiple call styles:
       let rawResult = null;
 
+      // Streaming callback for windowed processing — updates UI incrementally
+      const pdfPagesBatch = config.pdf_pages_batch ?? 0;
+      const onWindowResult = pdfPagesBatch > 0
+        ? ({ markdown, contentList, pageCount }) => {
+            console.log(`[adapter] onWindowResult fired — markdown: ${(markdown || '').length} chars, pages: ${pageCount}, contentList: ${contentList?.length ?? 0} items`);
+            state.updatePartialResults({ markdown, contentList, pageCount });
+            state.updateMemory();
+          }
+        : null;
+
       if (typeof engine.docAnalyze === 'function') {
         // Primary: rapid_doc/index.js exports docAnalyze(pdfBytesList, opts)
         // .slice(0) makes a fresh copy so the original fileBytes is never detached
         // by PDF.js's postMessage/structuredClone transfer semantics
         // docAnalyze returns [inferResults, allImageLists, allPdfDocs, langList, ocrEnabledList]
+        //   OR { _windowed: true, pdf_info, imageWriter, ... } for windowed mode
         throwIfAborted(signal);        const docResult = await engine.docAnalyze(
           [new Uint8Array(fileBytes.slice(0))],
           {
@@ -811,12 +832,60 @@ export class PipelineAdapter {
             checkbox_config: config.checkbox_config,
             start_page_id:  config.start_page_id ?? 0,
             end_page_id:    config.end_page_id ?? null,
-            pdf_pages_batch: config.pdf_pages_batch ?? 0,
+            pdf_pages_batch: pdfPagesBatch,
             on_progress:    onProgress,
+            on_window_result: onWindowResult,
           }
         );
 
-        if (Array.isArray(docResult) && docResult.length >= 5 &&
+        // ── Windowed mode: engine already did per-window resultToMiddleJson ──
+        if (docResult && docResult._windowed) {
+          const { pdf_info: pdfInfo, imageWriter, pipelineTimings } = docResult;
+          _imageWriter = imageWriter;
+
+          const tMarkdown0 = performance.now();
+          let markdown = engine.unionMake(pdfInfo, 'mm_markdown', 'images') || '';
+          postBreakdown.markdown_union_ms = performance.now() - tMarkdown0;
+
+          const tContent0 = performance.now();
+          let contentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
+          postBreakdown.content_list_union_ms = performance.now() - tContent0;
+
+          // Fallback check for markdown/content viability
+          const markdownHasContent = textHasContent(markdown);
+          const contentListHasContent = hasMeaningfulContentList(contentList);
+          const ocrEnabledWindowed = true; // ocr_enable handled per-window already
+          if (!ocrEnabledWindowed && (!markdownHasContent || !contentListHasContent)) {
+            const searchableFallback = extractSearchableTextFallback([]);
+            if (searchableFallback.markdown) {
+              markdown = searchableFallback.markdown;
+              contentList = searchableFallback.contentList;
+            }
+          }
+
+          const shouldKeepImages = Boolean(
+            markdownHasImageRefs(markdown)
+            || config.dump_middle_json
+            || config.dump_model_output
+            || config.dump_md_html
+            || config.dump_md_docx
+          );
+          throwIfAborted(signal);
+          const images = shouldKeepImages ? await this._collectImageMap(imageWriter) : {};
+
+          rawResult = {
+            markdown,
+            content_list:  contentList,
+            middle_json:   config.dump_middle_json ? { pdf_info: pdfInfo } : null,
+            model_output:  config.dump_model_output ? [] : null,
+            layout_label_blocks: extractLayoutLabelBlocks({ pdf_info: pdfInfo }),
+            page_count:    pdfInfo.length,
+            images,
+            layout_dets:   [],
+            page_info:     pdfInfo[0]?.page_size ? { width: pdfInfo[0].page_size[0], height: pdfInfo[0].page_size[1] } : null,
+            _timings:      pipelineTimings,
+          };
+        } else if (Array.isArray(docResult) && docResult.length >= 5 &&
             typeof engine.resultToMiddleJson === 'function' &&
             typeof engine.unionMake === 'function') {
           // ── Post-process: model output → middle JSON → markdown ──

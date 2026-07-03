@@ -198,6 +198,12 @@ export async function resultToMiddleJson(
     image_config = null,
     batch_idx = 0,
     pdf_pages_batch = 0,
+    /** Skip paraSplit + crossPageTableMerge — used by windowed pipeline
+     *  which defers these cross-page operations until all windows complete. */
+    skipGlobalPost = false,
+    /** Skip only crossPageTableMerge. paraSplit runs per-window
+     *  so unionMake can produce streaming markdown immediately. */
+    skipCrossPageMerge = false,
   } = {}
 ) {
   if (!modelList || !modelList.length) {
@@ -257,8 +263,13 @@ export async function resultToMiddleJson(
     await postProcessOcr(middleJson, lang, ocr_config);
   }
 
+  // paraSplit must always run per-window — it arranges blocks within pages
+  // so unionMake produces readable markdown immediately for streaming UX.
   paraSplit(middleJson.pdf_info);
-  crossPageTableMerge(middleJson.pdf_info);
+
+  if (!skipGlobalPost && !skipCrossPageMerge) {
+    crossPageTableMerge(middleJson.pdf_info);
+  }
 
   if (modelList.length >= 10) {
     // Awaited so transient WebGPU work has chance to flush before the next

@@ -1959,18 +1959,62 @@ input:focus-visible {
 }
 
 .progress-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(248, 250, 252, 0.68);
-    backdrop-filter: blur(2px);
+    position: relative;
+    order: -1;
+    flex-shrink: 0;
+    background: var(--white);
+    backdrop-filter: none;
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 24px;
-    z-index: 1000;
+    justify-content: flex-start;
+    padding: 4px 16px;
+    border-bottom: 1px solid var(--border);
+    z-index: 1;
+}
+
+.progress-overlay .progress-surface {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+}
+
+.progress-overlay .spinner {
+    width: 14px;
+    height: 14px;
+    border-width: 1.5px;
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.progress-overlay #progressTitle {
+    font-size: 12px;
+    margin: 0;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.progress-overlay #progressMessage { display: none; }
+.progress-overlay .progress-time { display: none; }
+
+.progress-overlay .progress-bar {
+    flex: 1;
+    max-width: 200px;
+    margin: 0 4px;
+}
+
+.progress-overlay .progress-percent {
+    font-size: 11px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.progress-overlay .progress-cancel {
+    font-size: 11px;
+    padding: 3px 10px;
+    flex-shrink: 0;
+    margin-left: 4px;
 }
 
 /* ===== LUCIDE ICON SIZING ===== */

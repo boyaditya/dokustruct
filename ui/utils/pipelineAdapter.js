@@ -24,6 +24,12 @@ import {
 import { getFormulaAssets, summarizeAssets } from '../../rapid_doc/utils/model_url_map.js';
 import { PDF_PAGES_BATCH } from '../../rapid_doc/utils/browser_utils.js';
 
+/** Pages per chunk for GPU VRAM hygiene — large PDFs are split into sequential
+ * chunks, each processed as an independent docAnalyze() invocation with
+ * engineReset() between chunks to return ORT-Web's JSEP buffer pool to the
+ * driver. Tuneable via config.vram_chunk_size. */
+const VRAM_CHUNK_SIZE = 50;
+
 // ---------------------------------------------------------------------------
 // Image helpers
 // ---------------------------------------------------------------------------
@@ -450,6 +456,60 @@ function extractLayoutLabelBlocks(middleJson) {
 }
 
 // ---------------------------------------------------------------------------
+// VRAM chunking helpers — used by _runFullAnalysis to split large PDFs
+// into sequential chunks, resetting the GPU device between chunks.
+// ---------------------------------------------------------------------------
+
+/**
+ * Lightweight page count — reads PDF metadata only, no rendering.
+ * Returns Infinity for corrupt/unreadable PDFs (unchunkable fallback).
+ * @param {ArrayBuffer} pdfBytes
+ * @returns {Promise<number>}
+ */
+async function countPdfPages(pdfBytes) {
+  try {
+    const { PDFDocument } = await import('pdf-lib');
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    return doc.getPageCount();
+  } catch {
+    return Infinity;
+  }
+}
+
+/**
+ * Offset page_idx in pdf_info and content_list to absolute page numbers
+ * after a chunk. Mutates in-place.
+ * @param {object[]} pdfInfo
+ * @param {object[]} contentList
+ * @param {number} offset
+ */
+function offsetPageIndices(pdfInfo, contentList, offset) {
+  if (!offset) return;
+  for (const page of pdfInfo || []) {
+    if (typeof page.page_idx === 'number') page.page_idx += offset;
+  }
+  for (const entry of contentList || []) {
+    if (typeof entry.page_idx === 'number') entry.page_idx += offset;
+  }
+}
+
+/**
+ * Sum timings keys from two stage-timing objects.
+ * @param {object} a
+ * @param {object} b
+ * @returns {object}
+ */
+function mergeTimings(a, b) {
+  if (!a) return b ? { ...b } : {};
+  if (!b) return { ...a };
+  const out = { ...a };
+  for (const key of Object.keys(b)) {
+    out[key] = (out[key] || 0) + (b[key] || 0);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // PipelineAdapter class
 // ---------------------------------------------------------------------------
 
@@ -745,6 +805,8 @@ export class PipelineAdapter {
     let _imageWriter = null;
     let _engineRef = null;
     let _runFailedFatally = false;
+    /** @type {Array<{imageWriter: any, chunkStart: number}>|null} */
+    let _chunkImageWriters = null;
 
     try {
       // ── Step 1: ensure models present ─────────────────────────────────────
@@ -768,8 +830,29 @@ export class PipelineAdapter {
         rawFileBytes.byteOffset + rawFileBytes.byteLength
       );
 
+      // ── Chunk detection for large PDFs ────────────────────────────────────
+      // Done inside preprocessing so the progress overlay stays visible.
+      // Reads only PDF metadata (no rendering), ~50-200ms for typical files.
+      const pdfPagesBatch = getDefaultPdfPagesBatch(state);
+      const shouldDetectPages = pdfPagesBatch > 0 && !isImageFile(file);
+      let totalPages = null;
+      let useChunking = false;
+      let chunkSize = VRAM_CHUNK_SIZE;
+
+      if (shouldDetectPages) {
+        totalPages = await countPdfPages(fileBytes);
+        // Use config if available (after _buildConfig), else use default.
+        // We re-read chunkSize from config after it's built below.
+        useChunking = Number.isFinite(totalPages) && totalPages > chunkSize;
+      }
+
       // ── Step 3: build pipeline config ─────────────────────────────────────
       const config = this._buildConfig(state, file);
+
+      // Refine chunk detection with config's override
+      chunkSize = config.vram_chunk_size ?? VRAM_CHUNK_SIZE;
+      useChunking = shouldDetectPages && Number.isFinite(totalPages) && totalPages > chunkSize;
+      const totalChunks = useChunking ? Math.ceil(totalPages / chunkSize) : 1;
 
       // ── Step 4: load engine ────────────────────────────────────────────────
       throwIfAborted(signal);      const engine = await getEngine();
@@ -798,10 +881,17 @@ export class PipelineAdapter {
           const bar = document.getElementById('progressFill');
           const pct = document.getElementById('progressPercent');
           const title = document.getElementById('progressTitle');
+          const timeEl = document.getElementById('timeElapsed');
+          const overlay = document.getElementById('progressOverlay');
           if (bar) bar.style.width = `${percent}%`;
           if (pct) pct.textContent = `${Math.round(percent)}%`;
           if (title && total > 0) {
             title.textContent = `Page ${current} of ${total}`;
+          }
+          // Direct timer update bypassing setInterval (throttled under WebGPU load).
+          if (timeEl && overlay?.dataset.timerStart) {
+            const elapsed = (Date.now() - Number(overlay.dataset.timerStart)) / 1000;
+            timeEl.textContent = `${elapsed.toFixed(1)}s`;
           }
         }
         state.updateMemory();
@@ -810,73 +900,122 @@ export class PipelineAdapter {
       // Invoke engine. The API surface may differ; try multiple call styles:
       let rawResult = null;
 
-      // Streaming callback for windowed processing — updates UI incrementally
-      const pdfPagesBatch = config.pdf_pages_batch ?? 0;
-      // Capture imageWriter ref set by per-window resultToMiddleJson in the engine.
-      // We won't have it yet during the first callback, so we poll it from the docResult after completion.
-      let streamingImageWriter = null;
-      const onWindowResult = pdfPagesBatch > 0
-        ? async ({ markdown, contentList, pageCount, imageWriter }) => {
-            streamingImageWriter = streamingImageWriter || imageWriter;
-            console.log(`[adapter] onWindowResult fired — markdown: ${(markdown || '').length} chars, pages: ${pageCount}, contentList: ${contentList?.length ?? 0} items`);
-            const images = streamingImageWriter
-              ? await this._collectImageMap(streamingImageWriter)
-              : {};
-            state.updatePartialResults({ markdown, contentList, pageCount, images });
-            state.updateMemory();
-          }
-        : null;
-
-      if (typeof engine.docAnalyze === 'function') {
-        // Primary: rapid_doc/index.js exports docAnalyze(pdfBytesList, opts)
-        // .slice(0) makes a fresh copy so the original fileBytes is never detached
-        // by PDF.js's postMessage/structuredClone transfer semantics
-        // docAnalyze returns [inferResults, allImageLists, allPdfDocs, langList, ocrEnabledList]
-        //   OR { _windowed: true, pdf_info, imageWriter, ... } for windowed mode
-        throwIfAborted(signal);        const docResult = await engine.docAnalyze(
-          [new Uint8Array(fileBytes.slice(0))],
-          {
-            lang_list:      [config.language ?? 'ch'],
-            parse_method:   config.parse_method,
-            force_ocr:      config.force_ocr,
-            formula_enable: config.formula_enable,
-            table_enable:   config.table_enable,
-            layout_config:  config.layout_config,
-            ocr_config:     config.ocr_config,
-            formula_config: config.formula_config,
-            table_config:   config.table_config,
-            orientation_config: config.orientation_config,
-            checkbox_config: config.checkbox_config,
-            start_page_id:  config.start_page_id ?? 0,
-            end_page_id:    config.end_page_id ?? null,
-            pdf_pages_batch: pdfPagesBatch,
-            on_progress:    onProgress,
-            on_window_result: onWindowResult,
-          }
+      if (useChunking) {
+        // ── Chunked path: sequential docAnalyze invocations with engineReset ──
+        console.log(
+          `[pipelineAdapter] Chunked mode — ${totalPages} pages in ` +
+          `${totalChunks} chunks of ≤${chunkSize} pages with engineReset between chunks`
         );
 
-        // ── Windowed mode: engine already did per-window resultToMiddleJson ──
-        if (docResult && docResult._windowed) {
+        let accumulatedMarkdown = '';
+        let accumulatedContentList = [];
+        let accumulatedLayoutBlocks = [];
+        let accumulatedImages = {};
+        let accumulatedTimings = null;
+        let accumulatedPageCount = 0;
+        let accumulatedPdfInfo = config.dump_middle_json ? [] : null;
+        let lastPageInfo = null;
+        const allImageWriters = [];
+
+        // Per-chunk streaming accumulator — concat across chunks so the UI
+        // shows progressive total markdown, not just the current chunk's.
+        let prevChunksMarkdown = '';
+        let prevChunksContentList = [];
+
+        for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+          throwIfAborted(signal);
+          const chunkStart = chunkIdx * chunkSize;
+          const chunkEnd = Math.min(chunkStart + chunkSize - 1, totalPages - 1);
+          const chunkPages = chunkEnd - chunkStart + 1;
+
+          console.log(
+            `[pipelineAdapter] Chunk ${chunkIdx + 1}/${totalChunks} — ` +
+            `pages ${chunkStart}-${chunkEnd} (${chunkPages} pages)`
+          );
+
+          const chunkOnProgress = (stage, current, total, percent) => {
+            const overallCurrent = chunkStart + current;
+            const overallTotal = totalPages;
+            const overallPct = Math.round((overallCurrent / overallTotal) * 100);
+            onProgress(stage, overallCurrent, overallTotal, overallPct);
+          };
+
+          const docResult = await engine.docAnalyze(
+            [new Uint8Array(fileBytes.slice(0))],
+            {
+              lang_list:      [config.language ?? 'ch'],
+              parse_method:   config.parse_method,
+              force_ocr:      config.force_ocr,
+              formula_enable: config.formula_enable,
+              table_enable:   config.table_enable,
+              layout_config:  config.layout_config,
+              ocr_config:     config.ocr_config,
+              formula_config: config.formula_config,
+              table_config:   config.table_config,
+              orientation_config: config.orientation_config,
+              checkbox_config: config.checkbox_config,
+              start_page_id:  chunkStart,
+              end_page_id:    chunkEnd,
+              pdf_pages_batch: pdfPagesBatch,
+              on_progress:    chunkOnProgress,
+              // Let the engine fire per-window streaming callbacks so the UI
+              // updates incrementally within each chunk. The adapter's
+              // streamingImageWriter is chunk-scoped — each chunk gets its own.
+              on_window_result: async ({ markdown: wMarkdown, contentList: wContentList, pageCount: wPageCount, imageWriter }) => {
+                const chunkImages = imageWriter
+                  ? await this._collectImageMap(imageWriter)
+                  : {};
+                Object.assign(accumulatedImages, chunkImages);
+                // Prepend previous chunks' markdown so streaming shows full
+                // document so far, not just current chunk's pages.
+                const fullMarkdown = prevChunksMarkdown
+                  ? prevChunksMarkdown + '\n\n' + wMarkdown
+                  : wMarkdown;
+                const fullContentList = prevChunksContentList
+                  ? [...prevChunksContentList, ...wContentList]
+                  : [...wContentList];
+                const absolutePageCount = chunkStart + wPageCount;
+                state.updatePartialResults({
+                  markdown: fullMarkdown,
+                  contentList: fullContentList,
+                  pageCount: absolutePageCount,
+                  images: accumulatedImages,
+                });
+                state.updateMemory();
+              },
+            }
+          );
+
+          if (!docResult || !docResult._windowed) {
+            throw new Error(
+              `Chunk ${chunkIdx + 1} did not return windowed mode result. ` +
+              `This is unexpected — all chunks should use windowed processing.`
+            );
+          }
+
           const { pdf_info: pdfInfo, imageWriter, pipelineTimings } = docResult;
-          _imageWriter = imageWriter;
+          allImageWriters.push({ imageWriter, chunkStart });
 
           const tMarkdown0 = performance.now();
           let markdown = engine.unionMake(pdfInfo, 'mm_markdown', 'images') || '';
-          postBreakdown.markdown_union_ms = performance.now() - tMarkdown0;
+          postBreakdown.markdown_union_ms += performance.now() - tMarkdown0;
 
           const tContent0 = performance.now();
-          let contentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
-          postBreakdown.content_list_union_ms = performance.now() - tContent0;
+          const chunkContentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
+          postBreakdown.content_list_union_ms += performance.now() - tContent0;
 
-          // Fallback check for markdown/content viability
+          // Offset page_idx to absolute page numbers AFTER unionMake, so
+          // unionMake reads chunk-relative pages and we offset the output.
+          offsetPageIndices(pdfInfo, chunkContentList, chunkStart);
+
           const markdownHasContent = textHasContent(markdown);
-          const contentListHasContent = hasMeaningfulContentList(contentList);
-          const ocrEnabledWindowed = true; // ocr_enable handled per-window already
-          if (!ocrEnabledWindowed && (!markdownHasContent || !contentListHasContent)) {
+          const contentListHasContent = hasMeaningfulContentList(chunkContentList);
+          if (!markdownHasContent && !contentListHasContent) {
             const searchableFallback = extractSearchableTextFallback([]);
             if (searchableFallback.markdown) {
               markdown = searchableFallback.markdown;
-              contentList = searchableFallback.contentList;
+              chunkContentList.length = 0;
+              chunkContentList.push(...searchableFallback.contentList);
             }
           }
 
@@ -887,120 +1026,283 @@ export class PipelineAdapter {
             || config.dump_md_html
             || config.dump_md_docx
           );
-          throwIfAborted(signal);
-          const images = shouldKeepImages ? await this._collectImageMap(imageWriter) : {};
 
-          rawResult = {
-            markdown,
-            content_list:  contentList,
-            middle_json:   config.dump_middle_json ? { pdf_info: pdfInfo } : null,
-            model_output:  config.dump_model_output ? [] : null,
-            layout_label_blocks: extractLayoutLabelBlocks({ pdf_info: pdfInfo }),
-            page_count:    pdfInfo.length,
-            images,
-            layout_dets:   [],
-            page_info:     pdfInfo[0]?.page_size ? { width: pdfInfo[0].page_size[0], height: pdfInfo[0].page_size[1] } : null,
-            _timings:      pipelineTimings,
-          };
-        } else if (Array.isArray(docResult) && docResult.length >= 5 &&
-            typeof engine.resultToMiddleJson === 'function' &&
-            typeof engine.unionMake === 'function') {
-          // ── Post-process: model output → middle JSON → markdown ──
-          const [inferResults, allImageLists, allPdfDocs, langList, ocrEnabledList, stageTimings = null] = docResult;
-          _allImageLists = allImageLists;
-          const modelList    = inferResults[0];   // first (only) PDF
-          const imagesList   = allImageLists[0];
-          const pageDictList = allPdfDocs[0];
-          const lang         = langList[0]  ?? config.language ?? 'ch';
-          const ocrEnabled   = ocrEnabledList[0] ?? false;
-
-          // MemoryDataWriter stub — collects cut images in-memory
-          const imageWriter = (typeof engine.MemoryDataWriter === 'function')
-            ? new engine.MemoryDataWriter()
-            : { files: {}, write(path, bytes) { this.files[path] = bytes; } };
-          _imageWriter = imageWriter;
-
-          const tMiddle0 = performance.now();
-          throwIfAborted(signal);          const middleJson = await engine.resultToMiddleJson(
-            modelList,
-            imagesList,
-            pageDictList,
-            imageWriter,
-            {
-              lang,
-              ocr_enable:      ocrEnabled,
-              formula_enabled: config.formula_enable ?? true,
-              ocr_config:      config.ocr_config  ?? null,
-              image_config:    null,
-            }
-          );
-          postBreakdown.middle_json_ms = performance.now() - tMiddle0;
-
-          const pdfInfo = middleJson?.pdf_info ?? [];
-          const tMarkdown0 = performance.now();
-          let markdown = engine.unionMake(pdfInfo, 'mm_markdown', 'images') || '';
-          postBreakdown.markdown_union_ms = performance.now() - tMarkdown0;
-
-          const tContent0 = performance.now();
-          let contentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
-          postBreakdown.content_list_union_ms = performance.now() - tContent0;
-
-          const markdownHasContent = textHasContent(markdown);
-          const contentListHasContent = hasMeaningfulContentList(contentList);
-          if (!ocrEnabled && (!markdownHasContent || !contentListHasContent)) {
-            const searchableFallback = extractSearchableTextFallback(pageDictList);
-            if (searchableFallback.markdown) {
-              markdown = searchableFallback.markdown;
-              contentList = searchableFallback.contentList;
-            }
+          // ── Accumulate into merged result ──
+          if (chunkIdx === 0) {
+            accumulatedMarkdown = markdown;
+          } else {
+            accumulatedMarkdown += '\n\n' + markdown;
+          }
+          if (shouldKeepImages) {
+            const chunkImages = await this._collectImageMap(imageWriter);
+            Object.assign(accumulatedImages, chunkImages);
+          }
+          accumulatedContentList.push(...chunkContentList);
+          accumulatedLayoutBlocks.push(...extractLayoutLabelBlocks({ pdf_info: pdfInfo }));
+          accumulatedPageCount += pdfInfo.length;
+          accumulatedTimings = mergeTimings(accumulatedTimings, pipelineTimings);
+          if (accumulatedPdfInfo) accumulatedPdfInfo.push(...pdfInfo);
+          if (!lastPageInfo && pdfInfo[0]?.page_size) {
+            lastPageInfo = { width: pdfInfo[0].page_size[0], height: pdfInfo[0].page_size[1] };
           }
 
-          const shouldKeepImages = Boolean(
-            markdownHasImageRefs(markdown)
-            || config.dump_middle_json
-            || config.dump_model_output
-            || config.dump_md_html
-            || config.dump_md_docx
-          );
-          throwIfAborted(signal);          const images = shouldKeepImages ? await this._collectImageMap(imageWriter) : {};
+          // ── Snapshot for next chunk's streaming callback ──
+          prevChunksMarkdown = accumulatedMarkdown;
+          prevChunksContentList = [...accumulatedContentList];
 
-          rawResult = {
-            markdown,
-            content_list:  contentList,
-            middle_json:   config.dump_middle_json ? middleJson : null,
-            model_output:  config.dump_model_output ? modelList : null,
-            layout_label_blocks: extractLayoutLabelBlocks(middleJson),
-            page_count:    modelList.length,
-            images,
-            layout_dets:   modelList.flatMap(p => p?.layout_dets ?? []),
-            page_info:     modelList[0]?.page_info ?? null,
-            _timings:      stageTimings,
-          };
+          // ── Streaming: update UI incrementally after each chunk ──
+          state.updatePartialResults({
+            markdown: accumulatedMarkdown,
+            contentList: accumulatedContentList,
+            pageCount: accumulatedPageCount,
+            images: accumulatedImages,
+          });
 
-          // Release immediately so the OffscreenCanvas backing stores are
-          // freed before downstream postprocessing (the finally also covers
-          // the error path; calling it twice is safe due to the null guard).
-          releaseImageLists(allImageLists);
-          _allImageLists = null;
-        } else if (Array.isArray(docResult)) {
-          // Fallback: unwrap first element
-          rawResult = docResult[0];
-        } else {
-          rawResult = docResult;
+          // ── VRAM hygiene: full GPU teardown between chunks ──
+          if (chunkIdx < totalChunks - 1) {
+            const tReset0 = performance.now();
+            console.log(
+              `[pipelineAdapter] engineReset() after chunk ${chunkIdx + 1}/${totalChunks} — ` +
+              `${accumulatedPageCount}/${totalPages} pages done, returning VRAM to driver`
+            );
+            await engine.engineReset();
+            console.log(
+              `[pipelineAdapter] engineReset() done in ${(performance.now() - tReset0).toFixed(0)}ms`
+            );
+
+            // Re-warm models for next chunk. After engineReset(), the
+            // ModelSingleton cache is empty; getModel() triggers
+            // customModelInit() which loads all models fresh.
+            const modelManager = engine.ModelSingleton?.getInstance?.();
+            if (modelManager?.getModel) {
+              await modelManager.getModel({
+                lang: config.language ?? 'ch',
+                formula_enable: config.formula_enable,
+                table_enable: config.table_enable,
+                layout_config: config.layout_config,
+                ocr_config: config.ocr_config,
+                formula_config: config.formula_config,
+                table_config: config.table_config,
+                orientation_config: config.orientation_config,
+              });
+            }
+          }
         }
-      } else if (typeof engine[['Rapid', 'Doc'].join('')] === 'function' || typeof engine[['Rapid', 'Doc'].join('')] === 'object') {
-        const engineApiName = ['Rapid', 'Doc'].join('');
-        // Class-style engine wrapper: new Engine(config).parse(bytes, onProgress)
-        const doc = engine[engineApiName]?.create
-          ? engine[engineApiName].create(config)
-          : new engine[engineApiName](config);
-        throwIfAborted(signal);        rawResult = await doc.parse(new Uint8Array(fileBytes.slice(0)), { onProgress, signal });
-      } else if (typeof engine.parse === 'function') {
-        throwIfAborted(signal);        rawResult = await engine.parse(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
-      } else if (typeof engine.default === 'function') {
-        throwIfAborted(signal);        rawResult = await engine.default(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
+
+        // ── Build merged rawResult for downstream normalisation ──
+        rawResult = {
+          markdown: accumulatedMarkdown,
+          content_list: accumulatedContentList,
+          middle_json: config.dump_middle_json ? { pdf_info: accumulatedPdfInfo || [] } : null,
+          model_output: config.dump_model_output ? [] : null,
+          layout_label_blocks: accumulatedLayoutBlocks,
+          page_count: accumulatedPageCount,
+          images: accumulatedImages,
+          layout_dets: [],
+          page_info: lastPageInfo,
+          _timings: accumulatedTimings,
+        };
+
+        // Preserve all imageWriters for cleanup in finally block
+        _chunkImageWriters = allImageWriters;
+
+        console.log(
+          `[pipelineAdapter] Chunked processing complete — ` +
+          `${totalChunks} chunks, ${accumulatedPageCount} pages, ` +
+          `${accumulatedMarkdown.length} chars markdown, ` +
+          `${accumulatedContentList.length} content items`
+        );
       } else {
-        throw new Error('Unknown engine API shape — cannot call parse.');
+        // ── Single-run path (unchunked, includes small PDFs and image files) ──
+        // Streaming callback for windowed processing — updates UI incrementally
+        let streamingImageWriter = null;
+        const onWindowResult = pdfPagesBatch > 0
+          ? async ({ markdown, contentList, pageCount, imageWriter }) => {
+              streamingImageWriter = streamingImageWriter || imageWriter;
+              console.log(`[adapter] onWindowResult fired — markdown: ${(markdown || '').length} chars, pages: ${pageCount}, contentList: ${contentList?.length ?? 0} items`);
+              const images = streamingImageWriter
+                ? await this._collectImageMap(streamingImageWriter)
+                : {};
+              state.updatePartialResults({ markdown, contentList, pageCount, images });
+              state.updateMemory();
+            }
+          : null;
+
+        if (typeof engine.docAnalyze === 'function') {
+          // Primary: rapid_doc/index.js exports docAnalyze(pdfBytesList, opts)
+          // .slice(0) makes a fresh copy so the original fileBytes is never detached
+          // by PDF.js's postMessage/structuredClone transfer semantics
+          // docAnalyze returns [inferResults, allImageLists, allPdfDocs, langList, ocrEnabledList]
+          //   OR { _windowed: true, pdf_info, imageWriter, ... } for windowed mode
+          throwIfAborted(signal);        const docResult = await engine.docAnalyze(
+            [new Uint8Array(fileBytes.slice(0))],
+            {
+              lang_list:      [config.language ?? 'ch'],
+              parse_method:   config.parse_method,
+              force_ocr:      config.force_ocr,
+              formula_enable: config.formula_enable,
+              table_enable:   config.table_enable,
+              layout_config:  config.layout_config,
+              ocr_config:     config.ocr_config,
+              formula_config: config.formula_config,
+              table_config:   config.table_config,
+              orientation_config: config.orientation_config,
+              checkbox_config: config.checkbox_config,
+              start_page_id:  config.start_page_id ?? 0,
+              end_page_id:    config.end_page_id ?? null,
+              pdf_pages_batch: pdfPagesBatch,
+              on_progress:    onProgress,
+              on_window_result: onWindowResult,
+            }
+          );
+
+          // ── Windowed mode: engine already did per-window resultToMiddleJson ──
+          if (docResult && docResult._windowed) {
+            const { pdf_info: pdfInfo, imageWriter, pipelineTimings } = docResult;
+            _imageWriter = imageWriter;
+
+            const tMarkdown0 = performance.now();
+            let markdown = engine.unionMake(pdfInfo, 'mm_markdown', 'images') || '';
+            postBreakdown.markdown_union_ms = performance.now() - tMarkdown0;
+
+            const tContent0 = performance.now();
+            let contentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
+            postBreakdown.content_list_union_ms = performance.now() - tContent0;
+
+            // Fallback check for markdown/content viability
+            const markdownHasContent = textHasContent(markdown);
+            const contentListHasContent = hasMeaningfulContentList(contentList);
+            const ocrEnabledWindowed = true; // ocr_enable handled per-window already
+            if (!ocrEnabledWindowed && (!markdownHasContent || !contentListHasContent)) {
+              const searchableFallback = extractSearchableTextFallback([]);
+              if (searchableFallback.markdown) {
+                markdown = searchableFallback.markdown;
+                contentList = searchableFallback.contentList;
+              }
+            }
+
+            const shouldKeepImages = Boolean(
+              markdownHasImageRefs(markdown)
+              || config.dump_middle_json
+              || config.dump_model_output
+              || config.dump_md_html
+              || config.dump_md_docx
+            );
+            throwIfAborted(signal);
+            const images = shouldKeepImages ? await this._collectImageMap(imageWriter) : {};
+
+            rawResult = {
+              markdown,
+              content_list:  contentList,
+              middle_json:   config.dump_middle_json ? { pdf_info: pdfInfo } : null,
+              model_output:  config.dump_model_output ? [] : null,
+              layout_label_blocks: extractLayoutLabelBlocks({ pdf_info: pdfInfo }),
+              page_count:    pdfInfo.length,
+              images,
+              layout_dets:   [],
+              page_info:     pdfInfo[0]?.page_size ? { width: pdfInfo[0].page_size[0], height: pdfInfo[0].page_size[1] } : null,
+              _timings:      pipelineTimings,
+            };
+          } else if (Array.isArray(docResult) && docResult.length >= 5 &&
+              typeof engine.resultToMiddleJson === 'function' &&
+              typeof engine.unionMake === 'function') {
+            // ── Post-process: model output → middle JSON → markdown ──
+            const [inferResults, allImageLists, allPdfDocs, langList, ocrEnabledList, stageTimings = null] = docResult;
+            _allImageLists = allImageLists;
+            const modelList    = inferResults[0];   // first (only) PDF
+            const imagesList   = allImageLists[0];
+            const pageDictList = allPdfDocs[0];
+            const lang         = langList[0]  ?? config.language ?? 'ch';
+            const ocrEnabled   = ocrEnabledList[0] ?? false;
+
+            // MemoryDataWriter stub — collects cut images in-memory
+            const imageWriter = (typeof engine.MemoryDataWriter === 'function')
+              ? new engine.MemoryDataWriter()
+              : { files: {}, write(path, bytes) { this.files[path] = bytes; } };
+            _imageWriter = imageWriter;
+
+            const tMiddle0 = performance.now();
+            throwIfAborted(signal);          const middleJson = await engine.resultToMiddleJson(
+              modelList,
+              imagesList,
+              pageDictList,
+              imageWriter,
+              {
+                lang,
+                ocr_enable:      ocrEnabled,
+                formula_enabled: config.formula_enable ?? true,
+                ocr_config:      config.ocr_config  ?? null,
+                image_config:    null,
+              }
+            );
+            postBreakdown.middle_json_ms = performance.now() - tMiddle0;
+
+            const pdfInfo = middleJson?.pdf_info ?? [];
+            const tMarkdown0 = performance.now();
+            let markdown = engine.unionMake(pdfInfo, 'mm_markdown', 'images') || '';
+            postBreakdown.markdown_union_ms = performance.now() - tMarkdown0;
+
+            const tContent0 = performance.now();
+            let contentList = engine.unionMake(pdfInfo, 'content_list', 'images') || [];
+            postBreakdown.content_list_union_ms = performance.now() - tContent0;
+
+            const markdownHasContent = textHasContent(markdown);
+            const contentListHasContent = hasMeaningfulContentList(contentList);
+            if (!ocrEnabled && (!markdownHasContent || !contentListHasContent)) {
+              const searchableFallback = extractSearchableTextFallback(pageDictList);
+              if (searchableFallback.markdown) {
+                markdown = searchableFallback.markdown;
+                contentList = searchableFallback.contentList;
+              }
+            }
+
+            const shouldKeepImages = Boolean(
+              markdownHasImageRefs(markdown)
+              || config.dump_middle_json
+              || config.dump_model_output
+              || config.dump_md_html
+              || config.dump_md_docx
+            );
+            throwIfAborted(signal);          const images = shouldKeepImages ? await this._collectImageMap(imageWriter) : {};
+
+            rawResult = {
+              markdown,
+              content_list:  contentList,
+              middle_json:   config.dump_middle_json ? middleJson : null,
+              model_output:  config.dump_model_output ? modelList : null,
+              layout_label_blocks: extractLayoutLabelBlocks(middleJson),
+              page_count:    modelList.length,
+              images,
+              layout_dets:   modelList.flatMap(p => p?.layout_dets ?? []),
+              page_info:     modelList[0]?.page_info ?? null,
+              _timings:      stageTimings,
+            };
+
+            // Release immediately so the OffscreenCanvas backing stores are
+            // freed before downstream postprocessing (the finally also covers
+            // the error path; calling it twice is safe due to the null guard).
+            releaseImageLists(allImageLists);
+            _allImageLists = null;
+          } else if (Array.isArray(docResult)) {
+            // Fallback: unwrap first element
+            rawResult = docResult[0];
+          } else {
+            rawResult = docResult;
+          }
+        } else if (typeof engine[['Rapid', 'Doc'].join('')] === 'function' || typeof engine[['Rapid', 'Doc'].join('')] === 'object') {
+          const engineApiName = ['Rapid', 'Doc'].join('');
+          // Class-style engine wrapper: new Engine(config).parse(bytes, onProgress)
+          const doc = engine[engineApiName]?.create
+            ? engine[engineApiName].create(config)
+            : new engine[engineApiName](config);
+          throwIfAborted(signal);        rawResult = await doc.parse(new Uint8Array(fileBytes.slice(0)), { onProgress, signal });
+        } else if (typeof engine.parse === 'function') {
+          throwIfAborted(signal);        rawResult = await engine.parse(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
+        } else if (typeof engine.default === 'function') {
+          throwIfAborted(signal);        rawResult = await engine.default(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
+        } else {
+          throw new Error('Unknown engine API shape — cannot call parse.');
+        }
       }
 
       const tLay1 = performance.now();
@@ -1155,6 +1457,15 @@ export class PipelineAdapter {
           // for the images we want to keep.
           for (const k of Object.keys(_imageWriter.files)) delete _imageWriter.files[k];
           _imageWriter = null;
+        }
+        // Clean up per-chunk imageWriters (chunked path)
+        if (Array.isArray(_chunkImageWriters)) {
+          for (const { imageWriter } of _chunkImageWriters) {
+            if (imageWriter && imageWriter.files && typeof imageWriter.files === 'object') {
+              for (const k of Object.keys(imageWriter.files)) delete imageWriter.files[k];
+            }
+          }
+          _chunkImageWriters = null;
         }
       } catch (e) {
         console.warn('[pipelineAdapter] imageWriter cleanup failed:', e?.message ?? e);

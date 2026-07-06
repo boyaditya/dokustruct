@@ -96,8 +96,6 @@ const refreshIcons = () => {
     createIcons({ icons: lucideIcons });
   } catch (error) {
     console.warn(`${UI_LOG_PREFIX} Failed to render icons:`, error);
-  } finally {
-    if (currentFileType === 'pdf') hideProgress();
   }
 };
 
@@ -713,7 +711,7 @@ let isDraggingResize = false;
 let resizeStartX = 0;
 let resizeStartWidth = 0;
 let processingStartTime = 0;
-let elapsedTimeInterval = null;
+let elapsedTimerId = null;
 const thumbnailObjectUrls = new Set();
 const filePreviewUrls = new WeakMap();
 let renderedPages = [];
@@ -2001,7 +1999,7 @@ function clearViewer() {
   syncedLinkId = null;
   // Clear markdown viewer
   if (el.markdownContent) {
-    el.markdownContent.innerHTML = '<div class="empty-markdown"><p>Run extraction to view Markdown and JSON.</p></div>';
+    el.markdownContent.innerHTML = '';
   }
 
   [el.contentJsonViewer].forEach((viewer) => {
@@ -2393,10 +2391,11 @@ function showProgress() {
   if (el.progressMessage) el.progressMessage.textContent = 'Extracting content from the current document.';
   updateProgress(0);
   
-  // Start elapsed time counter
   processingStartTime = Date.now();
   updateElapsedTime();
-  elapsedTimeInterval = setInterval(updateElapsedTime, 100);
+  elapsedTimerId = setInterval(updateElapsedTime, 200);
+  el.progressOverlay.dataset.timerStart = processingStartTime;
+  elapsedTimerId = setInterval(updateElapsedTime, 200);
 }
 
 function updateElapsedTime() {
@@ -2410,9 +2409,9 @@ function updateElapsedTime() {
 
 function hideProgress() {
   el.progressOverlay?.classList.add('hidden');
-  if (elapsedTimeInterval) {
-    clearInterval(elapsedTimeInterval);
-    elapsedTimeInterval = null;
+  if (elapsedTimerId) {
+    clearInterval(elapsedTimerId);
+    elapsedTimerId = null;
   }
   processingStartTime = 0;
 }
@@ -3569,6 +3568,8 @@ function updateProgress(progress) {
   if (el.progressPercent) {
     el.progressPercent.textContent = `${Math.round(percent)}%`;
   }
+  // Keep elapsed time fresh — setInterval alone stalls under WebGPU load.
+  updateElapsedTime();
 }
 
 // ===== TIMING DISPLAY =====
@@ -4695,7 +4696,7 @@ async function resetWorkspaceForNewTask() {
   
   // Clear markdown
   if (el.markdownContent) {
-    el.markdownContent.innerHTML = '<div class="empty-markdown"><p>Run extraction to view Markdown and JSON.</p></div>';
+    el.markdownContent.innerHTML = '';
   }
   if (el.contentJsonViewer) {
     el.contentJsonViewer.textContent = '';
@@ -4829,12 +4830,12 @@ function subscribeToState() {
     if (!results) return;
     try {
       const isProcessing = appState.get('isProcessing');
-      console.log(`[UI] results subscriber fired — isProcessing=${isProcessing}, markdown: ${(results.markdown || '').length} chars, pages: ${results.page_count}`);
       if (!isProcessing) {
         hideProgress();
       }
+      updateElapsedTime();
       displayResults(results, { keepProgress: isProcessing });
-      updateTimingsDisplay();
+      if (!isProcessing) updateTimingsDisplay();
     } catch (e) {
       console.error('[UI] results subscriber threw:', e);
     }

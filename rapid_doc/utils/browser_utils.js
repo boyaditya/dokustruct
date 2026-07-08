@@ -104,3 +104,40 @@ export function formatPipelineError({ stage, module, message, pageIndex, recover
 
   return parts.join(' ');
 }
+
+// ─── Visibility monitor (no keep-alive — browser throttling is unavoidable) ───
+//
+// Chrome caps background-tab CPU to ~1% and freezes Web Workers after ~5 min.
+// These are browser-level policies — NO web API (AudioContext, Web Locks,
+// Picture-in-Picture, etc.) can override them. Any claim otherwise is outdated.
+//
+// The `MessageChannel`-based `yieldToBrowser()` keeps the main-thread event
+// loop alive (immune to timer throttling), but ORT-Web's multi-threaded WASM
+// uses `Atomics.wait()` in SharedArrayBuffer-backed Web Workers — those Workers
+// ARE subject to CPU throttling and WILL slow down dramatically when the tab
+// is backgrounded. Eventually Chrome may park them entirely (deadlock).
+//
+// FOR FULL-SPEED BACKGROUND PROCESSING:
+// Launch Chrome with these flags:
+//   --disable-background-timer-throttling
+//   --disable-renderer-backgrounding
+// Or keep the tab visible (not minimized, not behind other windows).
+//
+// `navigator.wakeLock` is used to prevent OS-level sleep during long runs.
+
+/** @type {{ release: () => Promise<void> }|null} */
+let _wakeLock = null;
+
+export function startKeepAlive() {
+  if (_wakeLock) return;
+  if (navigator.wakeLock) {
+    navigator.wakeLock.request('screen').then(
+      (lock) => { _wakeLock = lock; lock.addEventListener('release', () => { _wakeLock = null; }); },
+      () => {},
+    );
+  }
+}
+
+export function stopKeepAlive() {
+  if (_wakeLock) { _wakeLock.release().catch(() => {}); _wakeLock = null; }
+}

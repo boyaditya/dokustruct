@@ -22,13 +22,10 @@ import {
   getAssetsStatus,
 } from '../../rapid_doc/utils/download_file.js';
 import { getFormulaAssets, summarizeAssets } from '../../rapid_doc/utils/model_url_map.js';
-import { PDF_PAGES_BATCH } from '../../rapid_doc/utils/browser_utils.js';
+import { PDF_PAGES_BATCH, startKeepAlive, stopKeepAlive } from '../../rapid_doc/utils/browser_utils.js';
 
-/** Pages per chunk for GPU VRAM hygiene — large PDFs are split into sequential
- * chunks, each processed as an independent docAnalyze() invocation with
- * engineReset() between chunks to return ORT-Web's JSEP buffer pool to the
- * driver. Tuneable via config.vram_chunk_size. */
-const VRAM_CHUNK_SIZE = 50;
+/** Pages per chunk — hard-reset on GPU buffer saturation (~138 pages). */
+const VRAM_CHUNK_SIZE = 8;
 
 // ---------------------------------------------------------------------------
 // Image helpers
@@ -456,6 +453,114 @@ function extractLayoutLabelBlocks(middleJson) {
 }
 
 // ---------------------------------------------------------------------------
+// Resume helpers — save state via IndexedDB + sessionStorage before reload.
+// ---------------------------------------------------------------------------
+
+const RESUME_DB = 'RapidDocResume';
+const RESUME_STORE = 'state';
+let _resumeDb = null;
+
+async function getResumeDb() {
+  if (_resumeDb) return _resumeDb;
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(RESUME_DB, 1);
+    req.onupgradeneeded = () => { req.result.createObjectStore(RESUME_STORE); };
+    req.onsuccess = () => { _resumeDb = req.result; resolve(req.result); };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/**
+ * Save resume state to IndexedDB + sessionStorage before page reload.
+ * sessionStorage holds a marker checked on load; IndexedDB holds the
+ * file bytes (too large for sessionStorage).
+ */
+async function saveResumeState(state) {
+  try {
+    // File bytes → IndexedDB (can hold large Uint8Array).
+    const db = await getResumeDb();
+    const tx = db.transaction(RESUME_STORE, 'readwrite');
+    tx.objectStore(RESUME_STORE).put(state.fileBytes, 'fileBytes');
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+
+    // Everything else → sessionStorage (strings, small objects).
+    // IMPORTANT: accumulatedImages is a map of data URLs that can easily
+    // exceed the 5-10 MB sessionStorage limit after a few chunks — this
+    // silently throws QuotaExceededError which the catch block swallows,
+    // leaving NO resume marker for the next page load. Images are
+    // regenerated during resume; only text metadata must persist.
+    const payload = {
+      fileName: state.fileName,
+      fileSize: state.fileSize,
+      fileType: state.fileType,
+      config: state.config,
+      startPage: state.startPage,
+      totalPages: state.totalPages,
+      chunkSize: state.chunkSize,
+      accumulatedMarkdown: state.accumulatedMarkdown,
+      accumulatedContentList: state.accumulatedContentList,
+      accumulatedLayoutBlocks: state.accumulatedLayoutBlocks,
+      accumulatedPageCount: state.accumulatedPageCount,
+    };
+    const serialized = JSON.stringify(payload);
+    // Verify we haven't blown the quota before committing.
+    if (serialized.length > 4_000_000) {
+      // Content list / markdown alone exceeded the safe limit — will still
+      // try to save but log a warning.
+      console.warn(
+        `[pipelineAdapter] Resume payload is ${(serialized.length / 1e6).toFixed(1)} MB — ` +
+        `may exceed sessionStorage quota. Accumulated chunks: ${state.accumulatedPageCount}`
+      );
+    }
+    sessionStorage.setItem('rapiddoc_resume', serialized);
+  } catch (e) {
+    // Log the actual error so we can diagnose failures.
+    console.error('[pipelineAdapter] Failed to save resume state:', e.name, e.message);
+  }
+}
+
+/**
+ * Check for saved resume state on page load. Returns null if no resume.
+ * @returns {Promise<object|null>}
+ */
+async function loadResumeState() {
+  try {
+    const raw = sessionStorage.getItem('rapiddoc_resume');
+    if (!raw) return null;
+    const meta = JSON.parse(raw);
+
+    // Restore file bytes from IndexedDB.
+    const db = await getResumeDb();
+    const tx = db.transaction(RESUME_STORE, 'readonly');
+    const req = tx.objectStore(RESUME_STORE).get('fileBytes');
+    const fileBytes = await new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    if (!fileBytes) return null;
+
+    return { ...meta, fileBytes };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clear resume state after successful completion or user cancellation.
+ */
+async function clearResumeState() {
+  sessionStorage.removeItem('rapiddoc_resume');
+  try {
+    const db = await getResumeDb();
+    const tx = db.transaction(RESUME_STORE, 'readwrite');
+    tx.objectStore(RESUME_STORE).delete('fileBytes');
+  } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
 // VRAM chunking helpers — used by _runFullAnalysis to split large PDFs
 // into sequential chunks, resetting the GPU device between chunks.
 // ---------------------------------------------------------------------------
@@ -568,7 +673,31 @@ export class PipelineAdapter {
    */
   async run(state = appState) {
     if (state.get('isProcessing')) return;
-    const file = state.currentFile;
+
+    // ── Auto-resume: if we have saved state, skip file check and rebuild file ──
+    const resumeRaw = sessionStorage.getItem('rapiddoc_resume');
+    let file = state.currentFile;
+    if (!file && resumeRaw) {
+      try {
+        const resume = JSON.parse(resumeRaw);
+        const db = await getResumeDb();
+        const tx = db.transaction(RESUME_STORE, 'readonly');
+        const req = tx.objectStore(RESUME_STORE).get('fileBytes');
+        const fb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        if (fb) {
+          file = new File([fb], resume.fileName || 'resume.pdf', {
+            type: resume.fileType || 'application/pdf',
+          });
+          state.patch({ files: [file], currentFileIndex: 0 });
+        }
+      } catch (e) {
+        console.warn('[pipelineAdapter] Failed to rebuild File from resume:', e);
+      }
+    }
+
     if (!file) {
       this._toast('No file selected.', 'error');
       return;
@@ -579,6 +708,62 @@ export class PipelineAdapter {
     state.set('abortController', abortCtrl);
 
     await this._runSingle(state, file, abortCtrl.signal);
+  }
+
+  // ── Auto-resume after GPU crash + page reload ────────────────────────────
+
+  /**
+   * Reconstruct File from IndexedDB, warm up models, and resume chunked
+   * processing from where the crash left off. Called by init() on page load
+   * when sessionStorage indicates a pending resume.
+   * @param {import('../state/appState.js').AppState} [state]
+   */
+  async _resumeFromCrash(state = appState) {
+    const resumeRaw = sessionStorage.getItem('rapiddoc_resume');
+    if (!resumeRaw) return false;
+    let resume;
+    try { resume = JSON.parse(resumeRaw); } catch { return false; }
+    if (!resume.startPage || resume.startPage <= 0) return false;
+
+    console.log(
+      `[pipelineAdapter] Resuming from crash — page ${resume.startPage}, ` +
+      `${resume.accumulatedPageCount} prior pages`
+    );
+
+    const db = await getResumeDb();
+    const tx = db.transaction(RESUME_STORE, 'readonly');
+    const req = tx.objectStore(RESUME_STORE).get('fileBytes');
+    const fb = await new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    if (!fb) {
+      this._toast('Resume failed: file data not found.', 'error');
+      clearResumeState();
+      return false;
+    }
+    const file = new File([fb], resume.fileName || 'resume.pdf', {
+      type: resume.fileType || 'application/pdf',
+    });
+    // currentFile is a getter deriving from files[currentFileIndex] —
+    // we must populate the files array so appState.currentFile resolves.
+    state.patch({ files: [file], currentFileIndex: 0 });
+
+    // Re-prepare engine — essential after fresh reload (models not cached)
+    startKeepAlive();
+    try {
+      const signal = new AbortController().signal;
+      state.patch({ isProcessing: true, processingStage: 'loading_models' });
+      await this.prepare(state, file, signal);
+
+      // Run chunked analysis — _runFullAnalysis detects resumeState,
+      // restores accumulated content, and starts from the correct chunk.
+      state.set('abortController', new AbortController());
+      await this._runFullAnalysis(state, file, signal);
+      return true;
+    } finally {
+      stopKeepAlive();
+    }
   }
 
   // ── Single-document run ───────────────────────────────────────────────────
@@ -825,33 +1010,25 @@ export class PipelineAdapter {
         : new Uint8Array(await file.arrayBuffer());
       if (signal.aborted) return null;
 
-      const fileBytes = rawFileBytes.buffer.slice(
+      let fileBytes = rawFileBytes.buffer.slice(
         rawFileBytes.byteOffset,
         rawFileBytes.byteOffset + rawFileBytes.byteLength
       );
 
       // ── Chunk detection for large PDFs ────────────────────────────────────
-      // Done inside preprocessing so the progress overlay stays visible.
-      // Reads only PDF metadata (no rendering), ~50-200ms for typical files.
       const pdfPagesBatch = getDefaultPdfPagesBatch(state);
       const shouldDetectPages = pdfPagesBatch > 0 && !isImageFile(file);
       let totalPages = null;
-      let useChunking = false;
-      let chunkSize = VRAM_CHUNK_SIZE;
 
       if (shouldDetectPages) {
         totalPages = await countPdfPages(fileBytes);
-        // Use config if available (after _buildConfig), else use default.
-        // We re-read chunkSize from config after it's built below.
-        useChunking = Number.isFinite(totalPages) && totalPages > chunkSize;
       }
 
       // ── Step 3: build pipeline config ─────────────────────────────────────
       const config = this._buildConfig(state, file);
 
-      // Refine chunk detection with config's override
-      chunkSize = config.vram_chunk_size ?? VRAM_CHUNK_SIZE;
-      useChunking = shouldDetectPages && Number.isFinite(totalPages) && totalPages > chunkSize;
+      const chunkSize = config.vram_chunk_size ?? VRAM_CHUNK_SIZE;
+      const useChunking = shouldDetectPages && Number.isFinite(totalPages) && totalPages > chunkSize;
       const totalChunks = useChunking ? Math.ceil(totalPages / chunkSize) : 1;
 
       // ── Step 4: load engine ────────────────────────────────────────────────
@@ -915,14 +1092,57 @@ export class PipelineAdapter {
         let accumulatedPageCount = 0;
         let accumulatedPdfInfo = config.dump_middle_json ? [] : null;
         let lastPageInfo = null;
+        let startChunkIdx = 0;
         const allImageWriters = [];
+
+        // ── Resume: restore prior accumulated state after page reload ──
+        const resumeState = await loadResumeState();
+        if (resumeState) {
+          accumulatedMarkdown = resumeState.accumulatedMarkdown || '';
+          accumulatedContentList = resumeState.accumulatedContentList || [];
+          accumulatedImages = resumeState.accumulatedImages || {};
+          accumulatedLayoutBlocks = resumeState.accumulatedLayoutBlocks || [];
+          accumulatedPageCount = resumeState.accumulatedPageCount || 0;
+          startChunkIdx = Math.floor(resumeState.startPage / chunkSize);
+          // fileBytes are restored from IndexedDB — use them instead of the
+          // File API bytes (which won't be available after a page reload).
+          const fb = resumeState.fileBytes;
+          fileBytes = fb.buffer.slice(fb.byteOffset, fb.byteOffset + fb.byteLength);
+          // Re-build config from saved state for consistency.
+          Object.assign(config, resumeState.config);
+          console.log(
+            `[pipelineAdapter] Resumed from page ${resumeState.startPage} — ` +
+            `${accumulatedPageCount} pages already accumulated`
+          );
+          await clearResumeState();
+        }
+
+        // Pre-slice sub-PDFs once from a single pdf-lib load. Each chunk
+        // internally calls convertPdfBytesToBytesByPypdfium2 which loads
+        // the full PDF. After ~15 loads, pdf-lib corrupts. Pre-slicing
+        // avoids repeated full-document parsing.
+        const subPdfList = [];
+        {
+          const { PDFDocument: PdfLib } = await import('pdf-lib');
+          const src = await PdfLib.load(fileBytes, { ignoreEncryption: true });
+          for (let ci = 0; ci < totalChunks; ci++) {
+            const s = ci * chunkSize;
+            const e = Math.min(s + chunkSize - 1, totalPages - 1);
+            const idx = [];
+            for (let i = s; i <= e; i++) idx.push(i);
+            const out = await PdfLib.create();
+            const pages = await out.copyPages(src, idx);
+            for (const p of pages) out.addPage(p);
+            subPdfList.push(await out.save());
+          }
+        }
 
         // Per-chunk streaming accumulator — concat across chunks so the UI
         // shows progressive total markdown, not just the current chunk's.
         let prevChunksMarkdown = '';
         let prevChunksContentList = [];
 
-        for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        for (let chunkIdx = startChunkIdx; chunkIdx < totalChunks; chunkIdx++) {
           throwIfAborted(signal);
           const chunkStart = chunkIdx * chunkSize;
           const chunkEnd = Math.min(chunkStart + chunkSize - 1, totalPages - 1);
@@ -940,8 +1160,11 @@ export class PipelineAdapter {
             onProgress(stage, overallCurrent, overallTotal, overallPct);
           };
 
-          const docResult = await engine.docAnalyze(
-            [new Uint8Array(fileBytes.slice(0))],
+          // ── Execute this chunk ──
+          let docResult;
+          try {
+            docResult = await engine.docAnalyze(
+            [subPdfList[chunkIdx]],
             {
               lang_list:      [config.language ?? 'ch'],
               parse_method:   config.parse_method,
@@ -954,8 +1177,8 @@ export class PipelineAdapter {
               table_config:   config.table_config,
               orientation_config: config.orientation_config,
               checkbox_config: config.checkbox_config,
-              start_page_id:  chunkStart,
-              end_page_id:    chunkEnd,
+              start_page_id:  0,  // sub-PDF already sliced to this chunk
+              end_page_id:    null,
               pdf_pages_batch: pdfPagesBatch,
               on_progress:    chunkOnProgress,
               // Let the engine fire per-window streaming callbacks so the UI
@@ -985,6 +1208,34 @@ export class PipelineAdapter {
               },
             }
           );
+          } catch (chunkErr) {
+            if (isAbortError(chunkErr, signal)) throw chunkErr;
+            console.warn(
+              `[pipelineAdapter] Chunk ${chunkIdx + 1} crashed: ` +
+              formatPipelineError(chunkErr)
+            );
+            // Save resume state and reload the page.
+            // The GPU device is permanently dead after a native ORT crash —
+            // only a browser page reload can get a fresh GPU adapter + WASM
+            // heap. sessionStorage survives the reload.
+            await saveResumeState({
+              fileBytes: new Uint8Array(fileBytes.slice(0)),
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type,
+              config: this._buildConfig(state, file),
+              startPage: chunkStart,
+              totalPages,
+              chunkSize,
+              accumulatedMarkdown,
+              accumulatedContentList,
+              accumulatedImages,
+              accumulatedLayoutBlocks,
+              accumulatedPageCount,
+            });
+            location.reload();
+            return null; // unreachable — reload stops execution
+          }
 
           if (!docResult || !docResult._windowed) {
             throw new Error(
@@ -1046,6 +1297,37 @@ export class PipelineAdapter {
             lastPageInfo = { width: pdfInfo[0].page_size[0], height: pdfInfo[0].page_size[1] };
           }
 
+          // When a chunk returns 0 pages, the GPU device's internal buffer
+          // pool is saturated. engineReset + model reload cannot revive a
+          // damaged pool — subsequent chunks will trigger native ORT crashes
+          // that kill the JS renderer process before we can save state.
+          // Save now and reload to get a fresh GPU adapter.
+          if (pdfInfo.length === 0 && chunkIdx > 0) {
+            console.warn(
+              `[pipelineAdapter] Chunk ${chunkIdx + 1} returned 0 pages — ` +
+              `GPU pool saturated. Saving state and reloading for fresh GPU.`
+            );
+            await saveResumeState({
+              fileBytes: new Uint8Array(fileBytes.slice(0)),
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type,
+              config: this._buildConfig(state, file),
+              startPage: chunkStart,
+              totalPages,
+              chunkSize,
+              accumulatedMarkdown,
+              accumulatedContentList: [],
+              accumulatedLayoutBlocks,
+              accumulatedPageCount,
+              // Intentionally empty — images are regenerated. Saves ~10-50MB
+              // of sessionStorage quota that would otherwise QuotaExceeded.
+              accumulatedImages: {},
+            });
+            location.reload();
+            return null; // unreachable
+          }
+
           // ── Snapshot for next chunk's streaming callback ──
           prevChunksMarkdown = accumulatedMarkdown;
           prevChunksContentList = [...accumulatedContentList];
@@ -1057,36 +1339,6 @@ export class PipelineAdapter {
             pageCount: accumulatedPageCount,
             images: accumulatedImages,
           });
-
-          // ── VRAM hygiene: full GPU teardown between chunks ──
-          if (chunkIdx < totalChunks - 1) {
-            const tReset0 = performance.now();
-            console.log(
-              `[pipelineAdapter] engineReset() after chunk ${chunkIdx + 1}/${totalChunks} — ` +
-              `${accumulatedPageCount}/${totalPages} pages done, returning VRAM to driver`
-            );
-            await engine.engineReset();
-            console.log(
-              `[pipelineAdapter] engineReset() done in ${(performance.now() - tReset0).toFixed(0)}ms`
-            );
-
-            // Re-warm models for next chunk. After engineReset(), the
-            // ModelSingleton cache is empty; getModel() triggers
-            // customModelInit() which loads all models fresh.
-            const modelManager = engine.ModelSingleton?.getInstance?.();
-            if (modelManager?.getModel) {
-              await modelManager.getModel({
-                lang: config.language ?? 'ch',
-                formula_enable: config.formula_enable,
-                table_enable: config.table_enable,
-                layout_config: config.layout_config,
-                ocr_config: config.ocr_config,
-                formula_config: config.formula_config,
-                table_config: config.table_config,
-                orientation_config: config.orientation_config,
-              });
-            }
-          }
         }
 
         // ── Build merged rawResult for downstream normalisation ──

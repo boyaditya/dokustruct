@@ -538,14 +538,17 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
 
   const slicedPdfBytesList = await _sliceAllPdfsForWindow(pdfBytesList, start_page_id, end_page_id);
 
-  // Count total pages BEFORE entering window loop
-  const { loadImagesFromPdf } = await import('../../utils/pdf_image_tools.js');
+  // Count total pages BEFORE entering window loop.
+  // Use pdf-lib's metadata-only page count (no rendering) to avoid
+  // allocating full OffscreenCanvas backing stores for every page just
+  // to count them. On 4GB GPUs, 8 pages × 15 chunks = 120 unretained
+  // canvas allocations was enough to exhaust VRAM.
+  const { PDFDocument } = await import('pdf-lib');
   let totalPages = 0;
   for (const pdfBytes of slicedPdfBytesList) {
     try {
-      const [imagesList, pdfDocProxy] = await loadImagesFromPdf(pdfBytes, { imageType: 0 });
-      totalPages += imagesList.length;
-      await destroyPdfProxy(pdfDocProxy);
+      const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+      totalPages += doc.getPageCount();
     } catch (err) {
       console.warn('[_docAnalyzeWindowed] Failed to count pages:', err);
       totalPages += Math.max(1, Math.floor((pdfBytes.byteLength || pdfBytes.length) / 100000));
@@ -629,9 +632,20 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
         accumulatedPdfInfo.push(...(middleJson.pdf_info || []));
       } catch (err) {
         if (err instanceof AbortException) throw err;
+        // ORT WASM trap: raw number, no .message. Session is permanently
+        // corrupted after this — subsequent windows WILL crash native.
+        if (typeof err === 'number' || (err && !err.message)) {
+          console.warn(
+            `[Pipeline] native runtime trap during resultToMiddleJson ` +
+            `(window ${batchIdx + 1}): ${err}. Stopping further windows; ` +
+            `preserving ${accumulatedPdfInfo.length} pages already accumulated.`
+          );
+          finished.fill(true);
+          break;
+        }
         console.warn(
-          `[Pipeline] resultToMiddleJson failed for window ${batchIdx + 1}, ` +
-          `PDF ${origIdx}: ${err?.message || err}`
+          `[Pipeline] resultToMiddleJson failed for window ${batchIdx + 1}: ` +
+          `${err?.message || err}`
         );
       }
 
@@ -675,12 +689,8 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
           windowIndex: batchIdx,
           imageWriter,
         });
-        // Force a paint frame so the UI renders before next window's heavy work
+        // Yield so the browser event loop can process UI updates.
         await yieldToBrowser();
-        if (typeof requestAnimationFrame !== 'undefined') {
-          await new Promise(r => requestAnimationFrame(r));
-          await new Promise(r => requestAnimationFrame(r));
-        }
       } catch (err) {
         console.warn(
           `[Pipeline] on_window_result callback failed for window ${batchIdx + 1}: ` +

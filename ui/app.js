@@ -7,6 +7,7 @@ import { appState } from './state/appState.js';
 import { pipelineAdapter } from './utils/pipelineAdapter.js';
 import { getPdfjsLib } from '../rapid_doc/utils/pdfjs_loader.js';
 import { getAssetDetailRows } from '../rapid_doc/utils/model_url_map.js';
+import { startKeepAlive, stopKeepAlive } from '../rapid_doc/utils/browser_utils.js';
 import { sanitizeFormulaLatex } from '../rapid_doc/model/formula/fix_utils.js';
 import { marked } from 'marked';
 import katex from 'katex';
@@ -991,6 +992,54 @@ async function init() {
   });
   subscribeToState();
 
+  // ── Auto-resume after page reload (GPU crash recovery) ──
+  const resumeRaw = sessionStorage.getItem('rapiddoc_resume');
+  let resumeSucceeded = false;
+  if (resumeRaw) {
+    try {
+      const resume = JSON.parse(resumeRaw);
+      if (resume.startPage > 0) {
+        console.log(
+          `[UI] Detected resume state — page ${resume.startPage}, ` +
+          `${resume.accumulatedPageCount} prior pages. Auto-resuming...`
+        );
+        // Pre-populate results so UI shows prior content
+        appState.patch({
+          results: {
+            markdown: resume.accumulatedMarkdown || '',
+            content_list: resume.accumulatedContentList || [],
+            images: resume.accumulatedImages || {},
+            page_count: resume.accumulatedPageCount || 0,
+          },
+          showOutputPanel: true,
+        });
+        setWorkspaceMode('workspace');
+        displayResults(appState.get('results'), { keepProgress: false });
+        // Handle everything: File rebuild + prepare + chunked resume
+        const ok = await pipelineAdapter._resumeFromCrash(appState);
+        if (ok) {
+          resumeSucceeded = true;
+          // Populate module-level state so UI queries (currentFile, etc.) work
+          currentFile = appState.currentFile;
+          selectedFiles = appState.get('files') || [];
+          if (currentFile) {
+            currentFileType = isImageFile(currentFile) ? 'image' : 'pdf';
+            currentFileIndex = 0;
+          }
+          // Do NOT fall through to the setup-reset code below.
+        } else {
+          // Resume failed — kill stale pre-populated partial results
+          appState.patch({ results: null, showOutputPanel: false });
+        }
+      }
+    } catch (e) {
+      console.warn('[UI] Failed to auto-resume:', e);
+      // Throw path — kill stale pre-populated results so updateUI doesn't
+      // think we have valid output.
+      appState.patch({ results: null, showOutputPanel: false });
+    }
+  }
+
   initHistoryList({
     el,
     getHistory,
@@ -1044,12 +1093,14 @@ async function init() {
     setSyncedLinkId: (id) => { syncedLinkId = id; },
   });
 
-  loadHistory();
-  setWorkspaceMode('setup');
+  if (!resumeSucceeded) {
+    loadHistory();
+    setWorkspaceMode('setup');
+  }
   setSetupTab('upload');
   updateUI();
   refreshAssetRequirements();
-  
+
   marked.setOptions({
     gfm: true,
     breaks: true,
@@ -2315,6 +2366,10 @@ async function runPipeline() {
   currentRunConfig = getCurrentRunConfig();
   updateRunSummary(currentRunConfig);
   setWorkspaceMode('workspace');
+
+  // Wake lock — prevents OS sleep during long pipeline runs.
+  startKeepAlive();
+
   showProgress();
   if (el.progressTitle) el.progressTitle.textContent = 'Preparing models...';
   if (el.progressMessage) el.progressMessage.textContent = 'Loading AI models and warming up runtime.';
@@ -2368,6 +2423,8 @@ async function runPipeline() {
     console.error(`${UI_LOG_PREFIX} Pipeline failed:`, err);
     hideProgress();
     showLoading(`Processing failed: ${err.message}`, 3000);
+  } finally {
+    stopKeepAlive();
   }
 }
 

@@ -1003,39 +1003,87 @@ async function init() {
           `[UI] Detected resume state — page ${resume.startPage}, ` +
           `${resume.accumulatedPageCount} prior pages. Auto-resuming...`
         );
-        // Pre-populate results so UI shows prior content
+
+        // Reconstruct the File from IndexedDB BEFORE starting resume so
+        // module-level currentFile/selectedFiles are populated for all
+        // downstream code (saveToHistory, loadPdfPreview, updateUI, etc.).
+        const db = await new Promise((resolve, reject) => {
+          const req = indexedDB.open('RapidDocResume', 1);
+          req.onupgradeneeded = () => { req.result.createObjectStore('state'); };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        const tx = db.transaction('state', 'readonly');
+        const reqFiles = tx.objectStore('state').get('fileBytes');
+        const reqCl = tx.objectStore('state').get('contentList');
+        const reqImg = tx.objectStore('state').get('images');
+        const [fb, idxContentList, idxImages] = await Promise.all([
+          new Promise((r) => { reqFiles.onsuccess = () => r(reqFiles.result); reqFiles.onerror = () => r(null); }),
+          new Promise((r) => { reqCl.onsuccess = () => r(reqCl.result); reqCl.onerror = () => r(null); }),
+          new Promise((r) => { reqImg.onsuccess = () => r(reqImg.result); reqImg.onerror = () => r(null); }),
+        ]);
+        db.close();
+
+        // Populate module-level file state immediately.
+        if (fb) {
+          currentFile = new File([fb], resume.fileName || 'resume.pdf', { type: resume.fileType || 'application/pdf' });
+          selectedFiles = [currentFile];
+          currentFileIndex = 0;
+          currentFileType = 'pdf';
+        }
+
+        // Push recovered content list + images into appState results (if available).
+        const recoveredContentList = idxContentList || resume.accumulatedContentList || [];
+        const recoveredImages = idxImages || {};
+
         appState.patch({
           results: {
             markdown: resume.accumulatedMarkdown || '',
-            content_list: resume.accumulatedContentList || [],
-            images: resume.accumulatedImages || {},
+            content_list: recoveredContentList,
+            images: recoveredImages,
             page_count: resume.accumulatedPageCount || 0,
           },
           showOutputPanel: true,
         });
         setWorkspaceMode('workspace');
         displayResults(appState.get('results'), { keepProgress: false });
+
+        // Restore elapsed time.
+        if (resume.elapsedSeconds > 0) {
+          processingStartTime = Date.now() - resume.elapsedSeconds * 1000;
+          updateElapsedTime();
+        }
+
+        // Show progress overlay with resumed page count for accurate %.
+        showProgress();
+        if (el.progressOverlay) {
+          el.progressOverlay.dataset.timerStart = processingStartTime || Date.now();
+        }
+        if (el.progressTitle) {
+          el.progressTitle.textContent = `Resuming from page ${resume.startPage} — preparing engine...`;
+        }
+        const resumePct = Math.round((resume.startPage / resume.totalPages) * 100);
+        updateProgress(resumePct);
+
+        // Load PDF preview if the file was reconstructed successfully.
+        if (currentFile) {
+          loadPdfPreview(currentFile).catch((e) => console.warn('[UI] Preview load failed:', e?.message));
+        }
+
+        // Track resume start time for elapsed-time accumulation.
+        pipelineAdapter._resumeStartTime = performance.now() - (resume.elapsedSeconds || 0) * 1000;
+
         // Handle everything: File rebuild + prepare + chunked resume
         const ok = await pipelineAdapter._resumeFromCrash(appState);
         if (ok) {
           resumeSucceeded = true;
-          // Populate module-level state so UI queries (currentFile, etc.) work
-          currentFile = appState.currentFile;
-          selectedFiles = appState.get('files') || [];
-          if (currentFile) {
-            currentFileType = isImageFile(currentFile) ? 'image' : 'pdf';
-            currentFileIndex = 0;
-          }
           // Do NOT fall through to the setup-reset code below.
         } else {
-          // Resume failed — kill stale pre-populated partial results
           appState.patch({ results: null, showOutputPanel: false });
         }
       }
     } catch (e) {
       console.warn('[UI] Failed to auto-resume:', e);
-      // Throw path — kill stale pre-populated results so updateUI doesn't
-      // think we have valid output.
       appState.patch({ results: null, showOutputPanel: false });
     }
   }
@@ -2447,11 +2495,13 @@ function showProgress() {
   if (el.progressTitle) el.progressTitle.textContent = 'Processing document';
   if (el.progressMessage) el.progressMessage.textContent = 'Extracting content from the current document.';
   updateProgress(0);
-  
-  processingStartTime = Date.now();
+
+  // Preserve elapsed time during resume — don't reset if already set by init.
+  if (!processingStartTime) {
+    processingStartTime = Date.now();
+    el.progressOverlay.dataset.timerStart = processingStartTime;
+  }
   updateElapsedTime();
-  elapsedTimerId = setInterval(updateElapsedTime, 200);
-  el.progressOverlay.dataset.timerStart = processingStartTime;
   elapsedTimerId = setInterval(updateElapsedTime, 200);
 }
 

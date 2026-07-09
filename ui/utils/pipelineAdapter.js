@@ -472,27 +472,30 @@ async function getResumeDb() {
 
 /**
  * Save resume state to IndexedDB + sessionStorage before page reload.
- * sessionStorage holds a marker checked on load; IndexedDB holds the
- * file bytes (too large for sessionStorage).
+ * sessionStorage holds a lightweight marker; IndexedDB holds the
+ * file bytes AND large accumulated objects (content list, images).
  */
 async function saveResumeState(state) {
   try {
-    // File bytes → IndexedDB (can hold large Uint8Array).
     const db = await getResumeDb();
     const tx = db.transaction(RESUME_STORE, 'readwrite');
+
+    // Large data → IndexedDB (no size limit).
     tx.objectStore(RESUME_STORE).put(state.fileBytes, 'fileBytes');
+    if (state.accumulatedContentList && state.accumulatedContentList.length) {
+      tx.objectStore(RESUME_STORE).put(state.accumulatedContentList, 'contentList');
+    }
+    if (state.accumulatedImages && Object.keys(state.accumulatedImages).length) {
+      tx.objectStore(RESUME_STORE).put(state.accumulatedImages, 'images');
+    }
+
     await new Promise((resolve, reject) => {
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
     });
 
-    // Everything else → sessionStorage (strings, small objects).
-    // IMPORTANT: accumulatedImages is a map of data URLs that can easily
-    // exceed the 5-10 MB sessionStorage limit after a few chunks — this
-    // silently throws QuotaExceededError which the catch block swallows,
-    // leaving NO resume marker for the next page load. Images are
-    // regenerated during resume; only text metadata must persist.
-    const payload = {
+    // Lightweight marker → sessionStorage (small, survives page reload).
+    sessionStorage.setItem('rapiddoc_resume', JSON.stringify({
       fileName: state.fileName,
       fileSize: state.fileSize,
       fileType: state.fileType,
@@ -501,29 +504,18 @@ async function saveResumeState(state) {
       totalPages: state.totalPages,
       chunkSize: state.chunkSize,
       accumulatedMarkdown: state.accumulatedMarkdown,
-      accumulatedContentList: state.accumulatedContentList,
       accumulatedLayoutBlocks: state.accumulatedLayoutBlocks,
       accumulatedPageCount: state.accumulatedPageCount,
-    };
-    const serialized = JSON.stringify(payload);
-    // Verify we haven't blown the quota before committing.
-    if (serialized.length > 4_000_000) {
-      // Content list / markdown alone exceeded the safe limit — will still
-      // try to save but log a warning.
-      console.warn(
-        `[pipelineAdapter] Resume payload is ${(serialized.length / 1e6).toFixed(1)} MB — ` +
-        `may exceed sessionStorage quota. Accumulated chunks: ${state.accumulatedPageCount}`
-      );
-    }
-    sessionStorage.setItem('rapiddoc_resume', serialized);
+      // Tracking elapsed time for resuming timer.
+      elapsedSeconds: Math.round((performance.now() - (state._startTime || 0)) / 1000),
+    }));
   } catch (e) {
-    // Log the actual error so we can diagnose failures.
     console.error('[pipelineAdapter] Failed to save resume state:', e.name, e.message);
   }
 }
 
 /**
- * Check for saved resume state on page load. Returns null if no resume.
+ * Check for saved resume state on page load. Restores from IndexedDB + sessionStorage.
  * @returns {Promise<object|null>}
  */
 async function loadResumeState() {
@@ -532,17 +524,27 @@ async function loadResumeState() {
     if (!raw) return null;
     const meta = JSON.parse(raw);
 
-    // Restore file bytes from IndexedDB.
+    // Restore from IndexedDB.
     const db = await getResumeDb();
     const tx = db.transaction(RESUME_STORE, 'readonly');
-    const req = tx.objectStore(RESUME_STORE).get('fileBytes');
-    const fileBytes = await new Promise((resolve, reject) => {
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
+    const reqFile = tx.objectStore(RESUME_STORE).get('fileBytes');
+    const reqCl = tx.objectStore(RESUME_STORE).get('contentList');
+    const reqImg = tx.objectStore(RESUME_STORE).get('images');
+
+    const [fileBytes, contentList, images] = await Promise.all([
+      new Promise((resolve) => { reqFile.onsuccess = () => resolve(reqFile.result); reqFile.onerror = () => resolve(null); }),
+      new Promise((resolve) => { reqCl.onsuccess = () => resolve(reqCl.result); reqCl.onerror = () => resolve(null); }),
+      new Promise((resolve) => { reqImg.onsuccess = () => resolve(reqImg.result); reqImg.onerror = () => resolve(null); }),
+    ]);
+
     if (!fileBytes) return null;
 
-    return { ...meta, fileBytes };
+    return {
+      ...meta,
+      fileBytes,
+      accumulatedContentList: contentList || meta.accumulatedContentList || [],
+      accumulatedImages: images || {},
+    };
   } catch {
     return null;
   }
@@ -557,6 +559,8 @@ async function clearResumeState() {
     const db = await getResumeDb();
     const tx = db.transaction(RESUME_STORE, 'readwrite');
     tx.objectStore(RESUME_STORE).delete('fileBytes');
+    tx.objectStore(RESUME_STORE).delete('contentList');
+    tx.objectStore(RESUME_STORE).delete('images');
   } catch { /* ignore */ }
 }
 
@@ -1232,6 +1236,7 @@ export class PipelineAdapter {
               accumulatedImages,
               accumulatedLayoutBlocks,
               accumulatedPageCount,
+              _startTime: this._resumeStartTime || 0,
             });
             location.reload();
             return null; // unreachable — reload stops execution
@@ -1317,12 +1322,11 @@ export class PipelineAdapter {
               totalPages,
               chunkSize,
               accumulatedMarkdown,
-              accumulatedContentList: [],
+              accumulatedContentList,
               accumulatedLayoutBlocks,
               accumulatedPageCount,
-              // Intentionally empty — images are regenerated. Saves ~10-50MB
-              // of sessionStorage quota that would otherwise QuotaExceeded.
-              accumulatedImages: {},
+              accumulatedImages,
+              _startTime: this._resumeStartTime || 0,
             });
             location.reload();
             return null; // unreachable

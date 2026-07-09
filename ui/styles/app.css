@@ -146,6 +146,50 @@ body {
     min-height: 0;
 }
 
+.history-item.is-processing {
+    border-color: rgba(37, 99, 235, 0.3);
+    background: rgba(37, 99, 235, 0.04);
+    cursor: default;
+    animation: history-pulse 2s ease-in-out infinite;
+}
+
+.history-item.is-processing:hover {
+    background: rgba(37, 99, 235, 0.08);
+}
+
+.history-item.is-processing .history-icon {
+    border-color: rgba(37, 99, 235, 0.35);
+    background: rgba(37, 99, 235, 0.08);
+    color: var(--primary);
+}
+
+.history-item.is-processing .history-name {
+    color: var(--primary);
+}
+
+.history-processing-pulse {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--primary);
+    font-weight: 500;
+}
+
+.history-processing-pulse::before {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: status-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes history-pulse {
+    0%, 100% { box-shadow: inset 0 0 0 0 rgba(37, 99, 235, 0.15); }
+    50% { box-shadow: inset 0 0 0 3px rgba(37, 99, 235, 0.06); }
+}
+
 .file-list-header {
     height: 30px;
     display: flex;
@@ -1991,6 +2035,7 @@ input:focus-visible {
 
 .progress-overlay .progress-surface {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     width: 100%;
@@ -2016,6 +2061,21 @@ input:focus-visible {
 .progress-overlay .progress-time { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
 .progress-overlay .progress-time .time-label { font-size: 10px; opacity: 0.7; }
 .progress-overlay .progress-time .time-value { font-weight: 500; }
+
+.progress-overlay .progress-warning {
+    font-size: 10px;
+    color: var(--warning);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(161, 98, 7, 0.08);
+    white-space: nowrap;
+    flex-shrink: 0;
+    flex-basis: 100%;
+    order: 10;
+}
 
 .progress-overlay .progress-bar {
     flex: 1;

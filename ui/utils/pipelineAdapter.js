@@ -488,6 +488,10 @@ async function saveResumeState(state) {
     if (state.accumulatedImages && Object.keys(state.accumulatedImages).length) {
       tx.objectStore(RESUME_STORE).put(state.accumulatedImages, 'images');
     }
+    // Persist accumulated pdfInfo so overlay blocks from pre-resume pages survive.
+    if (state.accumulatedPdfInfo && state.accumulatedPdfInfo.length) {
+      tx.objectStore(RESUME_STORE).put(state.accumulatedPdfInfo, 'pdfInfo');
+    }
 
     await new Promise((resolve, reject) => {
       tx.oncomplete = resolve;
@@ -530,11 +534,14 @@ async function loadResumeState() {
     const reqFile = tx.objectStore(RESUME_STORE).get('fileBytes');
     const reqCl = tx.objectStore(RESUME_STORE).get('contentList');
     const reqImg = tx.objectStore(RESUME_STORE).get('images');
+    const reqPdfInfo = tx.objectStore(RESUME_STORE).get('pdfInfo');
+    const reqTimings = tx.objectStore(RESUME_STORE).get('timings');
 
-    const [fileBytes, contentList, images] = await Promise.all([
-      new Promise((resolve) => { reqFile.onsuccess = () => resolve(reqFile.result); reqFile.onerror = () => resolve(null); }),
-      new Promise((resolve) => { reqCl.onsuccess = () => resolve(reqCl.result); reqCl.onerror = () => resolve(null); }),
-      new Promise((resolve) => { reqImg.onsuccess = () => resolve(reqImg.result); reqImg.onerror = () => resolve(null); }),
+    const [fileBytes, contentList, images, pdfInfo, resumedTimings] = await Promise.all([
+      new Promise((r) => { reqFile.onsuccess = () => r(reqFile.result); reqFile.onerror = () => r(null); }),
+      new Promise((r) => { reqCl.onsuccess = () => r(reqCl.result); reqCl.onerror = () => r(null); }),
+      new Promise((r) => { reqImg.onsuccess = () => r(reqImg.result); reqImg.onerror = () => r(null); }),
+      new Promise((r) => { reqPdfInfo.onsuccess = () => r(reqPdfInfo.result); reqPdfInfo.onerror = () => r(null); }),
     ]);
 
     if (!fileBytes) return null;
@@ -544,6 +551,7 @@ async function loadResumeState() {
       fileBytes,
       accumulatedContentList: contentList || meta.accumulatedContentList || [],
       accumulatedImages: images || {},
+      accumulatedPdfInfo: pdfInfo || null,
     };
   } catch {
     return null;
@@ -561,6 +569,7 @@ async function clearResumeState() {
     tx.objectStore(RESUME_STORE).delete('fileBytes');
     tx.objectStore(RESUME_STORE).delete('contentList');
     tx.objectStore(RESUME_STORE).delete('images');
+    tx.objectStore(RESUME_STORE).delete('pdfInfo');
   } catch { /* ignore */ }
 }
 
@@ -1107,6 +1116,8 @@ export class PipelineAdapter {
           accumulatedImages = resumeState.accumulatedImages || {};
           accumulatedLayoutBlocks = resumeState.accumulatedLayoutBlocks || [];
           accumulatedPageCount = resumeState.accumulatedPageCount || 0;
+          if (resumeState.accumulatedPdfInfo) accumulatedPdfInfo = resumeState.accumulatedPdfInfo;
+          if (resumeState.accumulatedTimings) accumulatedTimings = resumeState.accumulatedTimings;
           startChunkIdx = Math.floor(resumeState.startPage / chunkSize);
           // fileBytes are restored from IndexedDB — use them instead of the
           // File API bytes (which won't be available after a page reload).
@@ -1236,6 +1247,8 @@ export class PipelineAdapter {
               accumulatedImages,
               accumulatedLayoutBlocks,
               accumulatedPageCount,
+              accumulatedPdfInfo,
+              accumulatedTimings,
               _startTime: this._resumeStartTime || 0,
             });
             location.reload();
@@ -1326,6 +1339,8 @@ export class PipelineAdapter {
               accumulatedLayoutBlocks,
               accumulatedPageCount,
               accumulatedImages,
+              accumulatedPdfInfo,
+              accumulatedTimings,
               _startTime: this._resumeStartTime || 0,
             });
             location.reload();

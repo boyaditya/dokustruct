@@ -507,6 +507,25 @@ function getHistory() {
   }
 }
 
+/** Insert a lightweight history entry with _isProcessing flag for sidebar pulse. */
+async function _saveProcessingHistoryEntry() {
+  if (!currentFile) return;
+  const entry = {
+    id: Date.now(),
+    fileName: currentFile.name,
+    fileSize: currentFile.size,
+    fileType: currentFile.type,
+    historyKey: makeHistoryFileKey(currentFile),
+    timestamp: new Date().toISOString(),
+    processingTotalMs: 0,
+    pageCount: 0,
+    _isProcessing: true,
+  };
+  const history = getHistory();
+  history.unshift(entry);
+  await saveHistoryMetadata(history);
+}
+
 function loadHistory() {
   _loadHistoryList();
 }
@@ -992,6 +1011,62 @@ async function init() {
   });
   subscribeToState();
 
+  // initHistoryList + initHistoryReload MUST run before the resume block.
+  // The resume block calls displayResults → saveToHistory → loadHistory(),
+  // which requires _ctx to be populated.
+  initHistoryList({
+    el,
+    getHistory,
+    formatDuration,
+    formatFileSize,
+    formatDate,
+    escapeHtml,
+    refreshIcons,
+    loadHistoryItem,
+    requestHistoryDelete,
+  });
+  initHistoryReload({
+    el,
+    appState,
+    thumbnailObjectUrls,
+    get renderedPages() { return renderedPages; },
+    get overlayResizeObserver() { return overlayResizeObserver; },
+    setWorkspaceMode,
+    cleanupPdfPreview,
+    releaseCanvas,
+    hasStoredImages,
+    getResultArtifact,
+    readHistoryStoredValue,
+    normalizeHistoryStageTimings,
+    emptyTimingSet,
+    prepareLinkedBlocks,
+    updatePageInfo,
+    displayMarkdown,
+    displayJSON,
+    renderHistoryPreviewPages,
+    renderHistoryThumbnail,
+    showEmptyViewer,
+    formatFileSize,
+    formatDate,
+    updateRunSummary,
+    updateTimingsDisplay,
+    updateUI,
+    showLoading,
+    getSourceCanvas: () => sourceCanvas,
+    setSourceCanvas: (c) => { sourceCanvas = c; },
+    setCurrentRunConfig: (cfg) => { currentRunConfig = cfg; },
+    setCurrentStageTimings: (t) => { currentStageTimings = t; },
+    setSelectedFiles: (f) => { selectedFiles = f; },
+    setCurrentFileIndex: (i) => { currentFileIndex = i; },
+    setCurrentFile: (f) => { currentFile = f; },
+    setCurrentFileType: (t) => { currentFileType = t; },
+    setRequiredAssetsReady: (r) => { requiredAssetsReady = r; },
+    setTotalPages: (n) => { totalPages = n; },
+    setCurrentPage: (n) => { currentPage = n; },
+    setSyncedPageIndex: (i) => { syncedPageIndex = i; },
+    setSyncedLinkId: (id) => { syncedLinkId = id; },
+  });
+
   // ── Auto-resume after page reload (GPU crash recovery) ──
   const resumeRaw = sessionStorage.getItem('rapiddoc_resume');
   let resumeSucceeded = false;
@@ -1087,59 +1162,6 @@ async function init() {
       appState.patch({ results: null, showOutputPanel: false });
     }
   }
-
-  initHistoryList({
-    el,
-    getHistory,
-    formatDuration,
-    formatFileSize,
-    formatDate,
-    escapeHtml,
-    refreshIcons,
-    loadHistoryItem,
-    requestHistoryDelete,
-  });
-  initHistoryReload({
-    el,
-    appState,
-    thumbnailObjectUrls,
-    get renderedPages() { return renderedPages; },
-    get overlayResizeObserver() { return overlayResizeObserver; },
-    setWorkspaceMode,
-    cleanupPdfPreview,
-    releaseCanvas,
-    hasStoredImages,
-    getResultArtifact,
-    readHistoryStoredValue,
-    normalizeHistoryStageTimings,
-    emptyTimingSet,
-    prepareLinkedBlocks,
-    updatePageInfo,
-    displayMarkdown,
-    displayJSON,
-    renderHistoryPreviewPages,
-    renderHistoryThumbnail,
-    showEmptyViewer,
-    formatFileSize,
-    formatDate,
-    updateRunSummary,
-    updateTimingsDisplay,
-    updateUI,
-    showLoading,
-    getSourceCanvas: () => sourceCanvas,
-    setSourceCanvas: (c) => { sourceCanvas = c; },
-    setCurrentRunConfig: (cfg) => { currentRunConfig = cfg; },
-    setCurrentStageTimings: (t) => { currentStageTimings = t; },
-    setSelectedFiles: (f) => { selectedFiles = f; },
-    setCurrentFileIndex: (i) => { currentFileIndex = i; },
-    setCurrentFile: (f) => { currentFile = f; },
-    setCurrentFileType: (t) => { currentFileType = t; },
-    setRequiredAssetsReady: (r) => { requiredAssetsReady = r; },
-    setTotalPages: (n) => { totalPages = n; },
-    setCurrentPage: (n) => { currentPage = n; },
-    setSyncedPageIndex: (i) => { syncedPageIndex = i; },
-    setSyncedLinkId: (id) => { syncedLinkId = id; },
-  });
 
   if (!resumeSucceeded) {
     loadHistory();
@@ -1569,8 +1591,7 @@ function isCurrentRuntimeReady() {
 
 function canRunExtraction() {
   return selectedFiles.length > 0
-    && !appState.get('isProcessing')
-    && appState.get('warmupStatus') === 'ready';
+    && !appState.get('isProcessing');
 }
 
 function cancelPendingWarmup({ resetStatus = false } = {}) {
@@ -1982,7 +2003,24 @@ function addSelectedFiles(files) {
   setWorkspaceMode('setup');
   setSetupTab('upload');
   updateSetupUploadState();
-  loadFile(validFiles[0], { replaceQueue: false });
+  // Store the file but DON'T render preview yet — that happens in runPipeline().
+  currentFile = validFiles[0];
+  currentFileType = isImageFile(currentFile) ? 'image' : 'pdf';
+  currentPage = 1;
+  totalPages = 1;
+  clearViewer();
+  appState.patch({
+    files: [...selectedFiles],
+    currentFileIndex: 0,
+    results: null,
+    progress: { current: 0, total: 0 },
+    timings: emptyTimingSet(),
+    warmupStatus: 'idle',
+    warmupConfigKey: null,
+    warmupError: null,
+  });
+  requiredAssetsReady = false;
+  updateUI();
 }
 
 function handleViewerDragEnter(event) {
@@ -2398,19 +2436,7 @@ async function runPipeline() {
     showLoading('No file selected or already processing');
     return;
   }
-  if (!requiredAssetsReady) {
-    showLoading('Download required assets first');
-    renderAssetGate();
-    updateUI();
-    return;
-  }
-  if (!isCurrentRuntimeReady()) {
-    scheduleBackgroundWarmup(0);
-    showLoading('Runtime is still preparing');
-    updateUI();
-    return;
-  }
-  
+
   currentRunConfig = getCurrentRunConfig();
   updateRunSummary(currentRunConfig);
   setWorkspaceMode('workspace');
@@ -2419,19 +2445,48 @@ async function runPipeline() {
   startKeepAlive();
 
   showProgress();
-  if (el.progressTitle) el.progressTitle.textContent = 'Preparing models...';
-  if (el.progressMessage) el.progressMessage.textContent = 'Loading AI models and warming up runtime.';
-  
+  if (el.progressTitle) el.progressTitle.textContent = 'Rendering PDF...';
+  if (el.progressMessage) el.progressMessage.textContent = 'Parsing document pages.';
+  _injectProgressWarning();
+
+  // Immediately show a processing history item so the sidebar has a visual
+  // indicator while the pipeline is running.
   try {
-    if (warmupTimer) {
-      clearTimeout(warmupTimer);
-      warmupTimer = null;
+    await _saveProcessingHistoryEntry();
+    loadHistory();
+  } catch { /* best-effort — history is not critical */ }
+
+  try {
+    // ── Step 1: Render PDF preview → viewer fills with pages ──
+    if (el.progressTitle) el.progressTitle.textContent = 'Rendering PDF...';
+    if (el.progressMessage) el.progressMessage.textContent = `Parsing ${currentFile ? currentFile.name : 'document'}...`;
+    // Show loading placeholder inside the viewer container.
+    if (el.emptyViewer) {
+      el.emptyViewer.classList.remove('hidden');
+      el.emptyViewer.innerHTML = `<div class="viewer-loading-indicator">
+        <div class="viewer-loading-spinner"></div>
+        <strong>Preparing document...</strong>
+        <p>Rendering pages for processing.</p>
+      </div>`;
     }
-    await warmDocumentRuntime({ background: false });
+    if (currentFileType === 'pdf') {
+      await loadPdfPreview(currentFile);
+    } else {
+      sourceCanvas = await buildSourceCanvas(currentFile);
+    }
+
+    // ── Step 2: Warmup models + download assets ──
+    if (el.progressTitle) el.progressTitle.textContent = 'Preparing models...';
+    if (el.progressMessage) el.progressMessage.textContent = 'Loading AI models and warming up runtime.';
+    await refreshAssetRequirements({ allowWarmup: false });
+    if (warmupTimer) { clearTimeout(warmupTimer); warmupTimer = null; }
+    if (!pipelineAdapter.isPrepared(appState, currentFile)) {
+      await warmDocumentRuntime({ background: false });
+    }
     if (!pipelineAdapter.isPrepared(appState, currentFile)) {
       hideProgress();
       setWorkspaceMode('setup');
-      showLoading('Runtime preparation cancelled');
+      showLoading('Runtime preparation failed');
       return;
     }
 
@@ -2503,6 +2558,25 @@ function showProgress() {
   }
   updateElapsedTime();
   elapsedTimerId = setInterval(updateElapsedTime, 200);
+
+  _injectProgressWarning();
+}
+
+function _injectProgressWarning() {
+  const overlay = document.getElementById('progressOverlay');
+  if (!overlay) return;
+  // Remove stale warning first
+  overlay.querySelector('.progress-warning')?.remove();
+  const warning = document.createElement('span');
+  warning.className = 'progress-warning';
+  warning.textContent = '⚠ Keep this tab visible — background tabs may slow processing';
+  warning.title = 'Chrome throttles background-tab CPU. Keep this browser tab active for full speed.';
+  const bar = overlay.querySelector('.progress-bar');
+  if (bar) {
+    bar.after(warning);
+  } else {
+    overlay.querySelector('.progress-surface')?.appendChild(warning);
+  }
 }
 
 function updateElapsedTime() {
@@ -2510,7 +2584,13 @@ function updateElapsedTime() {
   const elapsed = (Date.now() - processingStartTime) / 1000;
   const timeEl = document.getElementById('timeElapsed');
   if (timeEl) {
-    timeEl.textContent = `${elapsed.toFixed(1)}s`;
+    if (elapsed >= 60) {
+      const min = Math.floor(elapsed / 60);
+      const sec = Math.floor(elapsed % 60);
+      timeEl.textContent = `${min}m ${sec}s`;
+    } else {
+      timeEl.textContent = `${elapsed.toFixed(1)}s`;
+    }
   }
 }
 
@@ -2849,7 +2929,10 @@ function buildOverlayBlocksFromMiddlePdfInfo(results) {
   const blocks = [];
   const globalPreprocBlocks = buildGlobalPreprocBlocks(pages, results);
 
-  pages.forEach((page, pageIndex) => {
+  pages.forEach((page, _loopIdx) => {
+    // Use page.page_idx (already offset to absolute by offsetPageIndices)
+    // instead of loop index, which would be 0-based within each chunk.
+    const pageIndex = getItemPageIndex(page);
     const sourceSize = getMiddlePageSize(page) || getOverlaySourceSize(results, pageIndex, []);
     const paraBlocks = Array.isArray(page?.para_blocks) ? page.para_blocks : [];
     const discardedBlocks = Array.isArray(page?.discarded_blocks) ? page.discarded_blocks : [];
@@ -2945,7 +3028,8 @@ function groupContentListByPage(contentList) {
 
 function buildGlobalPreprocBlocks(pages, results) {
   const blocks = [];
-  pages.forEach((page, pageIndex) => {
+  pages.forEach((page, _loopIdx) => {
+    const pageIndex = getItemPageIndex(page);
     const sourceSize = getMiddlePageSize(page) || getOverlaySourceSize(results, pageIndex, []);
     const pageBlocks = Array.isArray(page?.preproc_blocks) ? page.preproc_blocks : [];
     pageBlocks.forEach((block, index) => {
@@ -3119,7 +3203,8 @@ function getMiddleBlockSortKey(block) {
 function buildMiddleOverlayBlocks(results) {
   const pages = Array.isArray(results?.middle_json?.pdf_info) ? results.middle_json.pdf_info : [];
   const middleBlocks = [];
-  pages.forEach((page, pageIndex) => {
+  pages.forEach((page, _loopIdx) => {
+    const pageIndex = getItemPageIndex(page);
     const sourceSize = getMiddlePageSize(page) || getOverlaySourceSize(results, pageIndex, []);
     const blocks = Array.isArray(page?.preproc_blocks) ? page.preproc_blocks : [];
     blocks.forEach((block, index) => {
@@ -3399,70 +3484,205 @@ function isStandaloneDisplayFormulaBlock(block) {
 
 function linkMarkdownBlocks(pageCount = 1, contentList = null) {
   if (!el.markdownContent) return;
+  // ── Cleanup previous dividers and linking data ──
   el.markdownContent.querySelectorAll('.markdown-page-divider').forEach(node => node.remove());
-
   el.markdownContent.querySelectorAll('.block-shell').forEach(shell => {
     delete shell.dataset.linkId;
     delete shell.dataset.linkGroupId;
     delete shell.dataset.pageIndex;
     shell.classList.remove('is-linked', 'is-merged-block');
   });
+  if (!linkedBlocks.length) prepareLinkedBlocks(appState.get('results'));
 
-  if (!linkedBlocks.length) {
-    prepareLinkedBlocks(appState.get('results'));
+  // ── Build per-page candidate pools (exclude pages, discarded) ──
+  // CRITICAL: merge-group duplicates (N middle fragments → 1 content block)
+  // create N candidates for one shell. Keep only the FIRST fragment per group
+  // so shell count matches unique block count.
+  const seenGroups = new Set();
+  const rawCandidates = linkedBlocks.length
+    ? linkedBlocks.filter(c => c.type !== 'page' && c.category !== 'discarded')
+    : [];
+  const candidates = [];
+  for (const c of rawCandidates) {
+    if (c.mergeGroupId) {
+      if (seenGroups.has(c.mergeGroupId)) continue;
+      seenGroups.add(c.mergeGroupId);
+    }
+    candidates.push(c);
   }
+  const candidatesByPage = new Map();
+  candidates.forEach(c => {
+    const p = Number(c.pageIndex) || 0;
+    if (!candidatesByPage.has(p)) candidatesByPage.set(p, []);
+    candidatesByPage.get(p).push(c);
+  });
 
   const shells = Array.from(el.markdownContent.querySelectorAll('.block-shell'));
-  const candidates = linkedBlocks.length
-    ? linkedBlocks
-    : buildPageOnlyLinks(pageCount, contentList);
+  if (!shells.length) return;
 
-  let cursor = 0;
-  const lastShellByPage = new Map();
-  shells.forEach((shell) => {
-    const block = shell.firstElementChild;
-    const link = findNextMarkdownLink(block, candidates, cursor);
-    if (!link) return;
-
-    cursor = Math.max(cursor, candidates.indexOf(link) + 1);
+  // ── Pure positional linking ─────────────────────────────────────────────
+  // Walk shells in DOM order, assign the next unclaimed candidate whose
+  // pageIndex matches the shell's expected page (based on cumulative
+  // candidate count per page). Merge-group duplicates after the first
+  // share a shell → do NOT consume one.
+  const assign = (shell, link) => {
     shell.dataset.linkId = link.id;
     shell.dataset.pageIndex = String(link.pageIndex);
     shell.dataset.linkLabel = link.label || link.type || 'block';
-    shell.dataset.linkOrder = String(link.order ?? candidates.indexOf(link));
-    const mergedLinks = getPrebuiltMergeLinks(link, candidates) || [link];
-    if (link.mergeGroupId != null) {
+    if (link.mergeGroupId) {
       shell.dataset.linkGroupId = link.mergeGroupId;
-    }
-    if (mergedLinks.length > 1) {
       shell.classList.add('is-merged-block');
-      cursor = Math.max(cursor, candidates.indexOf(mergedLinks[mergedLinks.length - 1]) + 1);
     }
-    lastShellByPage.set(link.pageIndex, shell);
-  });
+  };
 
-  Array.from(lastShellByPage.entries())
-    .sort(([a], [b]) => a - b)
-    .forEach(([pageIndex, shell]) => {
-      shell.insertAdjacentElement('afterend', createMarkdownPageDivider(pageIndex));
-    });
+  // Flatten candidates into a single ordered list: page-by-page, cursor-based.
+  const sortedPages = Array.from(candidatesByPage.keys()).sort((a, b) => a - b);
+  const perPageCursors = new Map();
+  sortedPages.forEach(p => perPageCursors.set(p, 0));
+
+  // Determine which page a shell "belongs to" — the earliest page whose
+  // cursor hasn't reached its total candidate count.
+  const maxIdx = sortedPages.length - 1;
+  for (const shell of shells) {
+    let matched = false;
+    for (let j = 0; j <= maxIdx; j++) {
+      const p = sortedPages[j];
+      const pool = candidatesByPage.get(p) || [];
+      const cur = perPageCursors.get(p) || 0;
+      if (cur >= pool.length) continue;
+      assign(shell, pool[cur]);
+      perPageCursors.set(p, cur + 1);
+      matched = true;
+      break;
+    }
+    if (!matched) break; // ran out of candidates
+  }
+
+  // ── Page dividers: insert before shell whose pageIndex changes ──
+  let prevPageIdx = -1;
+  for (const shell of shells) {
+    const pi = Number(shell.dataset.pageIndex);
+    if (!Number.isFinite(pi)) continue;
+    if (pi !== prevPageIdx && prevPageIdx >= 0) {
+      shell.before(createMarkdownPageDivider(pi));
+    }
+    prevPageIdx = pi;
+  }
 }
 
-function getPrebuiltMergeLinks(link, candidates) {
-  if (!link?.mergeGroupId) return null;
-  const group = candidates.filter(candidate => candidate.mergeGroupId === link.mergeGroupId);
-  return group.length > 1 ? group : null;
+/**
+ * Find the best overlay link for a markdown block within its page window.
+ * Advances the per-page cursor so candidates aren't reused.
+ */
+function findBestLinkForBlock(blockInfo, candidatesByPage, pageCursors) {
+
+  // Try each page's candidates starting from that page's cursor.
+  // Walk through pages in order; for each page, try a window of candidates.
+  const sortedPages = Array.from(candidatesByPage.keys()).sort((a, b) => a - b);
+  let best = null;
+  let bestScore = 0;
+
+  for (const pageIdx of sortedPages) {
+    const pageCands = candidatesByPage.get(pageIdx) || [];
+    if (!pageCands.length) continue;
+    const cursor = pageCursors.get(pageIdx) || 0;
+    if (cursor >= pageCands.length) continue;
+    const end = Math.min(pageCands.length, cursor + 15);
+    for (let i = cursor; i < end; i++) {
+      const candidate = pageCands[i];
+      const score = scoreMarkdownLink(blockInfo, candidate, Math.abs(i - cursor));
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    if (bestScore >= 44) {
+      // Advance cursor past the match.
+      const matchIdx = pageCands.indexOf(best);
+      if (matchIdx >= 0) pageCursors.set(pageIdx, matchIdx + 1);
+      return best;
+    }
+  }
+  return null;
 }
 
-function buildPageOnlyLinks(pageCount = 1, contentList = null) {
-  const count = Math.max(1, Number(pageCount) || 1);
-  const items = Array.isArray(contentList) ? contentList : [];
-  return Array.from({ length: count }, (_, index) => ({
-    id: `page-${index}`,
-    pageIndex: index,
-    label: 'page',
-    type: 'page',
-    text: normalizeLayoutText(items.filter(item => getItemPageIndex(item) === index).map(getContentItemText).join(' ')),
-  }));
+/**
+ * Force-match: when a block has no text (rendered image for formula/table),
+ * pick the first unclaimed candidate on each page in order, preferring
+ * candidates whose category is compatible. Advances the cursor for the
+ * matched page only, preventing cascade.
+ */
+function findForceMatch(blockLabelGroup, tagName, isStandaloneFormula, candidatesByPage, pageCursors) {
+  const sortedPages = Array.from(candidatesByPage.keys()).sort((a, b) => a - b);
+  // ── Pass 1: strict equation/formula match → same page ──
+  if (isStandaloneFormula) {
+    for (const pageIdx of sortedPages) {
+      const pageCands = candidatesByPage.get(pageIdx) || [];
+      for (let i = pageCursors.get(pageIdx) || 0; i < pageCands.length; i++) {
+        const cand = pageCands[i];
+        const candGroup = labelGroupKey(cand.originalLabel, cand.type);
+        const candType = String(cand.type || '').toLowerCase();
+        if (/formula|equation|interline_equation/.test(candType) || candGroup === 'equation') {
+          pageCursors.set(pageIdx, i + 1);
+          return cand;
+        }
+      }
+    }
+    // ── No equation candidate (model OFF). Do NOT fall back — a positional
+    //     grab from an unrelated page would cascade-mismatch all subsequent
+    //     blocks. The formula shell stays unlinked; no corruption. ──
+    return null;
+  }
+  // ── Non-formula image-like: exact label group match on each page ──
+  for (const pageIdx of sortedPages) {
+    const pageCands = candidatesByPage.get(pageIdx) || [];
+    for (let i = pageCursors.get(pageIdx) || 0; i < pageCands.length; i++) {
+      const cand = pageCands[i];
+      const candGroup = labelGroupKey(cand.originalLabel, cand.type);
+      if (blockLabelGroup && candGroup && blockLabelGroup === candGroup) {
+        pageCursors.set(pageIdx, i + 1);
+        return cand;
+      }
+    }
+  }
+  // ── Permissive: media↔media, unlabeled→image ──
+  for (const pageIdx of sortedPages) {
+    const pageCands = candidatesByPage.get(pageIdx) || [];
+    for (let i = pageCursors.get(pageIdx) || 0; i < pageCands.length; i++) {
+      const cand = pageCands[i];
+      const candGroup = labelGroupKey(cand.originalLabel, cand.type);
+      const candType = String(cand.type || '').toLowerCase();
+      const isImageLike = /image|figure|chart|picture/.test(candType) || candGroup === 'media_image';
+      const blockIsMedia = blockLabelGroup === 'media_image' || blockLabelGroup === 'media_table';
+      const candIsMedia = candGroup === 'media_image' || candGroup === 'media_table';
+      if (blockIsMedia && candIsMedia) {
+        pageCursors.set(pageIdx, i + 1);
+        return cand;
+      }
+      if (!blockLabelGroup && isImageLike) {
+        pageCursors.set(pageIdx, i + 1);
+        return cand;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Per-page positional fallback: pick the next unused candidate from the
+ * earliest page that still has candidates.
+ */
+function findBestPerPageFallback(candidatesByPage, pageCursors) {
+  const sortedPages = Array.from(candidatesByPage.keys()).sort((a, b) => a - b);
+  for (const pageIdx of sortedPages) {
+    const pageCands = candidatesByPage.get(pageIdx) || [];
+    const cursor = pageCursors.get(pageIdx) || 0;
+    if (cursor < pageCands.length) {
+      pageCursors.set(pageIdx, cursor + 1);
+      return pageCands[cursor];
+    }
+  }
+  return null;
 }
 
 function createMarkdownPageDivider(pageIndex) {
@@ -3500,6 +3720,18 @@ function findNextMarkdownLink(block, candidates, startIndex) {
 
   const pageOnly = candidates[startIndex];
   if (pageOnly?.type === 'page') return pageOnly;
+  return null;
+}
+
+/**
+ * Fallback linker: when text scoring fails, pick the next unclaimed
+ * candidate so every shell-block still gets a unique linkId.
+ */
+function findFallbackLink(candidates, cursor) {
+  // Walk forward from cursor to find the first unclaimed non-page candidate.
+  for (let i = cursor; i < candidates.length; i++) {
+    if (candidates[i].type !== 'page') return candidates[i];
+  }
   return null;
 }
 
@@ -3551,7 +3783,16 @@ function scoreMarkdownLink(blockInfo, candidate, distance = 0) {
     // image-type candidate (and vice versa) without being blocked by the cross-category gate.
     const bothMedia = (blockLabelGroup === 'media_image' || blockLabelGroup === 'media_table')
                    && (candidateLabelGroup === 'media_image' || candidateLabelGroup === 'media_table');
-    if (!bothPlainText && !bothMedia) return 0;
+    // CRITICAL: when formula model is OFF, display-formula shells render as images
+    // (LaTeX → katex-display-placeholder → SVG/img inside). The shell's blockLabelGroup
+    // may be 'equation' but the candidate in the overlay is 'media_image' (image-type).
+    const equationToImage = (blockLabelGroup === 'equation' && candidateLabelGroup === 'media_image')
+                         || (blockLabelGroup === 'media_image' && candidateLabelGroup === 'equation');
+    // When formula model is OFF, inline formulas render inside text — the pipeline
+    // may classify them as 'text' or 'formula'. Allow cross-matching text↔equation.
+    const equationToText = (blockLabelGroup === 'equation' && candidateLabelGroup === 'text')
+                        || (blockLabelGroup === 'text' && candidateLabelGroup === 'equation');
+    if (!bothPlainText && !bothMedia && !equationToImage && !equationToText) return 0;
   }
 
   if ((blockInfo.hasImage || blockInfo.isMedia) && /image|figure|chart|picture/.test(`${type} ${label} ${source}`)) {
@@ -3573,6 +3814,15 @@ function scoreMarkdownLink(blockInfo, candidate, distance = 0) {
 
   if (blockInfo.isStandaloneFormula && !blockInfo.hasImage && /formula|equation/.test(`${type} ${label} ${source}`)) {
     score = Math.max(score, 64);
+  }
+
+  // Fallback for formula blocks whose LaTeX content is escaped/markdown-rendered
+  // differently than the pipeline's raw text. If the block is a formula and the
+  // candidate looks like equation, force a high score to prevent orphan shells.
+  if (blockInfo.isStandaloneFormula && !blockInfo.hasImage) {
+    if (/formula|equation|interline_equation|inline_equation/.test(`${type} ${label}`)) {
+      score = Math.max(score, 58);
+    }
   }
 
   const blockText = blockInfo.blockText;
@@ -4852,8 +5102,8 @@ function updateUI() {
   if (el.startBtn) {
     const canRun = canRunExtraction();
     el.startBtn.disabled = !canRun;
-    el.startBtn.title = canRun ? '' : hasFiles && appState.get('warmupStatus') !== 'ready'
-      ? 'Models are still preparing, please wait...'
+    el.startBtn.title = canRun ? '' : hasFiles && appState.get('isProcessing')
+      ? 'Pipeline is already running'
       : '';
   }
   if (el.uploadBtn) el.uploadBtn.disabled = Boolean(isProcessing);
@@ -4998,6 +5248,13 @@ function showRecoverableError(err, { audit_id = '', retryFn = null } = {}) {
 // Does NOT mutate native `disabled` on inputs — uses aria-disabled + pointer-events.
 const _processingInterceptor = (e) => {
   if (appState.get('isProcessing')) {
+    // Whitelist: allow interaction with all toolbar and settings elements.
+    const allowed = e.target?.closest?.(
+      '.docparse-drawer, .drawer-backdrop, .settings-control-stack, .settings-advanced, ' +
+      '.input-toolbar, .output-toolbar, #timingsPanel, #assetGateCard, ' +
+      '.workspace-toolbar, .setup-inline-settings, [data-allow-during-processing]'
+    );
+    if (allowed) return;
     e.stopPropagation();
     e.preventDefault();
   }
@@ -5005,9 +5262,9 @@ const _processingInterceptor = (e) => {
 let _processingChromeActive = false;
 
 function setProcessingChrome(isProcessing) {
+  // Only lock the run/upload/download buttons — toolbar remains interactive.
   const controls = [
     el.startBtn, el.uploadBtn, el.downloadBtn,
-    el.overlayToggle, el.zoomIn, el.zoomOut, el.fitWidth,
   ].filter(Boolean);
 
   if (isProcessing && !_processingChromeActive) {

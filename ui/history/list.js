@@ -65,7 +65,9 @@ export function loadHistory() {
 
   history.forEach((item) => {
     const div = document.createElement('div');
-    div.className = 'history-item';
+    // Whole-card pulse via CSS class when pipeline is active
+    const isProcessing = Boolean(item._isProcessing);
+    div.className = 'history-item' + (isProcessing ? ' is-processing' : '');
 
     // Determine icon based on file type
     const fileName = String(item.fileName || 'Untitled document');
@@ -81,11 +83,11 @@ export function loadHistory() {
     const historyMeta = [
       sizeText !== '-' ? sizeText : null,
       formatDate(item.timestamp),
-      timingText !== '-' ? timingText : null,
+      isProcessing ? '<span class="history-processing-pulse">Processing...</span>' : (timingText !== '-' ? timingText : null),
     ].filter(Boolean).join(' • ');
 
     div.innerHTML = `
-      <div class="history-icon ${iconClass}">
+      <div class="history-icon ${iconClass}${isProcessing ? ' is-processing' : ''}">
         <i data-lucide="${iconName}"></i>
       </div>
       <div class="history-info">
@@ -93,7 +95,7 @@ export function loadHistory() {
         <div class="history-meta">${historyMeta}</div>
         ${badges ? `<div class="history-badges">${badges}</div>` : ''}
       </div>
-      <button class="history-delete" data-id="${item.id}" type="button" aria-label="Delete ${escapeHtml(fileName)}">
+      <button class="history-delete" data-id="${item.id}" type="button" aria-label="Delete ${escapeHtml(fileName)}"${isProcessing ? ' disabled' : ''}>
         <i data-lucide="trash-2"></i>
       </button>
     `;

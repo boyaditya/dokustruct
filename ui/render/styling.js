@@ -28,7 +28,7 @@ const _ctx = {
   extractBlockLinkText: (block) => block?.textContent || '',
   normalizeLayoutText: (value) => String(value ?? '').replace(/\s+/g, ' ').trim(),
   labelGroupKey: () => 'text',
-  UI_LOG_PREFIX: '[DocParsing UI]',
+  UI_LOG_PREFIX: '[DokuStruct UI]',
 };
 
 /**

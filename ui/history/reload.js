@@ -8,7 +8,7 @@
 import { createDisposerChain } from '../lifecycle/disposerChain.js';
 import { readHistoryAsset } from './storage.js';
 
-const UI_LOG_PREFIX = '[DocParsing UI]';
+const UI_LOG_PREFIX = '[DokuStruct UI]';
 
 /**
  * @typedef {{

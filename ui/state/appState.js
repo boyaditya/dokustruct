@@ -1,6 +1,6 @@
 /**
  * ui/state/appState.js
- * Central reactive state store for the DocParsing web UI.
+ * Central reactive state store for the DokuStruct web UI.
  *
  * Pattern: lightweight pub/sub with path-based subscriptions.
  * No external framework — vanilla JS only.

@@ -70,7 +70,7 @@ function hasOpenCVRuntime() {
 function loadOpenCVScript() {
   if (hasOpenCVRuntime()) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-docparse-opencv], script[src="/opencv/opencv.js"]');
+    const existing = document.querySelector('script[data-dokustruct-opencv], script[src="/opencv/opencv.js"]');
     if (existing) {
       if (hasOpenCVRuntime()) { resolve(); return; }
       existing.addEventListener('load', resolve, { once: true });
@@ -80,7 +80,7 @@ function loadOpenCVScript() {
     const script = document.createElement('script');
     script.src = '/opencv/opencv.js';
     script.async = true;
-    script.dataset.docparseOpencv = 'true';
+    script.dataset.dokustructOpencv = 'true';
     script.addEventListener('load', resolve, { once: true });
     script.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
     document.head.appendChild(script);

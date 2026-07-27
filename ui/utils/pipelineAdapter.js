@@ -63,7 +63,7 @@ function loadOpenCVScript(signal) {
 
   openCvScriptPromise = new Promise((resolve, reject) => {
     throwIfAborted(signal);
-    const existingScript = document.querySelector('script[data-docparse-opencv], script[src="/opencv/opencv.js"]');
+    const existingScript = document.querySelector('script[data-dokustruct-opencv], script[src="/opencv/opencv.js"]');
     if (existingScript) {
       existingScript.addEventListener('load', () => resolve(), { once: true });
       existingScript.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
@@ -74,7 +74,7 @@ function loadOpenCVScript(signal) {
     const script = document.createElement('script');
     script.src = '/opencv/opencv.js';
     script.async = true;
-    script.dataset.docparseOpencv = 'true';
+    script.dataset.dokustructOpencv = 'true';
     script.addEventListener('load', () => resolve(), { once: true });
     script.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
     signal?.addEventListener('abort', () => reject(new DOMException('Operation aborted', 'AbortError')), { once: true });

@@ -1,4 +1,4 @@
-/* ===== DOCPARSING UI - CLEAN DESIGN ===== */
+/* ===== DokuStruct UI - CLEAN DESIGN ===== */
 
 * {
     margin: 0;
@@ -42,7 +42,7 @@ body {
 }
 
 /* ===== APP LAYOUT ===== */
-.docparse-app {
+.dokustruct-app {
     display: flex;
     width: 100vw;
     height: 100vh;
@@ -50,7 +50,7 @@ body {
 }
 
 /* ===== SIDEBAR ===== */
-.docparse-sidebar {
+.dokustruct-sidebar {
     width: var(--sidebar-width);
     background: var(--white);
     border-right: 1px solid var(--border);
@@ -410,7 +410,7 @@ input:focus-visible {
     outline-offset: 1px;
 }
 
-.docparse-drawer {
+.dokustruct-drawer {
     position: fixed;
     top: 0;
     right: 0;
@@ -585,7 +585,7 @@ input:focus-visible {
 }
 
 /* ===== MAIN CONTENT ===== */
-.docparse-main {
+.dokustruct-main {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -1979,32 +1979,32 @@ input:focus-visible {
 }
 
 /* ===== SIDEBAR COLLAPSED STATE ===== */
-.docparse-sidebar.collapsed {
+.dokustruct-sidebar.collapsed {
     width: 60px;
 }
 
-.docparse-sidebar.collapsed .logo-text,
-.docparse-sidebar.collapsed .create-task-btn span,
-.docparse-sidebar.collapsed .file-list-section {
+.dokustruct-sidebar.collapsed .logo-text,
+.dokustruct-sidebar.collapsed .create-task-btn span,
+.dokustruct-sidebar.collapsed .file-list-section {
     display: none;
 }
 
-.docparse-sidebar.collapsed .sidebar-header {
+.dokustruct-sidebar.collapsed .sidebar-header {
     padding-left: 6px;
     padding-right: 6px;
 }
 
-.docparse-sidebar.collapsed .create-task-btn {
+.dokustruct-sidebar.collapsed .create-task-btn {
     margin-left: 6px;
     margin-right: 6px;
     padding: 0;
 }
 
-.docparse-sidebar.collapsed .btn-group {
+.dokustruct-sidebar.collapsed .btn-group {
     flex-direction: column;
 }
 
-.docparse-sidebar.collapsed .export-menu {
+.dokustruct-sidebar.collapsed .export-menu {
     width: 100%;
 }
 
@@ -2194,7 +2194,7 @@ body {
     --sidebar-width: 276px;
 }
 
-.docparse-sidebar {
+.dokustruct-sidebar {
     background: #f8fafc;
 }
 
@@ -2758,20 +2758,20 @@ body {
     background: #dc2626;
 }
 
-.docparse-sidebar.collapsed .file-list-header {
+.dokustruct-sidebar.collapsed .file-list-header {
     display: none;
 }
 
-.docparse-sidebar.collapsed .sidebar-content {
+.dokustruct-sidebar.collapsed .sidebar-content {
     padding: 10px 6px;
 }
 
-.docparse-sidebar.collapsed .sidebar-header {
+.dokustruct-sidebar.collapsed .sidebar-header {
     justify-content: center;
     padding-bottom: 10px;
 }
 
-.docparse-sidebar.collapsed .create-task-btn {
+.dokustruct-sidebar.collapsed .create-task-btn {
     margin: 4px 0 12px;
     width: 44px;
     height: 40px;
@@ -2782,13 +2782,13 @@ body {
         overflow: auto;
     }
 
-    .docparse-app {
+    .dokustruct-app {
         min-height: 100vh;
         height: auto;
         flex-direction: column;
     }
 
-    .docparse-sidebar {
+    .dokustruct-sidebar {
         width: 100%;
         max-height: 248px;
         border-right: 0;
@@ -2962,11 +2962,11 @@ json-viewer {
 }
 
 @media (max-width: 900px) {
-    .docparse-app {
+    .dokustruct-app {
         flex-direction: column;
     }
 
-    .docparse-sidebar {
+    .dokustruct-sidebar {
         width: 100%;
         max-height: 32vh;
         border-right: 0;
@@ -2981,7 +2981,7 @@ json-viewer {
         max-height: 18vh;
     }
 
-    .docparse-drawer,
+    .dokustruct-drawer,
     .timings-drawer {
         top: auto;
         bottom: 0;
@@ -3537,7 +3537,7 @@ json-viewer {
     }
 }
 
-/* ===== DOCPARSING POLISH PATCH ===== */
+/* ===== DokuStruct POLISH PATCH ===== */
 .setup-pane-header {
     margin-bottom: 16px;
 }

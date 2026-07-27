@@ -1,6 +1,6 @@
 /**
  * ui/app.js
- * DocParsing UI - document processing workspace
+ * DokuStruct UI - document processing workspace
  */
 
 import { appState } from './state/appState.js';
@@ -55,7 +55,7 @@ import { initConnectorsRenderer, renderMergeConnectors as _renderMergeConnectors
 import { initStylingRenderer, applyLayoutBasedStyling as _applyLayoutBasedStyling } from './render/styling.js';
 import { initActionsRenderer, attachBlockActions as _attachBlockActions, isMediaOutputBlock as _isMediaOutputBlock, isStandaloneDisplayFormulaBlock as _isStandaloneDisplayFormulaBlock, blockHasFormula as _blockHasFormula, extractBlockLinkText as _extractBlockLinkText, hoistDisplayFormulaPlaceholders as _hoistDisplayFormulaPlaceholders } from './render/actions.js';
 
-const UI_LOG_PREFIX = '[DocParsing UI]';
+const UI_LOG_PREFIX = '[DokuStruct UI]';
 
 function hasKatexRenderError(html) {
   return html.includes('katex-error')
@@ -112,15 +112,15 @@ async function getExportUtils() {
 // ===== HISTORY STORAGE =====
 const LEGACY_STORAGE_PREFIX = ['rapid', 'doc'].join('');
 const OLD_HISTORY_KEY = `${LEGACY_STORAGE_PREFIX}_history`;
-const HISTORY_KEY = 'docparsing_history';
+const HISTORY_KEY = 'dokustruct_history';
 const OLD_HISTORY_ASSET_DB = `${LEGACY_STORAGE_PREFIX}_history_assets`;
-const HISTORY_ASSET_DB = 'docparsing_history_assets';
+const HISTORY_ASSET_DB = 'dokustruct_history_assets';
 const HISTORY_ASSET_STORE = 'assets';
 const MAX_HISTORY = 50;
 const KEEP_HISTORY_ARTIFACTS = true;
 const OLD_OVERLAY_VISIBLE_KEY = `${LEGACY_STORAGE_PREFIX}_overlay_visible`;
-const OVERLAY_VISIBLE_KEY = 'docparsing_overlay_visible';
-const UI_PREFS_KEY = 'docparsing_ui_preferences';
+const OVERLAY_VISIBLE_KEY = 'dokustruct_overlay_visible';
+const UI_PREFS_KEY = 'dokustruct_ui_preferences';
 
 function migrateUiStorage() {
   if (localStorage.getItem(HISTORY_KEY) == null) {
@@ -1266,7 +1266,7 @@ function setupEventListeners() {
     if (!event.target.closest('.export-menu')) {
       closeExportMenu();
     }
-    if (!event.target.closest('.docparse-drawer')
+    if (!event.target.closest('.dokustruct-drawer')
       && !event.target.closest('#settingsToggle')
       && !event.target.closest('#timingsToggle')) {
       closeDrawers();
@@ -5250,7 +5250,7 @@ const _processingInterceptor = (e) => {
   if (appState.get('isProcessing')) {
     // Whitelist: allow interaction with all toolbar and settings elements.
     const allowed = e.target?.closest?.(
-      '.docparse-drawer, .drawer-backdrop, .settings-control-stack, .settings-advanced, ' +
+      '.dokustruct-drawer, .drawer-backdrop, .settings-control-stack, .settings-advanced, ' +
       '.input-toolbar, .output-toolbar, #timingsPanel, #assetGateCard, ' +
       '.workspace-toolbar, .setup-inline-settings, [data-allow-during-processing]'
     );

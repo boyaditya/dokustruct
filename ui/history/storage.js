@@ -4,7 +4,7 @@
  * Extracted from ui/app.js. Signature unchanged (Requirement 7.2).
  */
 
-const HISTORY_ASSET_DB = 'docparsing_history_assets';
+const HISTORY_ASSET_DB = 'dokustruct_history_assets';
 const OLD_HISTORY_ASSET_DB = 'rapiddoc_history_assets';
 const HISTORY_ASSET_STORE = 'assets';
 

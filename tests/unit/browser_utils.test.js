@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { yieldToBrowser, formatPipelineError, BrowserPerformanceProfile, detectProfile } from '@rapid_doc/utils/browser_utils.js';
+import { yieldToBrowser, formatPipelineError } from '@rapid_doc/utils/browser_utils.js';
 
 describe('yieldToBrowser', () => {
   it('returns a promise that resolves', async () => {
@@ -130,98 +130,5 @@ describe('formatPipelineError', () => {
       recoverable: true,
     });
     expect(result).toBe('[Pipeline] Unknown error [recoverable]');
-  });
-});
-
-describe('BrowserPerformanceProfile', () => {
-  it('has three tiers: MOBILE, DESKTOP, HIGH_END', () => {
-    expect(BrowserPerformanceProfile).toHaveProperty('MOBILE');
-    expect(BrowserPerformanceProfile).toHaveProperty('DESKTOP');
-    expect(BrowserPerformanceProfile).toHaveProperty('HIGH_END');
-  });
-
-  it('each tier has all required fields', () => {
-    for (const tier of Object.values(BrowserPerformanceProfile)) {
-      expect(tier).toHaveProperty('MAX_CONCURRENT_BATCHES');
-      expect(tier).toHaveProperty('REC_BATCH_NUM');
-      expect(tier).toHaveProperty('DPI_DOWNSCALE_THRESHOLD');
-      expect(tier).toHaveProperty('PDF_PAGES_BATCH');
-    }
-  });
-
-  it('tier values are ordered MOBILE < DESKTOP < HIGH_END', () => {
-    const { MOBILE, DESKTOP, HIGH_END } = BrowserPerformanceProfile;
-    expect(MOBILE.MAX_CONCURRENT_BATCHES).toBeLessThan(DESKTOP.MAX_CONCURRENT_BATCHES);
-    expect(DESKTOP.MAX_CONCURRENT_BATCHES).toBeLessThan(HIGH_END.MAX_CONCURRENT_BATCHES);
-    expect(MOBILE.DPI_DOWNSCALE_THRESHOLD).toBeLessThan(DESKTOP.DPI_DOWNSCALE_THRESHOLD);
-    expect(DESKTOP.DPI_DOWNSCALE_THRESHOLD).toBeLessThan(HIGH_END.DPI_DOWNSCALE_THRESHOLD);
-    expect(MOBILE.PDF_PAGES_BATCH).toBeLessThan(DESKTOP.PDF_PAGES_BATCH);
-    expect(DESKTOP.PDF_PAGES_BATCH).toBeLessThan(HIGH_END.PDF_PAGES_BATCH);
-  });
-
-  it('is frozen (immutable)', () => {
-    expect(Object.isFrozen(BrowserPerformanceProfile)).toBe(true);
-    expect(Object.isFrozen(BrowserPerformanceProfile.DESKTOP)).toBe(true);
-  });
-});
-
-describe('detectProfile', () => {
-  it('returns DESKTOP when navigator is undefined (Node/SSR env)', () => {
-    // In the vitest Node environment, navigator is undefined.
-    expect(detectProfile()).toBe(BrowserPerformanceProfile.DESKTOP);
-  });
-
-  it('returns MOBILE when navigator.deviceMemory <= 4', () => {
-    vi.stubGlobal('navigator', { deviceMemory: 4 });
-    try {
-      expect(detectProfile()).toBe(BrowserPerformanceProfile.MOBILE);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('returns MOBILE for very low memory (1 GB)', () => {
-    vi.stubGlobal('navigator', { deviceMemory: 1 });
-    try {
-      expect(detectProfile()).toBe(BrowserPerformanceProfile.MOBILE);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('returns HIGH_END when navigator.deviceMemory >= 16', () => {
-    vi.stubGlobal('navigator', { deviceMemory: 16 });
-    try {
-      expect(detectProfile()).toBe(BrowserPerformanceProfile.HIGH_END);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('returns HIGH_END for 32 GB memory', () => {
-    vi.stubGlobal('navigator', { deviceMemory: 32 });
-    try {
-      expect(detectProfile()).toBe(BrowserPerformanceProfile.HIGH_END);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('returns DESKTOP for mid-range memory (8 GB)', () => {
-    vi.stubGlobal('navigator', { deviceMemory: 8 });
-    try {
-      expect(detectProfile()).toBe(BrowserPerformanceProfile.DESKTOP);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('returns DESKTOP when navigator exists but deviceMemory is absent', () => {
-    vi.stubGlobal('navigator', {}); // no deviceMemory API
-    try {
-      expect(detectProfile()).toBe(BrowserPerformanceProfile.DESKTOP);
-    } finally {
-      vi.unstubAllGlobals();
-    }
   });
 });

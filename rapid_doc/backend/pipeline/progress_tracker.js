@@ -104,21 +104,18 @@ export class ProgressTracker {
 
   /**
    * Mark all stages as complete (call this when pipeline finishes).
-   * This will report 100% progress.
+   * This will report 100% progress. When called with a stage name, marks
+   * only that stage as complete.
    */
-  complete() {
+  complete(stage = null) {
+    if (stage) {
+      if (this.stages[stage]) {
+        this.update(stage, this.stages[stage].total);
+      }
+      return;
+    }
     if (this.onProgress) {
       this.onProgress('complete', 1, 1, 100);
-    }
-  }
-
-  /**
-   * Mark stage as complete.
-   * @param {string} stage - Stage name
-   */
-  complete(stage) {
-    if (this.stages[stage]) {
-      this.update(stage, this.stages[stage].total);
     }
   }
 

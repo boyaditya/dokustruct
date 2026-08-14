@@ -57,6 +57,22 @@ import { initActionsRenderer, attachBlockActions as _attachBlockActions, isMedia
 
 const UI_LOG_PREFIX = '[DokuStruct UI]';
 
+/** Human-readable labels for pipeline stage names shown in the progress overlay. */
+const progressStageLabels = {
+  preprocessing: 'Preparing document',
+  orientation: 'Detecting orientation',
+  layout: 'Detecting layout',
+  region_collect: 'Collecting regions',
+  ocr: 'Recognizing text',
+  ocr_det: 'Detecting text regions',
+  ocr_rec: 'Recognizing text',
+  formula: 'Recognizing formulas',
+  table: 'Recognizing tables',
+  postprocessing: 'Assembling output',
+  loading_models: 'Loading models',
+  complete: 'Finishing up',
+};
+
 function hasKatexRenderError(html) {
   return html.includes('katex-error')
     || html.includes('mathcolor="#cc0000"')
@@ -524,6 +540,20 @@ async function _saveProcessingHistoryEntry() {
   const history = getHistory();
   history.unshift(entry);
   await saveHistoryMetadata(history);
+}
+
+/** Remove orphaned _isProcessing entries left behind when a run dies
+ *  mid-processing (tab refresh, crash, or failure). They hold no results and
+ *  their delete button is disabled while the flag is set, leaving them stuck. */
+async function clearStaleProcessingHistoryEntries() {
+  try {
+    const history = getHistory();
+    if (!history.some(item => item._isProcessing)) return;
+    await saveHistoryMetadata(history.filter(item => !item._isProcessing));
+    loadHistory();
+  } catch (err) {
+    console.warn(`${UI_LOG_PREFIX} Failed to clear stale processing history entries:`, err);
+  }
 }
 
 function loadHistory() {
@@ -1164,6 +1194,9 @@ async function init() {
   }
 
   if (!resumeSucceeded) {
+    // An orphaned _isProcessing entry means the previous tab died mid-run.
+    // Clear it before the list renders so it can't get stuck undeletable.
+    await clearStaleProcessingHistoryEntries();
     loadHistory();
     setWorkspaceMode('setup');
   }
@@ -2215,7 +2248,7 @@ async function buildSourceCanvas(file) {
   throw new Error('Not an image file');
 }
 
-async function loadPdfPreview(file) {
+async function loadPdfPreview(file, onPageProgress = null) {
   try {
     const pdfjsLib = await getPdfjsLib();
     if (el.setupFileLoadingText) el.setupFileLoadingText.textContent = `Reading ${file.name}...`;
@@ -2239,12 +2272,13 @@ async function loadPdfPreview(file) {
         const pct = Math.round((pageNum / totalPages) * 100);
         el.setupFileLoadingText.textContent = `Rendering page ${pageNum} of ${totalPages} (${pct}%)`;
       }
+      onPageProgress?.(pageNum, totalPages);
     };
     updateFileLoadProgress(1);
     for (let pageNum = 1; pageNum <= totalPages; pageNum += 1) {
       const record = pageNum === 1 ? getPageRecord(0) : createDocumentPage(pageNum - 1);
       await renderPdfPage(pageNum, record);
-      if (pageNum % 5 === 0 || pageNum === totalPages) updateFileLoadProgress(pageNum);
+      updateFileLoadProgress(pageNum);
     }
     showPageStack();
     updatePageInfo();
@@ -2470,9 +2504,25 @@ async function runPipeline() {
       </div>`;
     }
     if (currentFileType === 'pdf') {
-      await loadPdfPreview(currentFile);
+      // For a single-page PDF this callback fires once (1/1). Skip the
+      // percent update then — the pipeline stage events that follow will
+      // drive the bar. Multi-page PDFs keep the per-page fill.
+      await loadPdfPreview(currentFile, (rendered, total) => {
+        if (el.progressTitle) el.progressTitle.textContent = `Rendering page ${rendered} of ${total}`;
+        if (el.progressMessage) el.progressMessage.textContent = `Rendered ${rendered} of ${total} pages`;
+        if (total > 1) {
+          updateProgress(Math.round((rendered / Math.max(1, total)) * 100));
+        }
+      });
     } else {
+      // Image input — only 1 page, so show indeterminate progress instead
+      // of a bar that would jump straight from 0% to 100%.
+      if (el.progressTitle) el.progressTitle.textContent = 'Preparing image';
+      if (el.progressMessage) el.progressMessage.textContent = 'Converting image for processing.';
+      setProgressIndeterminate(true);
+      updateProgress(0);
       sourceCanvas = await buildSourceCanvas(currentFile);
+      await loadFilePreview(currentFile);
     }
 
     // ── Step 2: Warmup models + download assets ──
@@ -2521,10 +2571,12 @@ async function runPipeline() {
     updateSetupUploadState();
     updateSetupTabs();
     updateUI();
+    clearStaleProcessingHistoryEntries();
     showLoading(filesToRun.length > 1 ? 'Batch processing complete' : 'Processing complete');
   } catch (err) {
     console.error(`${UI_LOG_PREFIX} Pipeline failed:`, err);
     hideProgress();
+    clearStaleProcessingHistoryEntries();
     showLoading(`Processing failed: ${err.message}`, 3000);
   } finally {
     stopKeepAlive();
@@ -2545,6 +2597,7 @@ function resetRunState(index) {
 
 function showProgress() {
   el.progressOverlay?.classList.remove('hidden');
+  el.progressOverlay?.classList.remove('is-indeterminate');
   if (el.startBtn) el.startBtn.disabled = true;
   if (el.downloadBtn) el.downloadBtn.disabled = true;
   if (el.progressTitle) el.progressTitle.textContent = 'Processing document';
@@ -2596,6 +2649,7 @@ function updateElapsedTime() {
 
 function hideProgress() {
   el.progressOverlay?.classList.add('hidden');
+  el.progressOverlay?.classList.remove('is-indeterminate');
   if (elapsedTimerId) {
     clearInterval(elapsedTimerId);
     elapsedTimerId = null;
@@ -3916,13 +3970,24 @@ function displayJSON(contentList, target = 'content') {
 }
 
 // ===== PROGRESS UPDATE =====
+function setProgressIndeterminate(indeterminate) {
+  el.progressOverlay?.classList.toggle('is-indeterminate', Boolean(indeterminate));
+  if (indeterminate && el.progressFill) {
+    el.progressFill.style.width = '';
+  }
+  if (indeterminate && el.progressPercent) {
+    el.progressPercent.textContent = '...';
+  }
+}
+
 function updateProgress(progress) {
   const percent = Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : 0;
-  
-  if (el.progressFill) {
+  const indeterminate = el.progressOverlay?.classList.contains('is-indeterminate');
+
+  if (el.progressFill && !indeterminate) {
     el.progressFill.style.width = `${percent}%`;
   }
-  if (el.progressPercent) {
+  if (el.progressPercent && !indeterminate) {
     el.progressPercent.textContent = `${Math.round(percent)}%`;
   }
   // Keep elapsed time fresh — setInterval alone stalls under WebGPU load.
@@ -4924,6 +4989,7 @@ function cancelProcessing() {
   appState.cancelProcessing();
   hideProgress();
   updateUI();
+  clearStaleProcessingHistoryEntries();
   showLoading('Cancelled');
 }
 
@@ -5176,9 +5242,19 @@ function subscribeToState() {
     if (typeof percent === 'number' && percent >= 0) {
       const current = appState.get('progressCurrent') || 0;
       const total = appState.get('progressTotal') || 0;
+      const stage = appState.get('progressStage') || '';
+      const isPageProgress = stage === 'pages';
+      // Only 'pages' events with a single page are meaningless — stage
+      // events always carry a real cumulative percent from the engine.
+      const isIndeterminate = isPageProgress && total <= 1;
+      setProgressIndeterminate(isIndeterminate);
       updateProgress(percent);
-      if (el.progressTitle && total > 0) {
-        el.progressTitle.textContent = `Page ${current} of ${total}`;
+      if (el.progressTitle) {
+        if (isPageProgress && total > 1) {
+          el.progressTitle.textContent = `Page ${current} of ${total}`;
+        } else {
+          el.progressTitle.textContent = progressStageLabels[stage] || 'Processing...';
+        }
       }
     }
   });

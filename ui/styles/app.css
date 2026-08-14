@@ -1656,7 +1656,9 @@ input:focus-visible {
 }
 .line-content {
     flex: 1;
-    white-space: pre;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 /* Lists */
@@ -2087,6 +2089,17 @@ input:focus-visible {
     font-size: 11px;
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+/* Indeterminate mode — used for image inputs where percent would jump 0% → 100% */
+.progress-overlay.is-indeterminate .progress-fill {
+    width: 42%;
+    animation: progress-indeterminate-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate-slide {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(250%); }
 }
 
 .progress-overlay .progress-cancel {

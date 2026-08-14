@@ -301,6 +301,12 @@ export async function docAnalyze(
     formula_config, table_config, orientation_config, checkbox_config, on_progress,
   });
 
+  // Non-windowed path: the shared tracker no longer fires its own 100%
+  // event (the caller owns the final signal), so emit it here.
+  if (on_progress) {
+    on_progress('complete', 1, 1, 100);
+  }
+
   // Build return value
   const pipelineTimings = results.timings;
   pipelineTimings.pdf_load = (pipelineTimings.pdf_load || 0) + pdfLoadMs;
@@ -556,11 +562,24 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   }
 
   const totalWindows = Math.ceil(totalPages / (pdf_pages_batch || 1));
+  // Single-page documents never produce useful page-level progress (one
+  // window → one 100% event). Forward per-stage model progress instead so
+  // the UI can render a cumulative stage-by-stage bar.
+  const singlePageDocument = totalPages <= 1;
 
   // Per-window accumulation: only compact pdf_info (not raw canvas/inference data)
   const accumulatedPdfInfo = [];
   const imageWriter = new MemoryDataWriter();
   const ocrEnabledList = [];
+
+  // For single-page documents the per-stage events flow through a shared
+  // tracker so BatchAnalyze does NOT fire its own premature 'complete'
+  // event (resultToMiddleJson + unionMake still run after batch analysis).
+  let singlePageTracker = null;
+  if (singlePageDocument) {
+    const { ProgressTracker } = await import('./progress_tracker.js');
+    singlePageTracker = new ProgressTracker(on_progress);
+  }
 
   const finished = new Array(pdfBytesList.length).fill(false);
   let tmpStartPageId = 0;
@@ -570,7 +589,9 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   // (replaces weighted ProgressTracker which gives misleading % on image-heavy PDFs)
   let completedPages = 0;
   const firePageProgress = () => {
-    if (on_progress && totalPages > 0) {
+    // Single-page documents receive per-stage events instead; a page-level
+    // event here would overwrite the cumulative bar with a 100% jump.
+    if (on_progress && totalPages > 1) {
       const pct = Math.round((completedPages / totalPages) * 100);
       on_progress('pages', completedPages, totalPages, pct);
     }
@@ -589,6 +610,11 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
         orientation_config, checkbox_config,
         start_page_id: tmpStartPageId,
         end_page_id: tmpStartPageId + pdf_pages_batch - 1,
+        // For single-page documents, the weighted per-stage events carry the
+        // real granularity (layout → OCR → formula → table). The page-level
+        // firePageProgress() below only ever reports 0% or 100% for them.
+        on_progress: singlePageDocument ? on_progress : null,
+        progress_tracker: singlePageDocument ? singlePageTracker : null,
       });
 
     _accumulateTimings(pipelineTimings, windowTimings);
@@ -716,9 +742,15 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
     crossPageTableMerge(accumulatedPdfInfo);
   }
 
-  // Mark progress as 100%
+  // Mark progress as 100% — for single-page documents this final event must
+  // not be a 'pages' event (which would flip the bar back to indeterminate);
+  // 'complete' renders as "Finishing up" at 100%.
   if (on_progress && totalPages > 0) {
-    on_progress('pages', totalPages, totalPages, 100);
+    if (totalPages <= 1) {
+      on_progress('complete', 1, 1, 100);
+    } else {
+      on_progress('pages', totalPages, totalPages, 100);
+    }
   }
 
   return {

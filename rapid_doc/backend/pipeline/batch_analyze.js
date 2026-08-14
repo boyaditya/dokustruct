@@ -102,6 +102,7 @@ export class BatchAnalyze {
     this.lang = null;
     this.onStageProgress = onStageProgress;
     this.progressTracker = progressTracker;  // Use shared tracker if provided
+    this._externalProgressTracker = Boolean(progressTracker);
     this.batchOffset = batchOffset;  // Offset for multi-batch processing
     this.lastStageTimings = {
       layout: 0,
@@ -278,8 +279,12 @@ export class BatchAnalyze {
 
       this.lastStageTimings = stageTimings;
       
-      // Mark progress as complete (will report 100%)
-      this.progressTracker?.complete();
+      // Mark progress as complete (will report 100%). When a shared tracker
+      // was injected by the caller, do NOT fire the raw 100% event — the
+      // caller owns the final page-level completion signal.
+      if (!this._externalProgressTracker) {
+        this.progressTracker?.complete();
+      }
       
       return imagesLayoutRes;
     } finally {

@@ -578,13 +578,112 @@ async function clearResumeState() {
 // into sequential chunks, resetting the GPU device between chunks.
 // ---------------------------------------------------------------------------
 
+/** Human-readable labels for each processingStage value emitted by the engine. */
+const STAGE_LABELS = {
+  preprocessing: 'Preparing document',
+  orientation: 'Detecting orientation',
+  layout: 'Detecting layout',
+  region_collect: 'Collecting regions',
+  ocr: 'Recognizing text',
+  ocr_det: 'Detecting text regions',
+  ocr_rec: 'Recognizing text',
+  formula: 'Recognizing formulas',
+  table: 'Recognizing tables',
+  postprocessing: 'Assembling output',
+  loading_models: 'Loading models',
+  complete: 'Finishing up',
+};
+
+// ---------------------------------------------------------------------------
+// Single-page cumulative stage progress
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixed stage execution order + weights (sum = 1) matching BatchAnalyze's
+ * actual flow (orientation → layout → formula → ocr_det → table → ocr_rec).
+ * The engine's weighted tracker reports non-monotonic percents because stages
+ * are initialized lazily mid-run, so the adapter derives its own monotonic
+ * cumulative percent from stage completion fractions. Skipped stages (e.g.
+ * formula disabled) redistribute their weight to the remaining stages.
+ */
+const STAGE_PROGRESS_ORDER = [
+  ['orientation', 0.04],
+  ['layout', 0.16],
+  ['region_collect', 0.02],
+  ['formula', 0.16],
+  ['ocr_det', 0.20],
+  ['table', 0.14],
+  ['ocr_rec', 0.20],
+  ['complete', 0.08],
+];
+
+function createStageProgressAccumulator() {
+  const stages = STAGE_PROGRESS_ORDER.map(([key, weight]) => ({
+    key, weight, seen: false, done: false, skipped: false,
+  }));
+  let completedWeight = 0;
+
+  const redistribute = (index) => {
+    const stage = stages[index];
+    if (!stage || stage.skipped || stage.done) return;
+    stage.skipped = true;
+    const weight = stage.weight;
+    stage.weight = 0;
+    const remaining = stages.slice(index + 1).filter((s) => !s.done && !s.skipped);
+    if (!remaining.length) {
+      stages[stages.length - 1].weight += weight;
+      return;
+    }
+    const total = remaining.reduce((sum, s) => sum + s.weight, 0) || remaining.length;
+    for (const s of remaining) s.weight += weight * (s.weight / total);
+  };
+
+  const finalize = (stage) => {
+    if (!stage.done) {
+      stage.done = true;
+      completedWeight += stage.weight;
+    }
+  };
+
+  return {
+    /** Returns the new monotonic cumulative percent for this stage event. */
+    onStageEvent(stage, current, total) {
+      const index = stages.findIndex((s) => s.key === stage);
+      if (index < 0) {
+        return Math.round(Math.min(100, completedWeight * 100));
+      }
+      // Stages before this one: skipped if never seen, finalized if they
+      // were seen but never reported complete (the pipeline moved on).
+      for (let i = 0; i < index; i += 1) {
+        const prev = stages[i];
+        if (prev.seen && !prev.done && !prev.skipped) finalize(prev);
+        else if (!prev.seen && !prev.done && !prev.skipped) redistribute(i);
+      }
+      const target = stages[index];
+      target.seen = true;
+      const fraction = total > 0
+        ? Math.min(1, Math.max(0, Number(current) / Number(total)))
+        : 1;
+      if (fraction >= 1) {
+        finalize(target);
+        return Math.round(Math.min(100, completedWeight * 100));
+      }
+      const partial = target.done ? 0 : target.weight * fraction;
+      return Math.round(Math.min(100, (completedWeight + partial) * 100));
+    },
+  };
+}
+
 /**
  * Lightweight page count — reads PDF metadata only, no rendering.
  * Returns Infinity for corrupt/unreadable PDFs (unchunkable fallback).
+ * Image input always counts as a single page.
+ * @param {File} file
  * @param {ArrayBuffer} pdfBytes
  * @returns {Promise<number>}
  */
-async function countPdfPages(pdfBytes) {
+async function getInputPageCount(file, pdfBytes) {
+  if (isImageFile(file)) return 1;
   try {
     const { PDFDocument } = await import('pdf-lib');
     const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
@@ -592,6 +691,11 @@ async function countPdfPages(pdfBytes) {
   } catch {
     return Infinity;
   }
+}
+
+/** PDF-only page count for chunk detection (legacy call sites). */
+async function countPdfPages(pdfBytes) {
+  return getInputPageCount(null, pdfBytes);
 }
 
 /**
@@ -859,6 +963,22 @@ export class PipelineAdapter {
       const allPageTexts = [];
       const allPageLines = [];
       const totalPages = imageInput ? 1 : imagesList.length;
+      // OCR-only has no weighted tracker. For single-page runs the bar stays
+      // indeterminate (no meaningful percent between stages); we only update
+      // the stage label via direct DOM writes (no state patch, so the UI's
+      // progressPercent subscriber never resets the indeterminate bar).
+      const emitStageProgress = (stage) => {
+        const overlay = document.getElementById('progressOverlay');
+        const bar = document.getElementById('progressFill');
+        const pct = document.getElementById('progressPercent');
+        const title = document.getElementById('progressTitle');
+        const isSinglePage = totalPages <= 1;
+        overlay?.classList.toggle('is-indeterminate', isSinglePage);
+        if (bar) bar.style.width = isSinglePage ? '' : '0%';
+        if (pct) pct.textContent = isSinglePage ? '...' : '0%';
+        if (title) title.textContent = STAGE_LABELS[stage] || 'Processing...';
+      };
+      emitStageProgress('ocr');
       for (let i = 0; i < totalPages; i++) {
         throwIfAborted(signal);        state.updateProgress(i + 1, totalPages);
         state.updateMemory();
@@ -904,6 +1024,7 @@ export class PipelineAdapter {
       // ── Step 5: build result ────────────────────────────────────────────
       const tPost0 = performance.now();
       state.beginStage('postprocessing');
+      emitStageProgress('postprocessing');
       const fullText = allPageTexts.join('\n\n---\n\n');
 
       const results = {
@@ -1035,6 +1156,11 @@ export class PipelineAdapter {
 
       if (shouldDetectPages) {
         totalPages = await countPdfPages(fileBytes);
+      } else {
+        // Image inputs (or windowed mode off) are always a single page, so
+        // percent-only progress would jump 0% → 100%. Report the page count
+        // anyway so the UI can display an indeterminate bar for these runs.
+        totalPages = await getInputPageCount(file, fileBytes);
       }
 
       // ── Step 3: build pipeline config ─────────────────────────────────────
@@ -1058,31 +1184,39 @@ export class PipelineAdapter {
       state.beginStage('layout');
       state.updateMemory();
 
-      // Progress callback from engine — page-based for windowed mode
+      // Progress callback from engine. 'pages' events are page counts for
+      // multi-page windowed runs; per-stage events (layout/ocr/formula/...)
+      // drive a monotonic cumulative percent for single-page documents via
+      // a stage-order accumulator (the engine's weighted tracker is
+      // non-monotonic because stages initialize lazily mid-run).
+      const stageAccumulator = createStageProgressAccumulator();
       const onProgress = (stage, current, total, percent) => {
-        if (typeof percent === 'number') {
-          state.patch({ 
-            progressPercent: percent,
+        const isPageProgress = stage === 'pages';
+        if (isPageProgress && total > 1) {
+          // Multi-page windowed run: simple page-based progress.
+          if (typeof percent === 'number') {
+            state.patch({
+              progressPercent: percent,
+              progressStage: stage,
+              progressCurrent: current,
+              progressTotal: total,
+            });
+          }
+        } else if (isPageProgress) {
+          // Single-page run finalization (or engine 'pages' echo): keep the
+          // accumulated bar; only a numeric percent gets applied.
+          if (typeof percent === 'number' && percent >= 100) {
+            state.patch({ progressPercent: percent, progressStage: 'complete', progressCurrent: 1, progressTotal: 1 });
+          }
+        } else {
+          // Per-stage event: compute monotonic cumulative percent.
+          const cumulative = stageAccumulator.onStageEvent(stage, current, total);
+          state.patch({
+            progressPercent: cumulative,
             progressStage: stage,
             progressCurrent: current,
             progressTotal: total,
           });
-          // Direct DOM update — bypasses subscriber batching for reliable sync
-          const bar = document.getElementById('progressFill');
-          const pct = document.getElementById('progressPercent');
-          const title = document.getElementById('progressTitle');
-          const timeEl = document.getElementById('timeElapsed');
-          const overlay = document.getElementById('progressOverlay');
-          if (bar) bar.style.width = `${percent}%`;
-          if (pct) pct.textContent = `${Math.round(percent)}%`;
-          if (title && total > 0) {
-            title.textContent = `Page ${current} of ${total}`;
-          }
-          // Direct timer update bypassing setInterval (throttled under WebGPU load).
-          if (timeEl && overlay?.dataset.timerStart) {
-            const elapsed = (Date.now() - Number(overlay.dataset.timerStart)) / 1000;
-            timeEl.textContent = `${elapsed.toFixed(1)}s`;
-          }
         }
         state.updateMemory();
       };
@@ -1169,6 +1303,14 @@ export class PipelineAdapter {
           );
 
           const chunkOnProgress = (stage, current, total, percent) => {
+            // Stage events only flow from 1-page chunks (singlePageDocument).
+            // Map them to an end-of-chunk page count so the overall bar stays
+            // monotonic instead of resetting to small stage percents.
+            if (stage !== 'pages') {
+              const donePages = chunkStart + chunkPages;
+              onProgress('pages', donePages, totalPages, Math.round((donePages / Math.max(1, totalPages)) * 100));
+              return;
+            }
             const overallCurrent = chunkStart + current;
             const overallTotal = totalPages;
             const overallPct = Math.round((overallCurrent / overallTotal) * 100);

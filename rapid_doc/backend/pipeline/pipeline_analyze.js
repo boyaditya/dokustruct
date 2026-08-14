@@ -394,10 +394,12 @@ async function _loadAllPdfPages(pdfBytesList, langList, parseMethod, forceOcr) {
     const lang = langList[pdfIdx];
     const [imagesList, pdfDocProxy] = await loadImagesFromPdf(pdfBytes, { imageType: ImageType.PIL });
     allImageLists.push(imagesList);
+    await yieldToBrowser();
 
     const allPdfDict = await _extractPdfPageDicts(pdfDocProxy);
     await destroyPdfProxy(pdfDocProxy);
     allPdfDocs.push(allPdfDict);
+    await yieldToBrowser();
 
     for (let pageIdx = 0; pageIdx < imagesList.length; pageIdx++) {
       const imgDict = imagesList[pageIdx];

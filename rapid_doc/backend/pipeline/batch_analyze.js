@@ -8,6 +8,7 @@ import { checkboxPredict } from "../../utils/checkbox_det_cls.js";
 import { getFormulaEnable, getTableEnable } from "../../utils/config_reader.js";
 import { CategoryId } from "../../utils/enum_class.js";
 import { AbortException } from "../../utils/exceptions.js";
+import { throwIfAborted } from "../../utils/abort_registry.js";
 import { cropImg, getResListFromLayoutRes, toMatBgr } from "../../utils/model_utils.js";
 import { getCropNpImg } from "../../utils/pdf_image_tools.js";
 import { extractTableFillImage } from "../../utils/span_pre_proc.js";
@@ -187,11 +188,13 @@ export class BatchAnalyze {
       const tOri0 = performance.now();
       const imgOriOrientationList = await this._runOrientationClassify(npImages, pdfDictList, ownedMats);
       stageTimings.orientation = performance.now() - tOri0;
+      throwIfAborted();
 
       // 1. Layout detection
       const tLayout0 = performance.now();
       const imagesLayoutRes = await this._runLayoutDetection(npImages, pdfDictList, scaleList);
       stageTimings.layout = performance.now() - tLayout0;
+      throwIfAborted();
       await yieldToBrowser();
 
       // 2. Collect detection regions
@@ -199,6 +202,8 @@ export class BatchAnalyze {
       const [ocrResAllPage, tableResAllPage, formulaResAllPage] =
         await this._collectDetectionRegions(imagesLayoutRes, npImages, imagesWithExtraInfo);
       stageTimings.region_collect = performance.now() - tRegion0;
+      throwIfAborted();
+      await yieldToBrowser();
 
       // Calculate EXACT work units for progress tracking
       // OCR det: count actual crops that will be processed
@@ -223,6 +228,7 @@ export class BatchAnalyze {
         const tFormula0 = performance.now();
         await this._runFormulaRecognition(formulaResAllPage);
         stageTimings.formula = performance.now() - tFormula0;
+        throwIfAborted();
         await yieldToBrowser();
       }
 
@@ -236,6 +242,7 @@ export class BatchAnalyze {
         await this._runTraditionalOcr(ocrResAllPage, pdfDictList, scaleList);
         stageTimings.ocr_det = performance.now() - tOcr0;
       }
+      throwIfAborted();
       await yieldToBrowser();
 
       // After OCR detection, count recognition spans
@@ -250,6 +257,7 @@ export class BatchAnalyze {
         await this._runTableRecognition(tableResAllPage, pdfDictList, scaleList);
         stageTimings.table = performance.now() - tTable0;
       }
+      throwIfAborted();
       await yieldToBrowser();
 
       // 6. OCR text recognition (rec inference)
@@ -391,6 +399,7 @@ export class BatchAnalyze {
     const formulaResAllPage = [];
 
     for (let index = 0; index < npImages.length; index++) {
+      throwIfAborted();
       const [,, ocrEnable, lang,] = imagesWithExtraInfo[index];
       const npImg = npImages[index];
       const layoutRes = imagesLayoutRes[index];
@@ -452,6 +461,7 @@ export class BatchAnalyze {
   _collectTableRegions(tableResList, npImg, lang, ocrEnable, formulaResList, checkboxRes, pageIdx, tableResAllPage) {
     for (const tableRes of tableResList) {
       let tableImg = null;
+      throwIfAborted();
       try {
         const poly = tableRes.poly;
         let usefulList;
@@ -603,12 +613,14 @@ export class BatchAnalyze {
       let processedRegions = 0;
       
       for (const batch of batches) {
+        throwIfAborted();
         const batchTexts = await this.model.ocrModel.batchPredict(
           batch.images, { batchSize }
         );
         allTexts.push(...batchTexts);
         processedRegions += batch.images.length;
         this.onStageProgress?.('ocr_det', processedRegions, totalRegions);
+        await yieldToBrowser();
       }
 
       for (let i = 0; i < allOcrRegions.length; i++) {
@@ -723,6 +735,7 @@ export class BatchAnalyze {
     const fillImageResList = [];
 
     for (const tableResDict of tableResAllPage) {
+      throwIfAborted();
       const pageIdx = tableResDict.page_idx;
       const pageDict = pdfDictList[pageIdx];
       const scale = scaleList[pageIdx];
@@ -737,9 +750,11 @@ export class BatchAnalyze {
     if (!tableImgs.length) return;
 
     try {
+      throwIfAborted();
       const tableResults = await this.model.tableModel.batchPredict(
         tableImgs, { fillImageResList }
       );
+      await yieldToBrowser();
       const tableHtmls = Array.isArray(tableResults) ? tableResults : (tableResults?.htmls ?? []);
       for (let i = 0; i < tableResAllPage.length; i++) {
         const tableResDict = tableResAllPage[i];
@@ -784,6 +799,7 @@ export class BatchAnalyze {
       const scale = scaleList[pageIdx];
 
       for (const tableResDict of tableList) {
+        throwIfAborted();
         try {
           tableResDict.table_img = tableResDict.rect_table_img;
           await processSingleTable(
@@ -812,7 +828,7 @@ export class BatchAnalyze {
         done++;
         this.progressTracker?.update('table', done, total);
         if (done % 5 === 0) console.info(`[BatchAnalyze] Table Predict ${done}/${total}`);
-        if (done % 2 === 0) await yieldToBrowser();
+        await yieldToBrowser();
       }
     }
   }
@@ -824,6 +840,7 @@ export class BatchAnalyze {
   async _runSealOcr(npImages, imagesLayoutRes) {
     const sealOcrItems = [];
     for (let index = 0; index < npImages.length; index++) {
+      throwIfAborted();
       const npImg = npImages[index];
       for (const layoutRe of imagesLayoutRes[index]) {
         if (layoutRe.original_label === "seal") {

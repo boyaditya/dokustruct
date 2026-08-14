@@ -8,7 +8,8 @@
 import * as ort from 'onnxruntime-web';
 import { acquireGlobalGpu } from '../../utils/ort_runtime.js';
 import { AbortException } from '../../utils/exceptions.js';
-import { formatPipelineError } from '../../utils/browser_utils.js';
+import { throwIfAborted } from '../../utils/abort_registry.js';
+import { formatPipelineError, yieldToBrowser } from '../../utils/browser_utils.js';
 
 /**
  * Batch DB text detection.
@@ -43,8 +44,13 @@ export class TextDetector {
     const items = this._preprocessBatch(imgList, results);
     const groups = this._groupByShape(items);
 
+    let groupIndex = 0;
     for (const group of groups.values()) {
+      throwIfAborted();
       await this._runBatchGroup(group, results);
+      // Yield between shape groups so the cancel button and UI stay responsive
+      // during long detection runs (many crops → many groups).
+      if (++groupIndex < groups.size) await yieldToBrowser();
     }
 
     return results.map(result => result ?? { boxes: null, elapse: 0 });
@@ -163,10 +169,11 @@ export class TextDetector {
     const perItemSize = perItemDims.slice(1).reduce((acc, dim) => acc * dim, 1);
 
     for (let b = 0; b < N; b++) {
+      throwIfAborted();
       const item = group[b];
       try {
         const itemData = predData.subarray(b * perItemSize, (b + 1) * perItemSize);
-        const boxes = this.postProcess.call(
+        const boxes = await this.postProcess.call(
           { dims: perItemDims, data: itemData },
           item.ratio,
           [item.img.rows, item.img.cols],

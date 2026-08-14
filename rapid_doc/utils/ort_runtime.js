@@ -10,6 +10,30 @@ import ortJsepWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url
 let configured = false;
 let gpuDevice = null;
 let gpuDeviceLostListenerAttached = false;
+
+/**
+ * Point ORT at the Vite-resolved WASM loader + binary. This MUST run before
+ * any InferenceSession.create() — otherwise ORT falls back to its default path
+ * (/node_modules/.vite_rapiddoc/deps/ort-wasm-*.mjs), the fetch 404s, and the
+ * failed init poisons ORT's internal state (`aborted = true`) so every later
+ * session also fails with "no available backend found".
+ * @param {object} runtime
+ */
+function applyWasmPaths(runtime) {
+  if (!runtime.env?.wasm) return;
+  const override = (typeof window !== 'undefined' && window.__RAPIDDOC_ORT_WASM_PATHS__) || null;
+  runtime.env.wasm.wasmPaths = {
+    mjs: override?.mjs ?? ortJsepMjsUrl,
+    wasm: override?.wasm ?? ortJsepWasmUrl,
+  };
+}
+/** When true, ORT's WASM thread pool never takes the LAST CPU core. The
+ *  browser's main thread (UI rendering, input, compositing) always has a
+ *  dedicated core, which keeps the app responsive even when the pool is
+ *  running flat-out. Throughput impact is negligible — with n cores fully
+ *  saturated by n threads, OS scheduling contention degrades inference; n-1
+ *  worker threads + a free core usually run at the same speed. */
+let reserveMainThreadCore = false;
 /**
  * Diagnostic metadata captured when the shared WebGPU device is initialised.
  * Consumers can use this to size batches adaptively based on the adapter's
@@ -98,19 +122,35 @@ export async function configureOrtRuntime(opts = {}) {
 
   // WASM Config
   if (runtime.env.wasm) {
-    // Primary source: Vite-resolved `?url` paths (dev-server safe). An optional
-    // global override is honored for debugging against the /public copies.
-    const override = (typeof window !== 'undefined' && window.__RAPIDDOC_ORT_WASM_PATHS__) || null;
-    runtime.env.wasm.wasmPaths = {
-      mjs: override?.mjs ?? ortJsepMjsUrl,
-      wasm: override?.wasm ?? ortJsepWasmUrl,
-    };
+    applyWasmPaths(runtime);
 
     const fallbackThreads = typeof SharedArrayBuffer === 'undefined' ? 1 : 2;
     const requestedThreads = Number(opts.numThreads);
-    runtime.env.wasm.numThreads = Number.isFinite(requestedThreads) && requestedThreads > 0
+    let numThreads = Number.isFinite(requestedThreads) && requestedThreads > 0
       ? Math.max(1, Math.trunc(requestedThreads))
       : fallbackThreads;
+
+    // Reserve one core for the main thread so the UI stays responsive when
+    // the WASM pool saturates all CPU. Only applied to multi-threaded runs
+    // (single-threaded runs are already slow enough that saving a core is
+    // pointless). GPU runs are unaffected — WebGPU shaders don't spin the
+    // WASM worker pool.
+    if (opts.useWebGpu !== true && reserveMainThreadCore && numThreads > 1 && typeof navigator !== 'undefined') {
+      const cores = Number(navigator.hardwareConcurrency) || 0;
+      if (cores > 2) numThreads = Math.max(1, Math.min(numThreads, cores - 1));
+    }
+
+    runtime.env.wasm.numThreads = numThreads;
+    // PROXY MODE IS INTENTIONALLY OFF.
+    // ORT 1.24.3 shares one `initialized` flag between the proxy worker path
+    // and the main-thread WASM path. Enabling proxy leaves the main-thread
+    // instance uninitialised, so switching to WebGPU (which keeps 'wasm' as a
+    // fallback EP) fails with "WebAssembly is not initialized yet."; and
+    // initialising the main thread first makes proxy throw "worker not ready".
+    // Both modes cannot coexist in one page load — main-thread WASM is the
+    // only mode that supports provider switching without a reload. UI
+    // responsiveness is instead handled by scheduler.yield() between batches
+    // plus the reserved-core thread cap above.
     runtime.env.wasm.proxy = false;
   }
 
@@ -220,6 +260,19 @@ export async function configureOrtRuntime(opts = {}) {
 // Deprecated alias for backward compatibility
 export function configureOrtWasmRuntime(opts) {
   return configureOrtRuntime(opts);
+}
+
+/**
+ * Enable/disable reserving one CPU core for the main thread. When enabled,
+ * multi-threaded WASM runs are capped at (hardwareConcurrency - 1) threads so
+ * the browser UI thread never competes with a fully saturated worker pool.
+ * Pure-UI trade-off: zero cost to inference throughput in practice (n-1
+ * threads without scheduling contention ≈ n threads with contention).
+ *
+ * @param {boolean} enabled
+ */
+export function setReserveMainThreadCore(enabled) {
+  reserveMainThreadCore = Boolean(enabled);
 }
 
 export function isOrtRuntimeConfigured() {

@@ -8,6 +8,7 @@
 import * as ort from 'onnxruntime-web';
 import { acquireGlobalGpu } from '../../utils/ort_runtime.js';
 import { AbortException } from '../../utils/exceptions.js';
+import { isAborted } from '../../utils/abort_registry.js';
 import { formatPipelineError, MAX_CONCURRENT_BATCHES, yieldToBrowser } from '../../utils/browser_utils.js';
 import { RecPreProcess } from './ocr_preprocess.js';
 import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
@@ -205,6 +206,7 @@ export class TextRecognizer {
     let isFirstBatch = true;
     const cap = getMaxConcurrentBatches(this.useWebGpu);
     for (const task of tasks) {
+      if (isAborted()) throw new AbortException();
       const p = processFn(task).finally(() => inFlight.delete(p));
       inFlight.add(p);
       if (inFlight.size >= cap) {

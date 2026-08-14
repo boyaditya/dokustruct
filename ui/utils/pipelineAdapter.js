@@ -22,7 +22,11 @@ import {
   getAssetsStatus,
 } from '../../rapid_doc/utils/download_file.js';
 import { getFormulaAssets, summarizeAssets } from '../../rapid_doc/utils/model_url_map.js';
-import { PDF_PAGES_BATCH, startKeepAlive, stopKeepAlive } from '../../rapid_doc/utils/browser_utils.js';
+import { PDF_PAGES_BATCH, startKeepAlive, stopKeepAlive, yieldToBrowser } from '../../rapid_doc/utils/browser_utils.js';
+import {
+  setGlobalAbortSignal,
+  clearGlobalAbortSignal,
+} from '../../rapid_doc/utils/abort_registry.js';
 
 /** Pages per chunk — hard-reset on GPU buffer saturation (~138 pages). */
 const VRAM_CHUNK_SIZE = 8;
@@ -823,8 +827,15 @@ export class PipelineAdapter {
     const abortCtrl = new AbortController();
     this._abortController = abortCtrl;
     state.set('abortController', abortCtrl);
+    setGlobalAbortSignal(abortCtrl.signal);
 
-    await this._runSingle(state, file, abortCtrl.signal);
+    try {
+      await this._runSingle(state, file, abortCtrl.signal);
+    } finally {
+      clearGlobalAbortSignal();
+      if (this._abortController === abortCtrl) this._abortController = null;
+      state.set('abortController', null);
+    }
   }
 
   // ── Auto-resume after GPU crash + page reload ────────────────────────────
@@ -871,6 +882,7 @@ export class PipelineAdapter {
     try {
       const signal = new AbortController().signal;
       state.patch({ isProcessing: true, processingStage: 'loading_models' });
+      setGlobalAbortSignal(signal);
       await this.prepare(state, file, signal);
 
       // Run chunked analysis — _runFullAnalysis detects resumeState,
@@ -879,6 +891,7 @@ export class PipelineAdapter {
       await this._runFullAnalysis(state, file, signal);
       return true;
     } finally {
+      clearGlobalAbortSignal();
       stopKeepAlive();
     }
   }
@@ -980,8 +993,10 @@ export class PipelineAdapter {
       };
       emitStageProgress('ocr');
       for (let i = 0; i < totalPages; i++) {
-        throwIfAborted(signal);        state.updateProgress(i + 1, totalPages);
+        throwIfAborted(signal);
+        state.updateProgress(i + 1, totalPages);
         state.updateMemory();
+        await yieldToBrowser();
 
         let mat = null;
         let owned = false;
@@ -1974,6 +1989,13 @@ export class PipelineAdapter {
       if (!openCvLoaded) {
         throw new Error('OpenCV runtime is not available. Check /opencv/opencv.js and reload the page.');
       }
+      const isWebGpu = String(state.get('activeExecutionProvider') || '').toLowerCase() === 'webgpu';
+      // Reserve one CPU core for the main thread when running WASM: the pool
+      // gets hardwareConcurrency-1 threads, leaving a core free for UI input/
+      // rendering — this is what prevents the "laggy at 100% CPU" symptom
+      // without reducing inference throughput.
+      const { setReserveMainThreadCore } = await import('../../rapid_doc/utils/ort_runtime.js');
+      setReserveMainThreadCore(!isWebGpu);
       await configureDocumentRuntime();
       state.recordStartupTiming('preprocessing', performance.now() - runtimeStart);
       state.patch({ runtimeStatus: 'ready', warmupStatus: 'model_warming' });

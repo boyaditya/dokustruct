@@ -53,12 +53,27 @@ function getYieldChannel() {
  * the tab is in the background. Prevents UI freeze during long-running pipeline
  * operations and keeps inference running at full speed in hidden tabs.
  *
- * Uses MessageChannel (not subject to background-tab timer clamping) when
- * available, falling back to setTimeout in non-browser environments.
+ * Priority order:
+ *  1. `scheduler.yield()` (Chrome 129+) — integrates with the browser's task
+ *     scheduler so user input and rendering run BEFORE the pipeline
+ *     continuation. This is what keeps the UI interactive even when the
+ *     pipeline drives all cores to 100%. Not used in hidden tabs (see 2).
+ *  2. `MessageChannel` macrotask — immune to background-tab timer throttling,
+ *     keeps inference at full speed when the tab is hidden.
+ *  3. `setTimeout(0)` — last-resort fallback (non-browser environments).
  *
  * @returns {Promise<void>}
  */
 export function yieldToBrowser() {
+  const schedulerYield = globalThis.scheduler?.yield;
+  if (typeof schedulerYield === 'function') {
+    const tabHidden = typeof document !== 'undefined' && document.hidden;
+    if (!tabHidden) {
+      try {
+        return schedulerYield.call(globalThis.scheduler);
+      } catch { /* fall through to MessageChannel */ }
+    }
+  }
   const channel = getYieldChannel();
   if (channel) {
     return new Promise((resolve) => {

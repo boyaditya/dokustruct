@@ -8,6 +8,7 @@
 /* global cv */
 import { deleteMat } from '../../utils/resource_utils.js';
 import { AbortException } from '../../utils/exceptions.js';
+import { throwIfAborted } from '../../utils/abort_registry.js';
 
 // ─── Polygon geometry helpers ─────────────────────────────────────────────────
 
@@ -225,7 +226,7 @@ export class DetPostProcess {
    * @param {[number,number]} oriShape - [oriH, oriW]
    * @returns {Array<Array<[number,number]>>}
    */
-  call(predTensor, ratio, oriShape) {
+  async call(predTensor, ratio, oriShape) {
     const [srcH, srcW] = oriShape;
     const pred = predTensor.data;
     const [, , H, W] = predTensor.dims;
@@ -235,7 +236,7 @@ export class DetPostProcess {
     // FIX O2 (Audit O2): dispatch to poly path when box_type='poly'.
     // polygons_from_bitmap extracts raw contour polygons instead of min-area-rect quads.
     if (this.boxType === 'poly') {
-      return this._polygonsFromBitmap(segmentation, pred, H, W, srcH, srcW);
+      return await this._polygonsFromBitmap(segmentation, pred, H, W, srcH, srcW);
     }
 
     let mask = null;
@@ -251,7 +252,7 @@ export class DetPostProcess {
       hierarchy = new cv.Mat();
       cv.findContours(mask, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-      const { boxes, scores } = this._processContours(contours, pred, W, H, srcH, srcW);
+      const { boxes, scores } = await this._processContours(contours, pred, W, H, srcH, srcW);
       return this._filterDetRes(boxes, scores, srcH, srcW);
     } finally {
       deleteMat(mask);
@@ -284,7 +285,7 @@ export class DetPostProcess {
    * @param {number} srcW - original image width
    * @returns {Array<Array<[number,number]>>} array of polygons, each [[x,y],...]
    */
-  _polygonsFromBitmap(segmentation, pred, H, W, srcH, srcW) {
+  async _polygonsFromBitmap(segmentation, pred, H, W, srcH, srcW) {
     let mask = null;
     let contours = null;
     let hierarchy = null;
@@ -302,6 +303,10 @@ export class DetPostProcess {
       const polygons = [];
 
       for (let i = 0; i < numContours; i++) {
+        // Cancel check inside the contour loop — large images can produce
+        // hundreds of contours and this loop blocks the main thread.
+        throwIfAborted();
+        if (i % 50 === 0) await this._yieldContours();
         const contour = contours.get(i);
         let approx = null;
         try {
@@ -431,7 +436,7 @@ export class DetPostProcess {
   }
 
   /** @private */
-  _processContours(contours, pred, W, H, srcH, srcW) {
+  async _processContours(contours, pred, W, H, srcH, srcW) {
     const boxes = [];
     const scores = [];
     const numContours = Math.min(contours.size(), this.maxCandidates);
@@ -451,6 +456,10 @@ export class DetPostProcess {
       hoistedPtsVec.push_back(hoistedPtsMat);
 
       for (let i = 0; i < numContours; i++) {
+        throwIfAborted();
+        // Yield every 50 contours so large detection maps (hundreds of
+        // contours) don't freeze the UI between inference batches.
+        if (i % 50 === 0) await this._yieldContours();
         const contour = contours.get(i);
         try {
           const result = this._processSingleContour(contour, pred, W, H, srcH, srcW, hoistedPtsMat, hoistedPtsVec);
@@ -472,6 +481,12 @@ export class DetPostProcess {
     }
 
     return { boxes, scores };
+  }
+
+  /** @private */
+  async _yieldContours() {
+    const { yieldToBrowser } = await import('../../utils/browser_utils.js');
+    await yieldToBrowser();
   }
 
   /** @private */

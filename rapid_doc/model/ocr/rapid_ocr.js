@@ -24,7 +24,8 @@ import { checkImg, preprocessImage, sortedBoxes, mergeDetBoxes, updateDetBoxes, 
 import { configureOrtWasmRuntime } from '../../utils/ort_runtime.js';
 import { deleteMat, deleteMatList } from '../../utils/resource_utils.js';
 import { AbortException } from '../../utils/exceptions.js';
-import { REC_BATCH_NUM } from '../../utils/browser_utils.js';
+import { throwIfAborted } from '../../utils/abort_registry.js';
+import { REC_BATCH_NUM, yieldToBrowser } from '../../utils/browser_utils.js';
 
 import { DetPreProcess } from './ocr_preprocess.js';
 import { DetPostProcess } from './ocr_postprocess.js';
@@ -428,8 +429,10 @@ export class RapidOcrModel {
     if (!imgList.length) return [];
     const results = [];
     for (let i = 0; i < imgList.length; i += maxBatchSize) {
+      throwIfAborted();
       const batch = imgList.slice(i, i + maxBatchSize);
       results.push(...await this.textDetector.callBatch(batch));
+      await yieldToBrowser();
     }
     return results;
   }

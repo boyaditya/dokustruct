@@ -5324,11 +5324,14 @@ function showRecoverableError(err, { audit_id = '', retryFn = null } = {}) {
 // Does NOT mutate native `disabled` on inputs — uses aria-disabled + pointer-events.
 const _processingInterceptor = (e) => {
   if (appState.get('isProcessing')) {
-    // Whitelist: allow interaction with all toolbar and settings elements.
+    // Whitelist: allow interaction with all toolbar and settings elements,
+    // plus the progress overlay itself — its Cancel button must stay
+    // clickable or the user has no way to stop a run.
     const allowed = e.target?.closest?.(
       '.dokustruct-drawer, .drawer-backdrop, .settings-control-stack, .settings-advanced, ' +
       '.input-toolbar, .output-toolbar, #timingsPanel, #assetGateCard, ' +
-      '.workspace-toolbar, .setup-inline-settings, [data-allow-during-processing]'
+      '.workspace-toolbar, .setup-inline-settings, [data-allow-during-processing], ' +
+      '#progressOverlay, .progress-overlay'
     );
     if (allowed) return;
     e.stopPropagation();

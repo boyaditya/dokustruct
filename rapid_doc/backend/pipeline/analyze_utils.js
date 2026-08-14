@@ -17,6 +17,7 @@ import { rotateImage } from "../../utils/boxbase.js";
 import { deleteMat, deleteMatList, clearLayoutImageList } from "../../utils/resource_utils.js";
 import { yieldToBrowser, formatPipelineError } from "../../utils/browser_utils.js";
 import { AbortException } from "../../utils/exceptions.js";
+import { throwIfAborted } from "../../utils/abort_registry.js";
 
 const RESOLUTION_GROUP_STRIDE = 64;
 
@@ -305,6 +306,7 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig,
 
   for (const [lang, langCropList] of Object.entries(langGroups)) {
     if (!langCropList.length) continue;
+    throwIfAborted();
 
     const ocrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
       det_db_thresh: ocrConfig?.["Det.det_db_thresh"] ?? ocrConfig?.det_db_thresh ?? 0.3,
@@ -316,6 +318,7 @@ export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig,
     const resolutionGroups = groupByResolution(langCropList);
 
     for (const [key, groupCrops] of Object.entries(resolutionGroups)) {
+      throwIfAborted();
       const [targetH, targetW] = key.split(',').map(Number);
 
       const batchImages = groupCrops.map(info => padImageTo(info[1], targetH, targetW));
@@ -415,6 +418,7 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig, onProgres
 
   for (const [lang, imgCropList] of Object.entries(imgCropByLang)) {
     if (!imgCropList.length) continue;
+    throwIfAborted();
 
     const ocrModel = await atomModelManager.getAtomModel(AtomicModel.OCR, {
       det_db_box_thresh: 0.3,
@@ -443,6 +447,8 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig, onProgres
       
       processedSpans += imgCropList.length;
       onProgress?.(processedSpans, totalSpans);
+      throwIfAborted();
+      await yieldToBrowser();
     } catch (err) {
       if (err instanceof AbortException) throw err;
       console.warn(formatPipelineError({

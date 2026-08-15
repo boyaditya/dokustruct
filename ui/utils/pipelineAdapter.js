@@ -686,7 +686,7 @@ function createStageProgressAccumulator() {
  * @returns {Promise<number>}
  */
 async function getInputPageCount(file, pdfBytes) {
-  if (isImageFile(file)) return 1;
+  if (file && isImageFile(file)) return 1;
   try {
     const { PDFDocument } = await import('pdf-lib');
     const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });

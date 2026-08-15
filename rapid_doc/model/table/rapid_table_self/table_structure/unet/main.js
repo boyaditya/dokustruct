@@ -24,12 +24,9 @@ export class TSRUnetStructurer {
     const inst = new TSRUnetStructurer();
     const modelType = cfg.model_type ?? ModelType.UNET;
     const modelBytes = await ModelProcessor.getModelPath(modelType, cfg.model_dir_or_path ?? null);
-    // Honor the user's execution-provider selection (audit: table models
-    // ignored it). engine_cfg carries use_webgpu from withEngineProviderConfig.
-    const engineCfg = cfg.engine_cfg ?? {};
     inst.session = await OrtInferSession.create({
       model_dir_or_path: modelBytes,
-      engine_cfg: engineCfg,
+      engine_cfg: cfg.engine_cfg ?? {},
     });
     return inst;
   }

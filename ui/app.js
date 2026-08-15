@@ -2992,14 +2992,51 @@ function buildOverlayBlocksFromMiddlePdfInfo(results) {
     const discardedBlocks = Array.isArray(page?.discarded_blocks) ? page.discarded_blocks : [];
     const pageContent = contentByPage.get(pageIndex) || [];
     let contentCursor = 0;
+    // FIX IDENTICAL-TEXT: two paragraphs with the same text (different
+    // positions) both matched the FIRST physical preproc block by text.
+    // Track claimed blocks (by object identity — sort keys collide when
+    // original_order/index are missing) so the second paragraph is forced
+    // to match the second physical block instead of reusing the first.
+    const claimedPreprocKeys = new WeakSet();
 
     paraBlocks.forEach((paraBlock, paraIndex) => {
       const paraText = extractParaOutputText(paraBlock);
       if (isDeletedOrEmptyTextBlock(paraBlock, paraText)) return;
       const contentIndex = findMatchingContentIndex(pageContent, paraText, contentCursor);
       if (contentIndex >= 0) contentCursor = contentIndex + 1;
-      const physicalBlocks = findPreprocBlocksForPara(paraBlock, paraText, globalPreprocBlocks, pageIndex);
-      const overlayParts = physicalBlocks.length ? physicalBlocks : [paraBlock];
+      const physicalBlocks = findPreprocBlocksForPara(
+        paraBlock, paraText, globalPreprocBlocks, pageIndex, claimedPreprocKeys,
+      );
+      let overlayParts = physicalBlocks.length ? physicalBlocks : [paraBlock];
+      // FIX LIST-LINES: PDF-text lists render as <ol>/<ul> with one <li> per
+      // line, but the layout emits ONE 'content' box covering the whole list.
+      // Expand list/index para-blocks into per-line boxes so every <li> gets
+      // its own overlay box and its own link id.
+      const paraTypeLower = String(paraBlock?.type || '').toLowerCase();
+      const lines = Array.isArray(paraBlock?.lines) ? paraBlock.lines : [];
+      // PDF-text enumeration is not a layout 'list' block — the pipeline
+      // classifies it as plain 'text' while the markdown still renders <ol>.
+      // Detect numbered-list lines: "1. ", "(2) ", "1) " prefixes.
+      const numberedLineCount = lines.filter((line) => {
+        const t = normalizeLayoutText(extractParaOutputText(line) || '');
+        return /^\(?\d+[.)]\s/.test(t) || /^\d+\s/.test(t) && t.length > 2;
+      }).length;
+      const isEnumeratedTextBlock = paraTypeLower === 'text' && lines.length > 1 && numberedLineCount >= 2;
+      if (
+        (paraTypeLower === 'list' || paraTypeLower === 'index' || isEnumeratedTextBlock)
+        && overlayParts.length === 1
+        && lines.length > 1
+      ) {
+        const lineParts = lines
+          .map((line) => ({ ...line, sourcePageIndex: pageIndex, sourceSize }))
+          .filter((line) => Boolean(normalizeBox(line)));
+        if (lineParts.length > 1) overlayParts = lineParts;
+      }
+      // Mark every matched physical block as claimed so identical-text
+      // paragraphs later in the page cannot re-match the same blocks.
+      for (const block of physicalBlocks) {
+        claimedPreprocKeys.add(block);
+      }
       const baseId = makeStableLinkId('para', pageIndex, paraIndex, normalizeBox(paraBlock), paraBlock?.type, paraText);
       const mergeGroupId = overlayParts.length > 1
         ? `merge-${pageIndex}-${shortHash(`${baseId}:${overlayParts.map(block => getMiddleBlockSortKey(block)).join('|')}`)}`
@@ -3110,7 +3147,7 @@ function findMatchingContentIndex(pageContent, paraText, startIndex = 0) {
   return -1;
 }
 
-function findPreprocBlocksForPara(paraBlock, paraText, preprocBlocks, paraPageIndex = 0) {
+function findPreprocBlocksForPara(paraBlock, paraText, preprocBlocks, paraPageIndex = 0, claimedKeys = null) {
   const target = normalizeComparableText(paraText);
   if (!target || !Array.isArray(preprocBlocks) || !preprocBlocks.length) return [];
 
@@ -3122,6 +3159,9 @@ function findPreprocBlocksForPara(paraBlock, paraText, preprocBlocks, paraPageIn
       if (!text) return false;
       if (block?.lines_deleted) return false;
       if (!isCompatibleOverlayType(paraBlock, block)) return false;
+      // FIX IDENTICAL-TEXT: skip blocks already claimed by an earlier
+      // paragraph — identical text must not reuse the same physical block.
+      if (claimedKeys?.has(block)) return false;
       const blockLabelGroup = labelGroupKey(block?.original_label, block?.type);
       return paraLabelGroup === blockLabelGroup;
     })
@@ -3571,6 +3611,23 @@ function linkMarkdownBlocks(pageCount = 1, contentList = null) {
     candidatesByPage.get(p).push(c);
   });
 
+  // Every fragment of every merge group, sorted by physical order — needed to
+  // bind each <li> to its own overlay box when the list para-block produced
+  // one box per line.
+  const groupParts = new Map();
+  for (const c of rawCandidates) {
+    if (!c.mergeGroupId) continue;
+    if (!groupParts.has(c.mergeGroupId)) groupParts.set(c.mergeGroupId, []);
+    groupParts.get(c.mergeGroupId).push(c);
+  }
+  for (const parts of groupParts.values()) {
+    parts.sort((a, b) => {
+      const ao = Number(a.sourcePreprocOrders?.[0] ?? a.middleOriginalOrder ?? a.middleIndex ?? 0);
+      const bo = Number(b.sourcePreprocOrders?.[0] ?? b.middleOriginalOrder ?? b.middleIndex ?? 0);
+      return ao - bo;
+    });
+  }
+
   const shells = Array.from(el.markdownContent.querySelectorAll('.block-shell'));
   if (!shells.length) return;
 
@@ -3594,22 +3651,100 @@ function linkMarkdownBlocks(pageCount = 1, contentList = null) {
   const perPageCursors = new Map();
   sortedPages.forEach(p => perPageCursors.set(p, 0));
 
-  // Determine which page a shell "belongs to" — the earliest page whose
-  // cursor hasn't reached its total candidate count.
-  const maxIdx = sortedPages.length - 1;
-  for (const shell of shells) {
-    let matched = false;
-    for (let j = 0; j <= maxIdx; j++) {
+  // Take the next unclaimed candidate (page-by-page, cursor-based).
+  const takeNextCandidate = () => {
+    for (let j = 0; j < sortedPages.length; j++) {
       const p = sortedPages[j];
       const pool = candidatesByPage.get(p) || [];
       const cur = perPageCursors.get(p) || 0;
       if (cur >= pool.length) continue;
-      assign(shell, pool[cur]);
       perPageCursors.set(p, cur + 1);
-      matched = true;
-      break;
+      return pool[cur];
     }
-    if (!matched) break; // ran out of candidates
+    return null;
+  };
+
+  // Peek the next candidate WITHOUT consuming it — lets the list handler
+  // decide between "one box per line" and "one box for the whole list".
+  const peekNextCandidate = () => {
+    for (let j = 0; j < sortedPages.length; j++) {
+      const p = sortedPages[j];
+      const pool = candidatesByPage.get(p) || [];
+      const cur = perPageCursors.get(p) || 0;
+      if (cur < pool.length) return pool[cur];
+    }
+    return null;
+  };
+
+  // A list shell group = every <li> inside the same <ol>/<ul>. Overlay data
+  // comes in three shapes:
+  //  1. One box per rendered line (type 'text', one box per <li>): every
+  //     <li> consumes its own candidate in sequence → different link ids.
+  //  2. A merge group with per-line fragments: bind each <li> to its fragment.
+  //  3. A single box whose type/label is 'content' covering the whole list:
+  //     all <li> share that ONE id — one unit.
+  const processedLists = new Set();
+
+  const isContentBox = (candidate) => {
+    const type = String(candidate?.type ?? '').toLowerCase();
+    const label = String(candidate?.label ?? '').toLowerCase();
+    const original = String(candidate?.originalLabel ?? '').toLowerCase();
+    return type === 'content' || label === 'content' || original === 'content';
+  };
+
+  for (const shell of shells) {
+    const li = shell.firstElementChild?.tagName === 'LI' ? shell.firstElementChild : null;
+    if (li) {
+      const listEl = li.closest('ol, ul');
+      if (listEl && !processedLists.has(listEl)) {
+        processedLists.add(listEl);
+        const liShells = Array.from(listEl.querySelectorAll(':scope > .block-shell > li'))
+          .map(liEl => liEl.parentElement)
+          .filter(Boolean);
+        const firstCandidate = peekNextCandidate();
+        if (!firstCandidate) break;
+
+        // Case 2: merge group — one fragment per line, bound in order.
+        if (firstCandidate.mergeGroupId) {
+          const candidate = takeNextCandidate();
+          const parts = groupParts.get(candidate.mergeGroupId) ?? [];
+          liShells.forEach((liShell, idx) => {
+            const part = parts[idx];
+            if (!part) {
+              assign(liShell, candidate);
+              return;
+            }
+            liShell.dataset.linkId = part.id;
+            liShell.dataset.pageIndex = String(part.pageIndex);
+            liShell.dataset.linkLabel = part.label || part.type || 'block';
+            liShell.dataset.linkGroupId = candidate.mergeGroupId;
+            liShell.classList.add('is-merged-block');
+          });
+          continue;
+        }
+
+        // Case 3: a 'content' box covers the whole list — one unit, one id.
+        if (isContentBox(firstCandidate)) {
+          const candidate = takeNextCandidate();
+          liShells.forEach((liShell) => assign(liShell, candidate));
+          continue;
+        }
+
+        // Case 1: per-line text boxes — one candidate per <li>, in sequence.
+        for (const liShell of liShells) {
+          const candidate = takeNextCandidate();
+          if (!candidate) break;
+          assign(liShell, candidate);
+        }
+        continue;
+      }
+      // li in an already-processed list — skip (handled by its group).
+      if (listEl && processedLists.has(listEl)) continue;
+    }
+
+    const candidate = takeNextCandidate();
+    if (!candidate) break;
+    assign(shell, candidate);
   }
 
   // ── Page dividers: insert before shell whose pageIndex changes ──

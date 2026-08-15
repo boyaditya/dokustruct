@@ -196,12 +196,23 @@ export function attachBlockActions() {
   const mc = _ctx.markdownContent;
   if (!mc) return;
 
+  // FIX LINK-LIST: each <li> becomes its own shell — the pipeline's
+  // content_list emits one TEXT entry per list line, so each list item must
+  // carry its own data-link-id. Wrapping the whole <ol>/<ul> as a single
+  // shell made one candidate consume an entire list and shifted every
+  // following block's link by N-1.
   const blocks = mc.querySelectorAll(
-    'p, h1, h2, h3, h4, h5, h6, table, figure, pre, blockquote, div.katex-display-placeholder',
+    'p, h1, h2, h3, h4, h5, h6, table, figure, pre, blockquote, li, div.katex-display-placeholder',
   );
 
   blocks.forEach((block) => {
     if (block.closest('.block-shell')) return;
+
+    // <li> is handled itself; other elements nested inside a list belong to
+    // their li's shell — wrapping them separately would create extra shells
+    // and shift links.
+    const tag = String(block.tagName || '').toLowerCase();
+    if (tag !== 'li' && block.closest('li')) return;
 
     const shell = document.createElement('div');
     shell.className = 'block-shell';

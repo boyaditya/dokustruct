@@ -105,6 +105,9 @@ export class BatchAnalyze {
     this.progressTracker = progressTracker;  // Use shared tracker if provided
     this._externalProgressTracker = Boolean(progressTracker);
     this.batchOffset = batchOffset;  // Offset for multi-batch processing
+    /** @type {string[]} User-visible warnings for recoverable stage failures
+     *  (audit: silent skips degraded output quality with no notice). */
+    this.stageSkipWarnings = [];
     this.lastStageTimings = {
       layout: 0,
       formula: 0,
@@ -301,6 +304,24 @@ export class BatchAnalyze {
         if (ownedMats[i]) deleteMat(npImages[i]);
       }
     }
+  }
+
+  /** Record a recoverable stage failure for user-visible reporting. */
+  _warnStage(stage, message) {
+    const text = `[${stage}] ${message}`;
+    if (!this.stageSkipWarnings.includes(text)) this.stageSkipWarnings.push(text);
+    console.warn(formatPipelineError({
+      stage, module: 'BatchAnalyze', message, recoverable: true,
+    }));
+  }
+
+  /**
+   * Human-readable summary of recoverable stage failures for the UI toast.
+   * @returns {string|null}
+   */
+  getStageSkipSummary() {
+    if (!this.stageSkipWarnings.length) return null;
+    return `Some content could not be extracted (${this.stageSkipWarnings.length} issue(s) — see console).`;
   }
 
   // ---------------------------------------------------------------------------
@@ -507,11 +528,7 @@ export class BatchAnalyze {
       } catch (err) {
         if (err instanceof AbortException) throw err;
         deleteMat(tableImg);
-        console.warn(formatPipelineError({
-          stage: 'table', module: 'BatchAnalyze',
-          message: `table crop skipped: ${err.message}`,
-          pageIndex: pageIdx, recoverable: true,
-        }));
+        this._warnStage('table', `table crop skipped: ${err.message}`);
         tableRes.html = "";
       }
     }
@@ -523,11 +540,7 @@ export class BatchAnalyze {
 
   async _runFormulaRecognition(formulaResAllPage) {
     if (!this.model.formulaModel) {
-      console.warn(formatPipelineError({
-        stage: 'formula', module: 'BatchAnalyze',
-        message: 'formulaModel is null (likely failed to load), skipping formula recognition',
-        recoverable: true,
-      }));
+      this._warnStage('formula', 'formulaModel is null (likely failed to load), skipping formula recognition');
       return;
     }
     const formulaImgs = formulaResAllPage.map(d => d.formula_img);
@@ -561,19 +574,12 @@ export class BatchAnalyze {
         if (res != null) {
           d.formula_res.latex = res;
         } else {
-          console.warn(formatPipelineError({
-            stage: 'formula', module: 'BatchAnalyze',
-            message: `latex recognition failed for formula ${i}`,
-            recoverable: true,
-          }));
+          this._warnStage('formula', `latex recognition failed for formula ${i}`);
         }
       }
     } catch (err) {
       if (err instanceof AbortException) throw err;
-      console.warn(formatPipelineError({
-        stage: 'formula', module: 'BatchAnalyze',
-        message: err.message, recoverable: true,
-      }));
+      this._warnStage('formula', err.message);
     } finally {
       for (const img of formulaImgs) deleteMat(img);
     }
@@ -641,10 +647,7 @@ export class BatchAnalyze {
       }
     } catch (err) {
       if (err instanceof AbortException) throw err;
-      console.warn(formatPipelineError({
-        stage: 'ocr', module: 'BatchAnalyze',
-        message: err.message, recoverable: true,
-      }));
+      this._warnStage('ocr', err.message);
     } finally {
       for (const img of images) deleteMat(img);
     }
@@ -765,10 +768,7 @@ export class BatchAnalyze {
       }
     } catch (err) {
       if (err instanceof AbortException) throw err;
-      console.warn(formatPipelineError({
-        stage: 'table', module: 'BatchAnalyze',
-        message: err.message, recoverable: true,
-      }));
+      this._warnStage('table', err.message);
     } finally {
       for (const tableResDict of tableResAllPage) {
         if (tableResDict.table_img !== tableResDict.rect_table_img) {
@@ -808,11 +808,7 @@ export class BatchAnalyze {
           );
         } catch (err) {
           if (err instanceof AbortException) throw err;
-          console.warn(formatPipelineError({
-            stage: 'table', module: 'BatchAnalyze',
-            message: `table recognition skipped: ${err.message}`,
-            pageIndex: pageIdx, recoverable: true,
-          }));
+          this._warnStage('table', `table recognition skipped: ${err.message}`);
           if (tableResDict?.table_res) {
             clearLayoutImageList(tableResDict.table_res);
             tableResDict.table_res.html = tableResDict.table_res.html ?? "";
@@ -885,20 +881,12 @@ export class BatchAnalyze {
           if (sealTexts.length) layoutRe.text = sealTexts;
         } catch (err) {
           if (err instanceof AbortException) throw err;
-          console.warn(formatPipelineError({
-            stage: 'ocr', module: 'BatchAnalyze',
-            message: `seal OCR failed: ${err.message}`,
-            recoverable: true,
-          }));
+          this._warnStage('ocr', `seal OCR failed: ${err.message}`);
         }
       }
     } catch (err) {
       if (err instanceof AbortException) throw err;
-      console.warn(formatPipelineError({
-        stage: 'ocr', module: 'BatchAnalyze',
-        message: `seal OCR stage failed: ${err.message}`,
-        recoverable: true,
-      }));
+      this._warnStage('ocr', `seal OCR stage failed: ${err.message}`);
     } finally {
       for (const [sealImg] of sealOcrItems) {
         deleteMat(sealImg);

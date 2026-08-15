@@ -10,6 +10,7 @@ import {
   gatherOcrListByRow,
 } from "./utils/utils_table_recover.js";
 import { AbortException } from "../../../../../utils/exceptions.js";
+import { throwIfAborted } from "../../../../../utils/abort_registry.js";
 import { formatPipelineError } from "../../../../../utils/browser_utils.js";
 
 export class UnetTableRecognition {
@@ -36,6 +37,7 @@ export class UnetTableRecognition {
 
     for (let i = 0; i < oriImgs.length; i++) {
       try {
+        throwIfAborted();
         // Format OCR result: [(box, text, score), ...]
         let ocrResult = [];
         if (ocrResults && ocrResults[i] && ocrResults[i].length >= 3) {

@@ -540,7 +540,7 @@ export class AppState {
       // safe middle ground; users on capable hardware can override via the
       // OCR config UI.
       "Det.rec_batch_num": executionProvider === 'webgpu' ? 4 : 1,
-      "Rec.rec_batch_num": executionProvider === 'webgpu' ? 6 : 6,
+      "Rec.rec_batch_num": 6,
     };
   }
 

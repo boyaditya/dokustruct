@@ -30,7 +30,11 @@ import { MemoryDataWriter } from "../../data/data_reader_writer/index.js";
 
 const PDF_IMAGE_DPI = 200;
 const PDF_POINTS_PER_INCH = 72;
-const MIN_BATCH_INFERENCE_SIZE = 384;
+// Non-windowed fallback batch size. The windowed path (pdf_pages_batch) is the
+// primary UI path; this constant only matters for direct engine calls without
+// windowing. 384 held every page result in memory at once (audit: dead but
+// OOM-risky path); 24 keeps the same per-batch semantics with a bounded spike.
+const MIN_BATCH_INFERENCE_SIZE = 24;
 
 async function destroyPdfProxy(pdfDocProxy) {
   if (!pdfDocProxy) return;
@@ -739,8 +743,11 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   }
 
   // ── Final cross-page processing (deferred from per-window skipGlobalPost) ──
+  // paraSplit already ran per-window inside resultToMiddleJson (skipCrossPageMerge
+  // keeps it enabled) so streaming unionMake output is readable immediately.
+  // Re-running it here reprocessed every page a second time (audit RISK-07).
+  // Only crossPageTableMerge is deferred to the end — it needs the full page set.
   if (accumulatedPdfInfo.length > 0) {
-    paraSplit(accumulatedPdfInfo);
     crossPageTableMerge(accumulatedPdfInfo);
   }
 
@@ -875,6 +882,13 @@ export async function batchImageAnalyze(
 
   const results = await batchModel.call(imagesWithExtraInfo);
   results._stageTimings = { ...(batchModel.lastStageTimings || {}) };
+  // Propagate recoverable-stage failures upward so the UI can warn the user
+  // that some content was skipped (audit: silent skips degraded quality).
+  const skipSummary = batchModel.getStageSkipSummary?.();
+  if (skipSummary) {
+    results._stageSkipSummary = skipSummary;
+    results._stageSkipWarnings = [...batchModel.stageSkipWarnings];
+  }
 
   const device = getDevice();
   // Best-effort drain of transient inference allocations between batches.
@@ -979,5 +993,21 @@ export async function engineReset(opts = {}) {
     await cleanMemory(device, { releaseGpu: true });
   } else {
     await cleanMemory(device, { releaseGpu: false });
+  }
+
+  // 4) Release the in-memory model-buffer cache + object URLs. The audit
+  //    flagged that engineReset never cleared the ~530 MiB memoryCache, so
+  //    repeated runs (or provider switches) kept every downloaded model
+  //    buffer alive for the whole page lifetime.
+  try {
+    const { clearAssetMemoryCache } = await import('../../utils/download_file.js');
+    clearAssetMemoryCache();
+  } catch (err) {
+    console.warn(formatPipelineError({
+      stage: 'dispose',
+      module: 'engineReset',
+      message: `clearAssetMemoryCache failed: ${err?.message ?? err}`,
+      recoverable: true,
+    }));
   }
 }

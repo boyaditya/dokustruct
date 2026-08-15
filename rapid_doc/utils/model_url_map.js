@@ -185,14 +185,6 @@ export const ASSET_MANIFEST = Object.freeze({
     sizeBytes: 7_790_807,
     sha256: 'ddfc6c97ee4db2a5e9de4de8b6a14508a39d42d228503219fdfebfac364885e3',
   }),
-  table_ppstructure_en: asset({
-    id: 'table_ppstructure_en',
-    label: 'PP-Structure table English',
-    url: hfAsset('table/en_ppstructure_mobile_v2_SLANet.onnx'),
-    localUrl: '/models/table/en_ppstructure_mobile_v2_SLANet.onnx',
-    sizeBytes: 7_704_409,
-    sha256: '2cae17d16a16f9df7229e21665fe3fbe06f3ca85b2024772ee3e3142e955aa60',
-  }),
   table_dict_ch: asset({
     id: 'table_dict_ch',
     label: 'Table structure dictionary',
@@ -274,7 +266,6 @@ const TABLE_ASSETS_BY_TYPE = Object.freeze({
   slanet_plus: ['table_slanet_plus', 'table_dict_ch'],
   slanetplus: ['table_slanet_plus', 'table_dict_ch'],
   ppstructure_zh: ['table_ppstructure_zh', 'table_dict_ch'],
-  ppstructure_en: ['table_ppstructure_en', 'table_dict_ch'],
 });
 
 export function getAsset(assetId) {
@@ -311,7 +302,10 @@ export function getAssetSourceUrls(assetId) {
 }
 
 export function getRequiredAssets(config = {}) {
-  const required = new Set(RUNTIME_ASSET_IDS);
+  // Runtime assets (OpenCV, ORT loader/binary) are loaded by <script>/bundler,
+  // NOT through this cache path — the audit measured ~33.8 MiB downloaded and
+  // never read back. Exclude them from required downloads.
+  const required = new Set();
 
   const layoutType = config.layout_config?.model_type ?? config.layout_config?.modelType ?? 'pp_doclayoutv2';
   required.add(LAYOUT_ASSET_BY_TYPE[layoutType] ?? 'layout_pp_doclayoutv2');

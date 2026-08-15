@@ -149,9 +149,8 @@ export async function tableModelInit(lang = null, ocrConfig = null, tableConfig 
  */
 export async function formulaModelInit(formulaConfig = null) {
   // Browser default uses S model for cleaner/faster UI output.
-  // Python parity callers should pass M explicitly.
-  const modelType = formulaConfig?.modelType || "pp_formulanet_plus_s";
-
+  // Python parity callers should pass M explicitly (modelType is read from
+  // formulaConfig inside RapidFormulaInput).
   return RapidFormulaModel.create(formulaConfig);
 }
 

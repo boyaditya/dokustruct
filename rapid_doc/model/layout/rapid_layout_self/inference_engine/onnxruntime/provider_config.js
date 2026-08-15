@@ -160,6 +160,9 @@ export class ProviderConfig {
   }
 
   // ── verifyProviders ───────────────────────────────────────────────────────
+  // NOTE: dead code in the browser — ort-web does not expose
+  // session.getProviders(), so no caller can supply sessionProviders.
+  // Kept for API parity with the Python baseline; intentionally not invoked.
 
   /**
    * Warn if the session did not select the highest-priority expected provider.

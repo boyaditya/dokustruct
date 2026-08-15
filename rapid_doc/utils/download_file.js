@@ -15,8 +15,44 @@ const DB_NAME = 'rapiddoc_model_cache';
 const DB_VERSION = 2;
 const STORE_NAME = 'models';
 
+// ─── In-memory cache with LRU eviction ────────────────────────────────────────
+// The audit flagged an unbounded memoryCache (~530 MiB of model buffers held
+// for the page lifetime) and object URLs that were never revoked. Both are
+// addressed here: an LRU cap bounds the memory cache, and every object URL is
+// revoked when its entry is evicted (or the cache is cleared).
+const MEMORY_CACHE_MAX_ENTRIES = 12;
+
+/** @type {Map<string, ArrayBuffer|Uint8Array>} */
 const memoryCache = new Map();
+/** @type {Map<string, string>} */
 const objectUrlCache = new Map();
+
+function touchMemoryCacheEntry(key) {
+  if (!memoryCache.has(key)) return;
+  const value = memoryCache.get(key);
+  memoryCache.delete(key);
+  memoryCache.set(key, value); // re-insert → most recently used
+}
+
+function evictMemoryCache() {
+  while (memoryCache.size > MEMORY_CACHE_MAX_ENTRIES) {
+    const oldestKey = memoryCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    memoryCache.delete(oldestKey);
+    const objectUrl = objectUrlCache.get(oldestKey);
+    if (objectUrl) {
+      try { URL.revokeObjectURL(objectUrl); } catch { /* ignore */ }
+      objectUrlCache.delete(oldestKey);
+    }
+  }
+}
+
+function revokeObjectUrlFor(key) {
+  const objectUrl = objectUrlCache.get(key);
+  if (!objectUrl) return;
+  try { URL.revokeObjectURL(objectUrl); } catch { /* ignore */ }
+  objectUrlCache.delete(key);
+}
 
 function hasIndexedDb() {
   return typeof indexedDB !== 'undefined' && indexedDB?.open;
@@ -51,19 +87,26 @@ function openCacheDB() {
 }
 
 async function getFromCache(key) {
-  if (memoryCache.has(key)) return cloneArrayBuffer(memoryCache.get(key));
+  if (memoryCache.has(key)) {
+    touchMemoryCacheEntry(key);
+    return cloneArrayBuffer(memoryCache.get(key));
+  }
   if (!hasIndexedDb()) return null;
   try {
     const db = await openCacheDB();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const req = tx.objectStore(STORE_NAME).get(key);
-      req.onsuccess = (e) => {
-        const value = e.target.result ?? null;
-        resolve(value ? cloneArrayBuffer(value) : null);
-      };
-      req.onerror = (e) => reject(e.target.error);
-    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).get(key);
+        req.onsuccess = (e) => {
+          const value = e.target.result ?? null;
+          resolve(value ? cloneArrayBuffer(value) : null);
+        };
+        req.onerror = (e) => reject(e.target.error);
+      });
+    } finally {
+      db.close();
+    }
   } catch (err) {
     logger.warning('Cache read failed:', err);
     return null;
@@ -73,15 +116,20 @@ async function getFromCache(key) {
 async function saveToCache(key, buffer) {
   const cloned = cloneArrayBuffer(buffer);
   memoryCache.set(key, cloned);
+  evictMemoryCache();
   if (!hasIndexedDb()) return;
   try {
     const db = await openCacheDB();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).put(cloned, key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = (e) => reject(e.target.error);
-    });
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(cloned, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = (e) => reject(e.target.error);
+      });
+    } finally {
+      db.close();
+    }
   } catch (err) {
     logger.warning('Cache write failed:', err);
   }
@@ -89,18 +137,20 @@ async function saveToCache(key, buffer) {
 
 async function deleteFromCache(key) {
   memoryCache.delete(key);
-  const objectUrl = objectUrlCache.get(key);
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
-  objectUrlCache.delete(key);
+  revokeObjectUrlFor(key);
   if (!hasIndexedDb()) return;
   try {
     const db = await openCacheDB();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).delete(key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = (e) => reject(e.target.error);
-    });
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = (e) => reject(e.target.error);
+      });
+    } finally {
+      db.close();
+    }
   } catch (err) {
     logger.warning('Cache delete failed:', err);
   }
@@ -210,6 +260,7 @@ async function downloadFromSources({
   onProgress = null,
   asset = null,
   group = null,
+  verifySha256 = null,
 }) {
   const cached = await getFromCache(cacheKey);
   if (cached) {
@@ -235,6 +286,17 @@ async function downloadFromSources({
         asset,
         group,
       });
+      // Integrity check BEFORE caching — a corrupt buffer must not poison the
+      // cache (a later cached read would bypass re-verification).
+      if (sha256VerificationEnabled && verifySha256) {
+        const computed = await computeSha256Hex(toUint8Array(buffer));
+        if (computed && computed !== verifySha256.toLowerCase()) {
+          throw new Error(
+            `[download] SHA-256 mismatch for ${asset?.id ?? cacheKey}: ` +
+            `expected ${verifySha256}, got ${computed}`
+          );
+        }
+      }
       await saveToCache(cacheKey, buffer);
       onProgress?.(makeProgressEvent({
         asset,
@@ -257,10 +319,15 @@ async function downloadFromSources({
 
 /**
  * Compute SHA-256 hex digest of a Uint8Array using SubtleCrypto.
+ * Returns null when SubtleCrypto is unavailable (non-secure context).
  * @param {Uint8Array} bytes
- * @returns {Promise<string>} lowercase hex string
+ * @returns {Promise<string|null>} lowercase hex string or null
  */
 async function computeSha256Hex(bytes) {
+  if (!globalThis.crypto?.subtle?.digest) {
+    logger.warning('SubtleCrypto unavailable — skipping SHA-256 verification.');
+    return null;
+  }
   const buf = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(buf)]
     .map(b => b.toString(16).padStart(2, '0'))
@@ -295,7 +362,7 @@ export class DownloadFile {
     // FIX: SHA-256 verification (Audit/Requirement 1.1)
     if (cfg.sha256) {
       const computed = await computeSha256Hex(bytes);
-      if (computed !== cfg.sha256.toLowerCase()) {
+      if (computed && computed !== cfg.sha256.toLowerCase()) {
         throw new Error(
           `[DownloadFile] SHA-256 mismatch for ${cfg.url}: ` +
           `expected ${cfg.sha256}, got ${computed}`
@@ -340,6 +407,7 @@ export async function downloadAsset(assetId, onProgress = null, signal = null) {
     signal,
     onProgress,
     asset,
+    verifySha256: asset.sha256 ?? null,
   });
 }
 
@@ -383,6 +451,7 @@ export async function downloadAssetGroup(assetIds, onProgress = null, signal = n
         },
       });
     }, signal);
+
     results[id] = buffer;
     completedExpectedBytes += asset.sizeBytes || buffer.byteLength || 0;
     onProgress?.(makeProgressEvent({
@@ -454,8 +523,16 @@ export function clearAssetMemoryCache() {
   objectUrlCache.clear();
 }
 
+/** Test-only toggle: disables SHA-256 verification for mocked-fetch tests. */
+let sha256VerificationEnabled = true;
+
+export function __setSha256VerificationForTests(enabled) {
+  sha256VerificationEnabled = Boolean(enabled);
+}
+
 export function __resetAssetMemoryCacheForTests() {
   clearAssetMemoryCache();
+  sha256VerificationEnabled = true;
 }
 
 export const CPU_MODEL = Object.freeze([

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   HF_ASSET_BASE,
@@ -9,6 +9,7 @@ import {
 } from '../../rapid_doc/utils/model_url_map.js';
 import {
   __resetAssetMemoryCacheForTests,
+  __setSha256VerificationForTests,
   downloadAsset,
   downloadAssetGroup,
   getAssetStatus,
@@ -28,8 +29,9 @@ describe('asset manifest resolution', () => {
       table_config: { model_type: 'unet_slanet_plus' },
     });
 
-    expect(ids).toContain('runtime_opencv');
-    expect(ids).toContain('runtime_ort_jsep_wasm');
+    // Runtime assets are loaded via <script>/bundler, not the cache path.
+    expect(ids).not.toContain('runtime_opencv');
+    expect(ids).not.toContain('runtime_ort_jsep_wasm');
     expect(ids).toContain('layout_pp_doclayoutv2');
     expect(ids).toContain('ocr_det');
     expect(ids).toContain('ocr_rec_ch');
@@ -122,6 +124,11 @@ describe('asset manifest resolution', () => {
 });
 
 describe('asset cache downloads', () => {
+  beforeEach(() => {
+    // Mocked fetch returns fake bytes that never match manifest SHA-256 sums.
+    __setSha256VerificationForTests(false);
+  });
+
   it('tries the local source first, falls back externally, and caches the result', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const fetchMock = vi.fn(async (url) => {

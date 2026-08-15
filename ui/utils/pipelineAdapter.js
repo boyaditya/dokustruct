@@ -18,7 +18,6 @@ import { appState } from '../state/appState.js';
 import {
   clearAsset,
   downloadAssetGroup,
-  getAssetRuntimeUrl,
   getAssetsStatus,
 } from '../../rapid_doc/utils/download_file.js';
 import { getFormulaAssets, summarizeAssets } from '../../rapid_doc/utils/model_url_map.js';
@@ -1822,7 +1821,14 @@ export class PipelineAdapter {
 
       // ── Step 8: done ───────────────────────────────────────────────────────
       state.finishProcessing(results);
-      this._toast('Document processed successfully.', 'success');
+      // Surface recoverable stage skips instead of silently degrading output
+      // (audit: inference failures were swallowed without user notice).
+      const skipCount = results?._stageSkipWarnings?.length ?? 0;
+      if (skipCount > 0) {
+        this._toast(`Some content could not be extracted (${skipCount} issue(s) — see console).`, 'warning');
+      } else {
+        this._toast('Document processed successfully.', 'success');
+      }
 
       return {
         preprocessing:  state.get('timings').preprocessing,
@@ -2223,7 +2229,6 @@ export class PipelineAdapter {
       language:            state.get('language'),
       start_page_id:       start,
       end_page_id:         end,
-      max_pages:           state.get('maxPages'),
 
       // Features
       formula_enable:      state.get('formulaEnable'),

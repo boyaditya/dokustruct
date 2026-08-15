@@ -4,12 +4,26 @@
  *
  * Design rules (Requirement 1.3, 1.4 / Audit anti-patterns):
  *   - All functions are pure — no imports from cv or ort.
- *   - null / NaN / ±Infinity inputs return 0 (safe for coordinate pipelines).
+ *   - null / NaN / ±Infinity inputs return 0 (safe for coordinate pipelines),
+ *     but each absorption is logged once per module load so silent NaN
+ *     poisoning cannot hide model bugs (audit: "silent NaN absorption").
  *   - intTrunc  → Python int()    / numpy astype(int)   → Math.trunc
  *   - bankerRound → Python round() / numpy round()      → half-to-even
  *   - tensorToNumber → BigInt → Number coercion before arithmetic
  *   - tensorDataToFloat64 → flat typed-array → Float64Array for mixed sources
  */
+
+/** One-time dev warnings for non-finite inputs (avoids log spam in hot loops). */
+const _nanWarnings = { trunc: false, round: false };
+
+function warnNonFinite(kind, fnName) {
+  if (_nanWarnings[kind]) return;
+  _nanWarnings[kind] = true;
+  if (typeof console !== 'undefined' && process?.env?.NODE_ENV !== 'production') {
+    console.warn(`[math_utils] ${fnName} absorbed a non-finite value (NaN/±Infinity) → 0. ` +
+      'This mirrors browser-safe defensive behavior but may hide a model bug; further occurrences are silenced.');
+  }
+}
 
 /**
  * Truncate a number toward zero — matches Python `int()` and `numpy.astype(int)`.
@@ -26,7 +40,10 @@
  * intTrunc(NaN)   // 0
  */
 export function intTrunc(x) {
-  if (!Number.isFinite(x)) return 0;
+  if (!Number.isFinite(x)) {
+    warnNonFinite('trunc', 'intTrunc');
+    return 0;
+  }
   return Math.trunc(x);
 }
 
@@ -50,7 +67,10 @@ export function intTrunc(x) {
  * bankerRound(NaN)  // 0
  */
 export function bankerRound(x) {
-  if (!Number.isFinite(x)) return 0;
+  if (!Number.isFinite(x)) {
+    warnNonFinite('round', 'bankerRound');
+    return 0;
+  }
   const floor = Math.floor(x);
   // Check if x is exactly at a half-way point (within floating-point tolerance)
   if (Math.abs(x - floor - 0.5) < 1e-9) {

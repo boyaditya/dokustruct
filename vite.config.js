@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root: __dirname,
   publicDir: path.resolve(__dirname, 'public'),
-  cacheDir: 'node_modules/.vite_rapiddoc',
+  cacheDir: 'node_modules/.vite_dokustruct',
   
   // SOLUSI 1: Membatasi entry point hanya ke index.html
   // Agar Vite tidak menscan file HTML legacy/rusak di folder lain

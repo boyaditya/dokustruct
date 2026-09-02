@@ -14,7 +14,7 @@ export class Logger {
    * @param {Object} [options]
    * @param {string} [options.loggerName] - Module name prefix for log messages
    */
-  constructor({ loggerName = 'rapiddoc' } = {}) {
+  constructor({ loggerName = 'dokustruct' } = {}) {
     this._prefix = `[${loggerName}]`;
   }
 

@@ -451,9 +451,23 @@ function extractLayoutLabelBlocks(middleJson) {
 // Resume helpers — save state via IndexedDB + sessionStorage before reload.
 // ---------------------------------------------------------------------------
 
-const RESUME_DB = 'RapidDocResume';
+const RESUME_DB = 'DokuStructResume';
+const RESUME_DB_LEGACY = 'RapidDocResume'; // pre-rename DB, read-fallback only
 const RESUME_STORE = 'state';
+const RESUME_KEY = 'dokustruct_resume';
+const RESUME_KEY_LEGACY = 'rapiddoc_resume'; // pre-rename key, read-fallback only
 let _resumeDb = null;
+
+/** Read the resume marker from sessionStorage, falling back to the legacy key. */
+function readResumeMarker() {
+  return sessionStorage.getItem(RESUME_KEY) ?? sessionStorage.getItem(RESUME_KEY_LEGACY);
+}
+
+/** Remove both current and legacy resume markers. */
+function clearResumeMarker() {
+  sessionStorage.removeItem(RESUME_KEY);
+  sessionStorage.removeItem(RESUME_KEY_LEGACY);
+}
 
 async function getResumeDb() {
   if (_resumeDb) return _resumeDb;
@@ -462,6 +476,16 @@ async function getResumeDb() {
     req.onupgradeneeded = () => { req.result.createObjectStore(RESUME_STORE); };
     req.onsuccess = () => { _resumeDb = req.result; resolve(req.result); };
     req.onerror = () => reject(req.error);
+  });
+}
+
+/** Open the legacy resume DB (read-only fallback). Returns null if absent. */
+async function getLegacyResumeDb() {
+  return new Promise((resolve) => {
+    const req = indexedDB.open(RESUME_DB_LEGACY, 1);
+    req.onupgradeneeded = () => { /* legacy schema v1 only */ };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
   });
 }
 
@@ -494,7 +518,7 @@ async function saveResumeState(state) {
     });
 
     // Lightweight marker → sessionStorage (small, survives page reload).
-    sessionStorage.setItem('rapiddoc_resume', JSON.stringify({
+    sessionStorage.setItem(RESUME_KEY, JSON.stringify({
       fileName: state.fileName,
       fileSize: state.fileSize,
       fileType: state.fileType,
@@ -519,25 +543,34 @@ async function saveResumeState(state) {
  */
 async function loadResumeState() {
   try {
-    const raw = sessionStorage.getItem('rapiddoc_resume');
+    const raw = readResumeMarker();
     if (!raw) return null;
     const meta = JSON.parse(raw);
 
-    // Restore from IndexedDB.
-    const db = await getResumeDb();
-    const tx = db.transaction(RESUME_STORE, 'readonly');
-    const reqFile = tx.objectStore(RESUME_STORE).get('fileBytes');
-    const reqCl = tx.objectStore(RESUME_STORE).get('contentList');
-    const reqImg = tx.objectStore(RESUME_STORE).get('images');
-    const reqPdfInfo = tx.objectStore(RESUME_STORE).get('pdfInfo');
-    const reqTimings = tx.objectStore(RESUME_STORE).get('timings');
-
-    const [fileBytes, contentList, images, pdfInfo, resumedTimings] = await Promise.all([
-      new Promise((r) => { reqFile.onsuccess = () => r(reqFile.result); reqFile.onerror = () => r(null); }),
-      new Promise((r) => { reqCl.onsuccess = () => r(reqCl.result); reqCl.onerror = () => r(null); }),
-      new Promise((r) => { reqImg.onsuccess = () => r(reqImg.result); reqImg.onerror = () => r(null); }),
-      new Promise((r) => { reqPdfInfo.onsuccess = () => r(reqPdfInfo.result); reqPdfInfo.onerror = () => r(null); }),
-    ]);
+    // Restore from IndexedDB (current DB; falls back to legacy pre-rename DB).
+    let db = await getResumeDb();
+    let fileBytes, contentList, images, pdfInfo;
+    const readAll = (database) => new Promise((resolve) => {
+      try {
+        const tx = database.transaction(RESUME_STORE, 'readonly');
+        const store = tx.objectStore(RESUME_STORE);
+        const r1 = store.get('fileBytes');
+        const r2 = store.get('contentList');
+        const r3 = store.get('images');
+        const r4 = store.get('pdfInfo');
+        r1.onsuccess = () => { r2.onsuccess = () => { r3.onsuccess = () => { r4.onsuccess = () => {
+          resolve([r1.result, r2.result, r3.result, r4.result]);
+        }; }; }; };
+        r1.onerror = () => resolve(null);
+      } catch { resolve(null); }
+    });
+    [fileBytes, contentList, images, pdfInfo] = (await readAll(db)) || [];
+    if (!fileBytes) {
+      const legacy = await getLegacyResumeDb();
+      if (legacy) {
+        [fileBytes, contentList, images, pdfInfo] = (await readAll(legacy)) || [];
+      }
+    }
 
     if (!fileBytes) return null;
 
@@ -557,7 +590,7 @@ async function loadResumeState() {
  * Clear resume state after successful completion or user cancellation.
  */
 async function clearResumeState() {
-  sessionStorage.removeItem('rapiddoc_resume');
+  clearResumeMarker();
   try {
     const db = await getResumeDb();
     const tx = db.transaction(RESUME_STORE, 'readwrite');
@@ -761,7 +794,7 @@ export class PipelineAdapter {
     if (state.get('isProcessing')) return;
 
     // ── Auto-resume: if we have saved state, skip file check and rebuild file ──
-    const resumeRaw = sessionStorage.getItem('rapiddoc_resume');
+    const resumeRaw = readResumeMarker();
     let file = state.currentFile;
     if (!file && resumeRaw) {
       try {
@@ -812,7 +845,7 @@ export class PipelineAdapter {
    * @param {import('../state/appState.js').AppState} [state]
    */
   async _resumeFromCrash(state = appState) {
-    const resumeRaw = sessionStorage.getItem('rapiddoc_resume');
+    const resumeRaw = readResumeMarker();
     if (!resumeRaw) return false;
     let resume;
     try { resume = JSON.parse(resumeRaw); } catch { return false; }

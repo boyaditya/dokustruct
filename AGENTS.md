@@ -6,9 +6,15 @@ Proyek ini adalah **port JavaScript** dari [RapidDoc Python](https://github.com/
 
 ## Ringkasan Porting
 
-Seluruh `rapid_doc/` di porting file-per-file dari `python/rapid_doc/`. Kode Python yang menjadi referensi masih disertakan dalam repository sebagai `python/rapid_doc/` — bukan sebagai dependency, melainkan sebagai kanon untuk menjaga paritas perilaku. Hanya `python/rapid_doc/` + `python/LICENSE` yang disertakan; sisanya (demo assets, docker, tests, chunker) tidak dibawa dari upstream.
+Seluruh `rapid_doc/` di porting file-per-file dari `python/rapid_doc/`. Kode Python yang menjadi referensi masih disertakan dalam repository sebagai `python/rapid_doc/` — bukan sebagai dependency, melainkan sebagai kanon untuk menjaga paritas perilaku. Hanya `python/rapid_doc/` yang disertakan (lisensi upstream ada di root `LICENSE`); sisanya (demo assets, docker, tests, chunker) tidak dibawa dari upstream.
 
 Setiap file `.js` memiliki `PORTING NOTE` di header yang mendokumentasikan asal file `.py` dan keputusan adaptasi yang diambil.
+
+### Konvensi Penamaan
+
+- **Permukaan produk = DokuStruct**: judul halaman, branding UI, key storage/baru (`dokustruct_*`), logger default.
+- **Engine internals = rapid_doc/rapiddoc**: folder modul `rapid_doc/`, plugin ESLint `rapiddoc/*`, globals `__RAPIDDOC_*`, key cache lama yang dibaca untuk migrasi.
+- **Jangan rename** `rapiddoc_model_cache` (IndexedDB cache model 150MB — rename mengorbankan cache user) dan key legacy `rapiddoc_resume`/`RapidDocResume` (dibaca sebagai fallback migrasi di pipelineAdapter/app.js).
 
 ---
 
@@ -43,7 +49,7 @@ Setiap file `.js` memiliki `PORTING NOTE` di header yang mendokumentasikan asal 
 
 ### Model & Assets
 
-- **Asset manifest** (`model_url_map.js`) — 50+ entri ONNX model + runtime files, di-download ke IndexedDB.
+- **Asset manifest** (`model_url_map.js`) — ~30 entri ONNX model (layout, OCR, formula, table, orientation), di-download ke IndexedDB.
 - Model disimpan di **HuggingFace CDN**, fallback ke `/models` lokal.
 - `hashlib.sha256` → `SubtleCrypto.digest` untuk verifikasi integritas.
 - `OmegaConf.load()` → `fetch` + `js-yaml` untuk loading konfigurasi.

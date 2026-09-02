@@ -1099,13 +1099,15 @@ async function init() {
   });
 
   // ── Auto-resume after page reload (GPU crash recovery) ──
-  const resumeRaw = sessionStorage.getItem('rapiddoc_resume');
+  // Reads the current resume marker, falling back to the pre-rename key.
+  const resumeRaw = sessionStorage.getItem('dokustruct_resume')
+    ?? sessionStorage.getItem('rapiddoc_resume');
   let resumeSucceeded = false;
   if (resumeRaw) {
     try {
       const resume = JSON.parse(resumeRaw);
       if (resume.startPage > 0) {
-        console.log(
+        console.debug(
           `[UI] Detected resume state — page ${resume.startPage}, ` +
           `${resume.accumulatedPageCount} prior pages. Auto-resuming...`
         );
@@ -1113,22 +1115,33 @@ async function init() {
         // Reconstruct the File from IndexedDB BEFORE starting resume so
         // module-level currentFile/selectedFiles are populated for all
         // downstream code (saveToHistory, loadPdfPreview, updateUI, etc.).
-        const db = await new Promise((resolve, reject) => {
-          const req = indexedDB.open('RapidDocResume', 1);
+        const openResumeDb = (name) => new Promise((resolve, reject) => {
+          const req = indexedDB.open(name, 1);
           req.onupgradeneeded = () => { req.result.createObjectStore('state'); };
           req.onsuccess = () => resolve(req.result);
           req.onerror = () => reject(req.error);
         });
-        const tx = db.transaction('state', 'readonly');
-        const reqFiles = tx.objectStore('state').get('fileBytes');
-        const reqCl = tx.objectStore('state').get('contentList');
-        const reqImg = tx.objectStore('state').get('images');
-        const [fb, idxContentList, idxImages] = await Promise.all([
-          new Promise((r) => { reqFiles.onsuccess = () => r(reqFiles.result); reqFiles.onerror = () => r(null); }),
-          new Promise((r) => { reqCl.onsuccess = () => r(reqCl.result); reqCl.onerror = () => r(null); }),
-          new Promise((r) => { reqImg.onsuccess = () => r(reqImg.result); reqImg.onerror = () => r(null); }),
-        ]);
-        db.close();
+        let db = await openResumeDb('DokuStructResume').catch(() => null);
+        let fb, idxContentList, idxImages;
+        const readResumeStores = (database) => new Promise((resolve) => {
+          try {
+            const tx = database.transaction('state', 'readonly');
+            const reqFiles = tx.objectStore('state').get('fileBytes');
+            const reqCl = tx.objectStore('state').get('contentList');
+            const reqImg = tx.objectStore('state').get('images');
+            Promise.all([
+              new Promise((r) => { reqFiles.onsuccess = () => r(reqFiles.result); reqFiles.onerror = () => r(null); }),
+              new Promise((r) => { reqCl.onsuccess = () => r(reqCl.result); reqCl.onerror = () => r(null); }),
+              new Promise((r) => { reqImg.onsuccess = () => r(reqImg.result); reqImg.onerror = () => r(null); }),
+            ]).then(resolve);
+          } catch { resolve(null); }
+        });
+        [fb, idxContentList, idxImages] = (db && await readResumeStores(db)) || [];
+        if (!fb) {
+          db = await openResumeDb('RapidDocResume').catch(() => null);
+          [fb, idxContentList, idxImages] = (db && await readResumeStores(db)) || [];
+        }
+        if (db) db.close();
 
         // Populate module-level file state immediately.
         if (fb) {

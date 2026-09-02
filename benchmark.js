@@ -1,7 +1,7 @@
 /**
  * benchmark.js
  * ============
- * Lightweight benchmark runner for RapidDoc-JS.
+ * Lightweight benchmark runner for DokuStruct.
  *
  * Runs the same pipeline as the main UI but without any rendering overhead.
  * Supports multi-file queue, configurable repeat count, and warm-up exclusion.

@@ -1,5 +1,5 @@
 /**
- * ESLint flat configuration for RapidDoc-JS.
+ * ESLint flat configuration for DokuStruct.
  *
  * Uses ESLint's flat config format (eslint.config.js), required for ESLint ≥ 9.
  * Custom parity rules are loaded from `tooling/eslint-rules/`.

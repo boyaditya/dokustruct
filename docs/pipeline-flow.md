@@ -1,4 +1,4 @@
-# RapidDoc-JS Pipeline Flow
+# DokuStruct Pipeline Flow
 
 This is the canonical flow for the browser-native JavaScript pipeline. It is intended for agents that need to debug, extend, or validate the RapidDoc-JS engine.
 

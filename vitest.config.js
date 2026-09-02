@@ -14,6 +14,9 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.{test,spec,prop}.js'],
     timeout: 30000,
+    // Run test files sequentially: onnxruntime-web wasm init is not
+    // parallel-safe on Windows CI and can exceed per-test timeouts
+    fileParallelism: false,
     // Separate vitest config from vite.config.js to avoid interference
     // with browser-specific Vite build settings (COOP/COEP headers, optimizeDeps, etc.)
   },

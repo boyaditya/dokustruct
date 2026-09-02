@@ -10,8 +10,7 @@
     "preview": "vite preview",
     "test": "vitest --run",
     "bench:js:supervised": "node benchmark/js_supervised_runner.mjs",
-    "lint": "eslint rapid_doc/ ui/",
-    "lint:bbox": "eslint rapid_doc/ --rule 'rapiddoc/no-math-round-bbox: warn'"
+    "lint": "eslint rapid_doc/ ui/"
   },
   "dependencies": {
     "dompurify": "^3.3.0",

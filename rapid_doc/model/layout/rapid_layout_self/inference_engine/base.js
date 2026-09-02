@@ -84,12 +84,12 @@ export async function loadEngineCfg(url) {
 
 /**
  * Set a value at a dotted-key path inside an object, creating intermediate
- * objects as needed.  Matches OmegaConf Python semantics for flat overrides
+ * objects as needed. Matches OmegaConf Python semantics for flat overrides
  * such as `cuda_ep_cfg.device_id`.
  *
- * @param {Object} obj      - Target object (mutated in-place)
- * @param {string} dotPath  - Dot-separated key path, e.g. "cuda_ep_cfg.device_id"
- * @param {*}      value    - Value to set at the leaf
+ * @param {Object} obj - Target object (mutated in-place)
+ * @param {string} dotPath - Dot-separated key path, e.g. "cuda_ep_cfg.device_id"
+ * @param {*} value - Value to set at the leaf
  */
 export function setNestedKey(obj, dotPath, value) {
   const parts = dotPath.split('.');
@@ -174,8 +174,8 @@ export class InferSession {
   /**
    * Merge override params into a config object (deep-merge).
    * Supports dotted-key paths (e.g. "cuda_ep_cfg.device_id") that expand to
-   * nested object traversal, matching OmegaConf Python semantics (Audit L14).
-   * @param {Object} cfg    - Base config
+   * nested object traversal, matching OmegaConf Python semantics.
+   * @param {Object} cfg - Base config
    * @param {Object} params - Override params (may contain dotted-key keys)
    * @returns {Object}
    */

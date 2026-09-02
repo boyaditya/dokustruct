@@ -1339,10 +1339,10 @@ function setupOverlayResizeObservers() {
     if (target) overlayResizeObserver.observe(target);
   });
 
-  // assignment or other out-of-band DOM mutations (Requirement 4.5).
+  // assignment or other out-of-band DOM mutations.
   if (el.pageStack && typeof MutationObserver === 'function') {
-    if (el.pageStack._auditMutationObserver) {
-      el.pageStack._auditMutationObserver.disconnect();
+    if (el.pageStack._overlayMutationObserver) {
+      el.pageStack._overlayMutationObserver.disconnect();
     }
     const mo = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
@@ -1358,7 +1358,7 @@ function setupOverlayResizeObservers() {
       }
     });
     mo.observe(el.pageStack, { childList: true });
-    el.pageStack._auditMutationObserver = mo;
+    el.pageStack._overlayMutationObserver = mo;
   }
 }
 
@@ -2036,7 +2036,7 @@ function addSelectedFiles(files) {
   setWorkspaceMode('setup');
   setSetupTab('upload');
   updateSetupUploadState();
-  // Store the file but DON'T render preview yet — that happens in runPipeline().
+  // Store the file but DON'T render preview yet — that happens in runPipeline.
   currentFile = validFiles[0];
   currentFileType = isImageFile(currentFile) ? 'image' : 'pdf';
   currentPage = 1;
@@ -2714,7 +2714,7 @@ function displayMarkdown(markdown, pageCount = 1, contentList = null) {
 
   // Render markdown while preserving LaTeX blocks before marked parses inline syntax.
   try {
-    // Protect LaTeX blocks from being mangled by marked.parse()
+    // Protect LaTeX blocks from being mangled by marked.parse
     const latexBlocks = [];
     let protectedSource = markdown;
 
@@ -2992,7 +2992,7 @@ function buildOverlayBlocksFromMiddlePdfInfo(results) {
     const discardedBlocks = Array.isArray(page?.discarded_blocks) ? page.discarded_blocks : [];
     const pageContent = contentByPage.get(pageIndex) || [];
     let contentCursor = 0;
-    // FIX IDENTICAL-TEXT: two paragraphs with the same text (different
+    // Porting fix: two paragraphs with the same text (different
     // positions) both matched the FIRST physical preproc block by text.
     // Track claimed blocks (by object identity — sort keys collide when
     // original_order/index are missing) so the second paragraph is forced
@@ -3008,7 +3008,7 @@ function buildOverlayBlocksFromMiddlePdfInfo(results) {
         paraBlock, paraText, globalPreprocBlocks, pageIndex, claimedPreprocKeys,
       );
       let overlayParts = physicalBlocks.length ? physicalBlocks : [paraBlock];
-      // FIX LIST-LINES: PDF-text lists render as <ol>/<ul> with one <li> per
+      // Porting fix: PDF-text lists render as <ol>/<ul> with one <li> per
       // line, but the layout emits ONE 'content' box covering the whole list.
       // Expand list/index para-blocks into per-line boxes so every <li> gets
       // its own overlay box and its own link id.
@@ -3159,7 +3159,7 @@ function findPreprocBlocksForPara(paraBlock, paraText, preprocBlocks, paraPageIn
       if (!text) return false;
       if (block?.lines_deleted) return false;
       if (!isCompatibleOverlayType(paraBlock, block)) return false;
-      // FIX IDENTICAL-TEXT: skip blocks already claimed by an earlier
+      // Porting fix: skip blocks already claimed by an earlier
       // paragraph — identical text must not reuse the same physical block.
       if (claimedKeys?.has(block)) return false;
       const blockLabelGroup = labelGroupKey(block?.original_label, block?.type);
@@ -3967,7 +3967,7 @@ function scoreMarkdownLink(blockInfo, candidate, distance = 0) {
   const blockLabelGroup = blockInfo.blockLabelGroup;
   if (blockLabelGroup && candidateLabelGroup && blockLabelGroup !== candidateLabelGroup) {
     const bothPlainText = blockLabelGroup === 'text' && candidateLabelGroup === 'text';
-    // FIX LINK-STEAL: when table model is off, tables are rendered as images in the pipeline.
+    // Porting fix: when table model is off, tables are rendered as images in the pipeline.
     // Treat media_image and media_table as the same group so a <table> block can match an
     // image-type candidate (and vice versa) without being blocked by the cross-category gate.
     const bothMedia = (blockLabelGroup === 'media_image' || blockLabelGroup === 'media_table')
@@ -3991,7 +3991,7 @@ function scoreMarkdownLink(blockInfo, candidate, distance = 0) {
   if (blockInfo.hasImage && !candidateText && /image|figure|chart|picture/.test(`${type} ${label}`)) {
     score = Math.max(score, 60);
   }
-  // FIX LINK-STEAL: when table model is off, a <table> in markdown may correspond to an
+  // Porting fix: when table model is off, a <table> in markdown may correspond to an
   // image-type candidate (the table was treated as an image region by the pipeline).
   // Also allow an image block to match a table-type candidate for the same reason.
   if (blockInfo.tagName === 'table' && /image|figure|chart|picture/.test(`${type} ${label} ${source}`)) {
@@ -5419,10 +5419,10 @@ function subscribeToState() {
 }
 
 // ===== LOADING INDICATOR (LOFI) =====
-function showRecoverableError(err, { audit_id = '', retryFn = null } = {}) {
+function showRecoverableError(err, { runId = '', retryFn = null } = {}) {
   const container = document.getElementById('toastContainer');
   const message = err?.message ?? String(err ?? 'Unknown error');
-  const id = audit_id ? ` [${audit_id}]` : '';
+  const id = runId ? ` [${runId}]` : '';
 
   if (container) {
     const t = document.createElement('div');
@@ -5432,11 +5432,11 @@ function showRecoverableError(err, { audit_id = '', retryFn = null } = {}) {
     t.innerHTML = `
       <span class="text-base mt-0.5">❌</span>
       <span class="flex-1" style="color:#8b949e">${escapeHtml(message)}${escapeHtml(id)}</span>
-      ${retryFn ? '<button class="audit-retry-btn" style="color:#60a5fa;cursor:pointer;font-size:11px;white-space:nowrap">Retry</button>' : ''}
+      ${retryFn ? '<button class="run-retry-btn" style="color:#60a5fa;cursor:pointer;font-size:11px;white-space:nowrap">Retry</button>' : ''}
       <button style="color:#484f58;cursor:pointer" onclick="this.closest('div').remove()">×</button>
     `;
     if (retryFn) {
-      t.querySelector('.audit-retry-btn')?.addEventListener('click', () => {
+      t.querySelector('.run-retry-btn')?.addEventListener('click', () => {
         t.remove();
         retryFn();
       });
@@ -5448,7 +5448,7 @@ function showRecoverableError(err, { audit_id = '', retryFn = null } = {}) {
     showLoading(`Error: ${message}`, 4000);
   }
 
-  // Restore startBtn within 500ms per Requirement 5.2
+  // Restore startBtn within 500ms per
   setTimeout(() => {
     if (el.startBtn && !appState.get('isProcessing')) {
       el.startBtn.disabled = !canRunExtraction();

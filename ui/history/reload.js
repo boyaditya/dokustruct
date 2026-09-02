@@ -1,8 +1,8 @@
 /**
  * ui/history/reload.js
  *
- * Extracted from ui/app.js. Signature unchanged (Requirement 7.2).
- * Disposer chain wired for deterministic resource cleanup (Requirement 4.7).
+ * Extracted from ui/app.js. Signature unchanged.
+ * Disposer chain wired for deterministic resource cleanup.
  */
 
 import { createDisposerChain } from '../lifecycle/disposerChain.js';
@@ -70,7 +70,7 @@ let _ctx = null;
 
 /**
  * Initialise the history reload module with shared app context.
- * Must be called once from init() before loadHistoryItem() is used.
+ * Must be called once from init before loadHistoryItem is used.
  *
  * @param {ReloadCtx} ctx
  */
@@ -82,9 +82,9 @@ export function initHistoryReload(ctx) {
  * Load a history item back into the workspace.
  * Runs a disposer chain before mounting new content to release previous
  * blob URLs, zero-out canvases, remove thumbnailObjectUrls entries, and
- * detach observers (Requirement 4.7).
+ * detach observers.
  *
- * @param {object} item - History entry from getHistory().
+ * @param {object} item - History entry from getHistory.
  */
 export async function loadHistoryItem(item) {
   if (!_ctx) {
@@ -137,7 +137,7 @@ export async function loadHistoryItem(item) {
   setWorkspaceMode('workspace');
 
   // ── Disposer chain: release resources from the previous item ──────────────
-  // deterministic cleanup before mounting new content (Requirement 4.7)
+  // deterministic cleanup before mounting new content
   const disposer = createDisposerChain('loadHistoryItem');
 
   // 1. Revoke previous blob URLs and clear the tracking set

@@ -3,7 +3,7 @@
  *
  * Draws SVG connector lines between merged layout-overlay boxes that span
  * multiple pages or positions. Uses a single global SVG layer prepended to
- * el.pageStack (Requirement 3.4 — reads before writes, DocumentFragment-style
+ * el.pageStack ( — reads before writes, DocumentFragment-style
  * batching via a single innerHTML clear + grouped appends).
  *
  * Requirements: 3.4, 7.2
@@ -25,7 +25,7 @@ const _ctx = {
 };
 
 /**
- * Wire the connectors render context. Called once from app.js init().
+ * Wire the connectors render context. Called once from app.js init.
  * @param {ConnectorsRenderContext} ctx
  */
 export function initConnectorsRenderer(ctx) {
@@ -161,7 +161,7 @@ function appendMergeConnectorPath(layer, groupId, points, { showLabel = false } 
  * Render SVG merge-connector lines between grouped overlay boxes.
  * Phase 1 (read): collect box positions from the live overlay DOM.
  * Phase 2 (write): clear the SVG layer and append new paths.
- * Requirement 3.4 — reads before writes.
+ *  — reads before writes.
  */
 export function renderMergeConnectors() {
   const layer = getGlobalMergeConnectorLayer();
@@ -213,7 +213,7 @@ export function renderMergeConnectors() {
 }
 
 /**
- * Schedule renderMergeConnectors via RAF coalescer (Requirement 7.2).
+ * Schedule renderMergeConnectors via RAF coalescer.
  * Attaches a lazy _coalescer property on first call.
  */
 export function scheduleRenderMergeConnectors() {

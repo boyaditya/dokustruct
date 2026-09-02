@@ -1,7 +1,7 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: table_structure/pp_structure/main.py → main.js
+// Copyright (c) Opendatalab. All rights reserved.
 // PPTableStructurer: session + preprocess + postprocess pipeline
-// W1: __init__(cfg) → static async create(cfg)
+// __init__(cfg) → static async create(cfg)
 
 import * as ort from "onnxruntime-web";
 import { OrtInferSession } from "../../inference_engine/onnxruntime/main.js";
@@ -14,7 +14,7 @@ import { disposeOutputMap } from "../../../../../utils/resource_utils.js";
 
 /**
  * PP-Structure table structure recognizer.
- * PORTING NOTE: PPTableStructurer(cfg) → static async create(cfg)
+ * PP-Structure table structure recognizer.
  */
 export class PPTableStructurer {
   constructor() {
@@ -69,7 +69,7 @@ export class PPTableStructurer {
 
   /**
    * Run structure recognition on a batch of images.
-   * FIX T11b: return shape now includes per-image mean confidence scores
+   * Porting fix: return shape now includes per-image mean confidence scores
    * @param {cv.Mat[]} oriImgs
    * @returns {Promise<{ structures: string[][], cellBboxes: number[][][], scores: number[] }>}
    */

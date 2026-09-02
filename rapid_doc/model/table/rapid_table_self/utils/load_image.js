@@ -84,7 +84,7 @@ export class LoadImage {
     const b = channels.get(2);
     // a = aChannel already held above
 
-    // new_img = merge(b, g, r)  →  BGR ordering
+    // new_img = merge(b, g, r) → BGR ordering
     const bgrVec = new cv.MatVector();
     bgrVec.push_back(b);
     bgrVec.push_back(g);
@@ -92,17 +92,17 @@ export class LoadImage {
     let bgrMat = new cv.Mat();
     cv.merge(bgrVec, bgrMat);
 
-    // not_a = bitwise_not(a);  not_a_bgr = cvtColor(not_a, GRAY2BGR)
+    // not_a = bitwise_not(a); not_a_bgr = cvtColor(not_a, GRAY2BGR)
     let notA = new cv.Mat();
     cv.bitwise_not(aChannel, notA);
     let notABgr = new cv.Mat();
     cv.cvtColor(notA, notABgr, cv.COLOR_GRAY2BGR);
 
-    // masked = bitwise_and(bgr, bgr, mask=a)  →  transparent pixels become 0
+    // masked = bitwise_and(bgr, bgr, mask=a) → transparent pixels become 0
     let masked = new cv.Mat();
     cv.bitwise_and(bgrMat, bgrMat, masked, aChannel);
 
-    // mean_color = np.mean(masked)  →  average over all channels and pixels
+    // mean_color = np.mean(masked) → average over all channels and pixels
     const meanVals = cv.mean(masked);
     const meanColor = (meanVals[0] + meanVals[1] + meanVals[2]) / 3;
 

@@ -10,9 +10,9 @@ import { RapidLayoutOutput } from '../../utils/typings.js';
 
 export class DocLayoutModelHandler extends BaseModelHandler {
   /**
-   * @param {string[]}                              labels
-   * @param {number}                                confThres
-   * @param {number}                                iouThres
+   * @param {string[]} labels
+   * @param {number} confThres
+   * @param {number} iouThres
    * @param {import('../../inference_engine/base.js').InferSession} session
    */
   constructor(labels, confThres, iouThres, session) {

@@ -68,8 +68,8 @@ function deepEqualArray(a, b) {
  * Returns -1 if not found.
  * FIX 8.10: value-equality replacement for `arr.findIndex(b => b === target)`.
  *
- * @param {Array[]} arr   Array of bbox arrays
- * @param {Array}   target  Bbox array to find
+ * @param {Array[]} arr Array of bbox arrays
+ * @param {Array} target Bbox array to find
  * @returns {number}
  */
 function findIndexByValue(arr, target) {

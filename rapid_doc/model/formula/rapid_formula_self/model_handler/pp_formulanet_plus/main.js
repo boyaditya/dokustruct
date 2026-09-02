@@ -1,6 +1,6 @@
 // Copyright (c) Opendatalab. All rights reserved.
 // PORTING NOTE: model_handler/pp_formulanet_plus/main.py → main.js
-// W1: sync __init__ → static async create(); W2: cv.Mat cleanup in try/finally
+// sync __init__ → static async create(); cv.Mat cleanup in try/finally
 
 import * as ort from "onnxruntime-web";
 import { BaseModelHandler } from "../base/index.js";
@@ -50,7 +50,7 @@ export class PPFormulaNetPlusModelHandler extends BaseModelHandler {
       // than WASM with SIMD. No GPU mutex needed for WASM execution.
       outputMap = await this.session.run({ [inputName]: inputTensor });
 
-      // 3. Postprocess (WASM output is already on CPU — no getData() needed)
+      // 3. Postprocess (WASM output is already on CPU — no getData needed)
       const outputName = this.session.getOutputNames()[0];
       const predTensor = outputMap instanceof Map
         ? (outputMap.get(outputName) ?? outputMap.values().next().value)

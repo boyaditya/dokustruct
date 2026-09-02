@@ -42,7 +42,7 @@ function getYieldChannel() {
     const resolve = _yieldResolvers.shift();
     if (resolve) resolve();
   };
-  // Some environments require start() before messages flow.
+  // Some environments require start before messages flow.
   channel.port1.start?.();
   _yieldChannel = channel;
   return channel;

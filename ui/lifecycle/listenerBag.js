@@ -2,7 +2,7 @@
  * ui/lifecycle/listenerBag.js
  *
  * Prevents listener leaks by recording every registration and providing a
- * single dispose() call that removes all of them.
+ * single dispose call that removes all of them.
  *
  * Usage:
  *   const bag = createListenerBag('linking');

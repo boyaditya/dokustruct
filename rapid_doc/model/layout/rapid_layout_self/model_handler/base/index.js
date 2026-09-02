@@ -13,7 +13,7 @@ export class BaseModelHandler {
     throw new Error(`${this.constructor.name}.preprocess() not implemented`);
   }
 
-  /** @param  {...any} args */
+  /** @param {...any} args */
   postprocess(...args) {
     throw new Error(`${this.constructor.name}.postprocess() not implemented`);
   }

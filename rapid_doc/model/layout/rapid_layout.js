@@ -211,8 +211,8 @@ export class RapidLayoutModel {
   /**
    * Run layout detection on a batch of images.
    * @param {cv.Mat[]} images
-   * @param {number}   batchSize
-   * @param {number}   [dpi=200]
+   * @param {number} batchSize
+   * @param {number} [dpi=200]
    * @returns {Promise<Array<Array<Object>>>}
    */
   async batchPredict(images, batchSize, dpi = 200) {

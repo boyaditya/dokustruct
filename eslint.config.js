@@ -5,9 +5,9 @@
  * Custom parity rules are loaded from `tooling/eslint-rules/`.
  *
  * Run:
- *   npx eslint rapid_doc/          — lint all source files
- *   npm run lint                   — same via package.json script
- *   npm run lint:bbox              — targeted bbox-coordinate check only
+ *   npx eslint rapid_doc/ — lint all source files
+ *   npm run lint — same via package.json script
+ *   npm run lint:bbox — targeted bbox-coordinate check only
  */
 
 import rapiddocPlugin from './tooling/eslint-rules/index.js';
@@ -53,10 +53,10 @@ export default [
     },
     rules: {
       // -----------------------------------------------------------------------
-      // Parity rule — Requirement 9.2
-      // Warn on Math.round() in bbox-coordinate contexts.
-      // Use intTrunc() from rapid_doc/utils/math_utils.js instead.
-      // References: Audit L9, R5, R7, R8, R9, T10
+      // Parity rule —
+      // Warn on Math.round in bbox-coordinate contexts.
+      // Use intTrunc from rapid_doc/utils/math_utils.js instead.
+      // References:
       // -----------------------------------------------------------------------
       'rapiddoc/no-math-round-bbox': 'warn',
 

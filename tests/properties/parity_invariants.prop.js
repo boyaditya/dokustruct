@@ -6,7 +6,7 @@
  * Feature: parity-remediation, Property 13: SHA-256 Verification Enforced
  * Feature: parity-remediation, Property 14: Math.round-vs-int Substitution
  *
- * Validates: Requirements 1.1, 1.2, 1.3, 1.4, 9.1, 9.2
+ * , 1.2, 1.3, 1.4, 9.1, 9.2
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fc from 'fast-check';
@@ -39,7 +39,7 @@ import {
 
 describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arithmetic', () => {
   /**
-   * **Validates: Requirements 1.4**
+   * ****
    *
    * tensorToNumber(BigInt) should return a plain Number, never throw TypeError.
    */
@@ -63,7 +63,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * **Validates: Requirements 1.4**
+   * ****
    *
    * tensorToNumber(Number) should pass through as-is.
    */
@@ -82,7 +82,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * **Validates: Requirements 1.4**
+   * ****
    *
    * tensorToNumber result is safe for use in arithmetic with Number — no TypeError.
    */
@@ -108,7 +108,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * **Validates: Requirements 1.4**
+   * ****
    *
    * tensorDataToFloat64 converts BigInt64Array to Float64Array without TypeError.
    */
@@ -140,7 +140,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * **Validates: Requirements 1.4**
+   * ****
    *
    * tensorDataToFloat64 handles Float32Array without losing type safety.
    */
@@ -167,7 +167,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * **Validates: Requirements 1.4**
+   * ****
    *
    * tensorToNumber handles null/undefined safely (returns 0).
    */
@@ -183,10 +183,10 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
 
 describe('Feature: parity-remediation, Property 4: Threshold Table Singularity', () => {
   /**
-   * **Validates: Requirements 2.6, 2.7, 2.8, 9.1**
+   * **, 2.7, 2.8, 9.1**
    *
-   * PP_DOCLAYOUTV2_Threshold[5] must be 0.5 (FIXED from 0.4, Audit L6).
-   * PP_DOCLAYOUTV2_Threshold[15] must be 0.5 (FIXED from 0.4, Audit L6).
+   * PP_DOCLAYOUTV2_Threshold[5] must be 0.5 (FIXED from 0.4, ).
+   * PP_DOCLAYOUTV2_Threshold[15] must be 0.5 (FIXED from 0.4, ).
    */
   it('PP_DOCLAYOUTV2_Threshold has correct fixed values at indices 5 and 15', () => {
     expect(PP_DOCLAYOUTV2_Threshold[5]).toBe(0.5);
@@ -194,10 +194,10 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   /**
-   * **Validates: Requirements 2.7, 9.1**
+   * **, 9.1**
    *
-   * PP_DOCLAYOUT_L_Threshold[7] must be 0.5 (FIXED from 0.3, Audit L7).
-   * PP_DOCLAYOUT_L_Threshold[16] must be 0.45 (FIXED from 0.2, Audit L7).
+   * PP_DOCLAYOUT_L_Threshold[7] must be 0.5 (FIXED from 0.3, ).
+   * PP_DOCLAYOUT_L_Threshold[16] must be 0.45 (FIXED from 0.2, ).
    */
   it('PP_DOCLAYOUT_L_Threshold has correct fixed values at indices 7 and 16', () => {
     expect(PP_DOCLAYOUT_L_Threshold[7]).toBe(0.5);
@@ -205,7 +205,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   /**
-   * **Validates: Requirements 9.1**
+   * ****
    *
    * All keys in both threshold tables must have exactly one entry — no duplicates.
    * Object.freeze + Object literal literal syntax prevents JS from accepting
@@ -224,7 +224,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   /**
-   * **Validates: Requirements 9.1**
+   * ****
    *
    * Threshold tables are frozen — no mutation possible at runtime.
    */
@@ -237,7 +237,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   /**
-   * **Validates: Requirements 9.1**
+   * ****
    *
    * All threshold values in PP_DOCLAYOUTV2_Threshold must be valid probabilities
    * in (0, 1] — no zero thresholds, no values outside valid range.
@@ -259,17 +259,16 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   /**
-   * **Validates: Requirements 9.1 — single source of truth**
+   * ** — single source of truth**
    *
    * The layout-local typings.js (which re-exports from shared) must yield
-   * exactly the same object identity or value for the threshold tables as
-   * the shared rapid_doc/utils/typings.js. This ensures the consolidation
-   * (Audit L7, Task 1.4) is in effect.
-   */
+    * exactly the same object identity or value for the threshold tables as
+    * the shared rapid_doc/utils/typings.js.
+    */
   it('layout-local PP_DOCLAYOUTV2_Threshold re-exports same values as shared typings', () => {
     // The local typings file may have an extended schema (more indices for V2's 25-class model),
-    // but the critical audit-fixed indices must always match the canonical shared values.
-    // Per Audit L6: indices 5 and 15 were fixed from 0.4 → 0.5.
+    // but the critical fixed indices must always match the canonical shared values.
+    // Per indices 5 and 15 were fixed from 0.4 → 0.5.
     expect(PP_DOCLAYOUTV2_Threshold_local[5]).toBe(0.5);
     expect(PP_DOCLAYOUTV2_Threshold_local[15]).toBe(0.5);
     // All indices that exist in BOTH tables must agree
@@ -280,7 +279,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
       const sharedVal = PP_DOCLAYOUTV2_Threshold[key];
       const localVal  = PP_DOCLAYOUTV2_Threshold_local[key];
       if (localVal !== undefined && sharedVal !== undefined) {
-        // Both tables must agree on the two audit-fixed indices
+        // Both tables must agree on the two fixed indices
         if (key === '5' || key === '15') {
           expect(localVal).toBe(sharedVal);
         }
@@ -289,7 +288,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   it('layout-local PP_DOCLAYOUT_L_Threshold is the same object as shared (re-export)', () => {
-    // After Task 1.4 consolidation, the layout-local file must re-export the
+    // After consolidation, the layout-local file must re-export the
     // canonical shared table — same object reference or same values at all keys
     expect(PP_DOCLAYOUT_L_Threshold_local[7]).toBe(0.5);
     expect(PP_DOCLAYOUT_L_Threshold_local[16]).toBe(0.45);
@@ -336,7 +335,7 @@ describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforce
   });
 
   /**
-   * **Validates: Requirements 1.1, 1.2**
+   * **, 1.2**
    *
    * DownloadFile.run with CORRECT sha256 field must accept the bytes and
    * return them without throwing.
@@ -359,7 +358,7 @@ describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforce
   });
 
   /**
-   * **Validates: Requirements 1.1, 1.2**
+   * **, 1.2**
    *
    * DownloadFile.run with WRONG sha256 field must throw an error whose
    * message contains the expected hash, the computed hash, and the URL.
@@ -379,7 +378,7 @@ describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforce
   });
 
   /**
-   * **Validates: Requirements 1.1, 1.2**
+   * **, 1.2**
    *
    * Error message must contain the URL and expected hash for diagnostics.
    */
@@ -408,7 +407,7 @@ describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforce
   });
 
   /**
-   * **Validates: Requirements 1.1**
+   * ****
    *
    * DownloadFile.run with sha256=null must NOT throw — it should accept the
    * bytes and (in non-production) emit a console.warn.
@@ -434,7 +433,7 @@ describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforce
   });
 
   /**
-   * **Validates: Requirements 1.1, 1.2**
+   * **, 1.2**
    *
    * Property: for any arbitrary byte sequence, DownloadFile.run accepts bytes
    * whose correct SHA-256 is supplied and rejects bytes with an incorrect hash.
@@ -480,7 +479,7 @@ describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforce
 
 describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substitution', () => {
   /**
-   * **Validates: Requirements 1.3, 9.2**
+   * **, 9.2**
    *
    * intTrunc(2.9) === 2 — truncation toward zero (Python int(2.9) → 2).
    */
@@ -489,7 +488,7 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * **Validates: Requirements 1.3, 9.2**
+   * **, 9.2**
    *
    * intTrunc(-2.9) === -2 — truncation toward zero (Python int(-2.9) → -2).
    */
@@ -498,7 +497,7 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * **Validates: Requirements 1.3, 9.2**
+   * **, 9.2**
    *
    * intTrunc(2.5) === 2 — unlike Math.round which gives 3 (round-half-up),
    * intTrunc truncates toward zero.
@@ -511,7 +510,7 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * **Validates: Requirements 1.3, 9.2**
+   * **, 9.2**
    *
    * intTrunc(-2.5) === -2 — unlike Math.floor which gives -3,
    * truncation toward zero gives -2.
@@ -524,10 +523,10 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * **Validates: Requirements 1.3, 9.2**
+   * **, 9.2**
    *
    * Property: for any finite float x, intTrunc(x) equals Math.trunc(x),
-   * which is Python int() semantics.
+   * which is Python int semantics.
    */
   it('intTrunc matches Math.trunc for all finite floats (property)', () => {
     fc.assert(
@@ -542,7 +541,7 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * **Validates: Requirements 1.3, 9.2**
+   * **, 9.2**
    *
    * Property: intTrunc result is always an integer.
    */
@@ -560,7 +559,7 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * **Validates: Requirements 1.3, 9.2**
+   * **, 9.2**
    *
    * Property: intTrunc(x) differs from Math.round(x) for any x where the
    * fractional part is ≥ 0.5 but < 1 (the "would-be-rounded-up" range).
@@ -585,7 +584,7 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * **Validates: Requirements 1.3**
+   * ****
    *
    * intTrunc handles non-finite inputs safely, returning 0.
    */
@@ -596,13 +595,11 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * **Validates: Requirements 1.3, 9.2**
-   *
-   * Cross-check: intTrunc matches Python int() for the specific audit-relevant
-   * coordinate values listed in design.md (coordinate pipeline examples).
+   * Cross-check: intTrunc matches Python int for the coordinate
+   * values listed in design.md (coordinate pipeline examples).
    */
-  it('intTrunc matches Python int() for audit-relevant coordinate examples', () => {
-    // Python int() always truncates toward zero
+  it('intTrunc matches Python int() for coordinate examples', () => {
+    // Python int always truncates toward zero
     const cases = [
       [0.0, 0],
       [0.9, 0],
@@ -623,7 +620,7 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
 
     for (const [input, expected] of cases) {
       // Use == 0 for zero checks to avoid -0 vs +0 distinction
-      // (Python int() does not distinguish -0 from 0)
+      // (Python int does not distinguish -0 from 0)
       const result = intTrunc(input);
       if (expected === 0) {
         expect(result == 0).toBe(true); // both -0 and +0 satisfy == 0

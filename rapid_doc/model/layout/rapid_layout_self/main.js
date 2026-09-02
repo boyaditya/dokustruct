@@ -1,7 +1,7 @@
 /**
  * RapidLayout: the public-facing layout detection class.
  * Wraps inference engine and model handler for layout detection.
- * Session loading is async — uses static create() factory instead of constructor.
+ * Session loading is async — uses static create factory instead of constructor.
  */
 
 import { getEngine } from './inference_engine/base.js';
@@ -32,7 +32,7 @@ function isBatchInferenceFallbackError(err) {
 }
 
 export class RapidLayout {
-  /** @private — use static create() */
+  /** @private — use static create */
   constructor() {
     /** @type {import('./inference_engine/base.js').InferSession} */
     this.session      = null;
@@ -84,8 +84,8 @@ export class RapidLayout {
   /**
    * Run layout detection on a list of image inputs.
    * @param {Array<string|ArrayBuffer|Uint8Array|cv.Mat>} imgContents
-   * @param {number}   [batchSize=1]
-   * @param {Function} [onProgress]  - (processed: number, total: number) => void
+   * @param {number} [batchSize=1]
+   * @param {Function} [onProgress] - (processed: number, total: number) => void
    * @returns {Promise<import('./utils/typings.js').RapidLayoutOutput[]>}
    */
   async call(imgContents, batchSize = 1, onProgress = null) {

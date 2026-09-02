@@ -21,21 +21,21 @@ export function fixLatex(formula) {
   return result;
 }
 
-// FIX F4: HuggingFace byte-level BPE inverse map for Greek/CJK token decoding
+// Porting fix: HuggingFace byte-level BPE inverse map for Greek/CJK token decoding
 //
-// The HuggingFace GPT-2 BPE byte_to_unicode() map encodes each of the 256 byte
+// The HuggingFace GPT-2 BPE byte_to_unicode map encodes each of the 256 byte
 // values to a unique Unicode character, avoiding "problematic" control/whitespace
-// bytes.  The forward map (byte → unicode) is built in Python as follows:
+// bytes. The forward map (byte → unicode) is built in Python as follows:
 //
-//   bs = list(range(ord("!"), ord("~")+1))          # 0x21–0x7E (printable ASCII)
-//          + list(range(ord("¡"), ord("¬")+1))       # 0xA1–0xAC
-//          + list(range(ord("®"), ord("ÿ")+1))       # 0xAE–0xFF
+//   bs = list(range(ord("!"), ord("~")+1)) # 0x21–0x7E (printable ASCII)
+//          + list(range(ord("¡"), ord("¬")+1)) # 0xA1–0xAC
+//          + list(range(ord("®"), ord("ÿ")+1)) # 0xAE–0xFF
 //   cs = bs[:]
 //   n = 0
 //   for b in range(256):
 //     if b not in bs:
 //       bs.append(b), cs.append(256 + n), n += 1
-//   # result: dict(zip(map(chr, cs), bs))  ← maps unicode char → byte value
+//   # result: dict(zip(map(chr, cs), bs)) ← maps unicode char → byte value
 //            i.e. this IS the inverse map we need for decoding.
 //
 // The inverse map (unicode char → byte value) lets us reconstruct the raw byte
@@ -87,8 +87,8 @@ export function gpt2BytesToUnicodeInverse() {
  * Decode a single GPT-2 BPE token string using the byte-level inverse map.
  *
  * Each character in the token string corresponds to a byte value via the
- * inverse map.  Those byte values are assembled into a Uint8Array and decoded
- * as UTF-8.  Characters that are NOT in the inverse map are passed through
+ * inverse map. Those byte values are assembled into a Uint8Array and decoded
+ * as UTF-8. Characters that are NOT in the inverse map are passed through
  * as-is (e.g. characters that are already plain ASCII LaTeX like \, {, }).
  *
  * @param {string} token - A single BPE token as it appears in the vocabulary

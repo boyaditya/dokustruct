@@ -1,8 +1,8 @@
 /**
  * ui/history/list.js
  *
- * Extracted from ui/app.js. Signature unchanged (Requirement 7.2).
- * Virtualization applied when history item count > 100 (Requirement 3.7).
+ * Extracted from ui/app.js. Signature unchanged.
+ * Virtualization applied when history item count > 100.
  */
 
 import { createVirtualList } from '../perf/virtualization.js';
@@ -17,7 +17,7 @@ let _vlist = null;
 
 /**
  * Initialise the history list module with shared app context.
- * Must be called once from init() before loadHistory() is used.
+ * Must be called once from init before loadHistory is used.
  *
  * @param {{
  *   el: object,
@@ -109,7 +109,7 @@ export function loadHistory() {
     el.fileList.appendChild(div);
   });
 
-  // apply virtualization when item count exceeds threshold (Requirement 3.7)
+  // apply virtualization when item count exceeds threshold
   if (history.length > HISTORY_VLIST_THRESHOLD) {
     _vlist = createVirtualList({
       container: el.fileList,

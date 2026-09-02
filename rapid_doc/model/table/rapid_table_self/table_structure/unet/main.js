@@ -103,7 +103,7 @@ export class TSRUnetStructurer {
    * @param {number} [opts.v_lines_threshold=15] - Alpha distance threshold for adjustLines on vertical lines (Python `v_lines_threshold`)
    * @param {number} [opts.angle=50] - Angle tolerance (degrees) passed to adjustLines for both row and col lines
    * @param {boolean} [opts.enhance_box_line=false] - Whether to enhance box-border lines (reserved for future use)
-   * @param {boolean} [opts.morph_close=true] - Whether to apply MORPH_CLOSE on hPred (unconditional on vPred); see task 10.7
+   * @param {boolean} [opts.morph_close=true] - Whether to apply MORPH_CLOSE on hPred (unconditional on vPred); see
    * @param {boolean} [opts.more_h_lines=true] - Gate: whether to run adjustLines for horizontal lines (Python `more_h_lines`, default true via enhance_box_line)
    * @param {boolean} [opts.more_v_lines=true] - Gate: whether to run adjustLines for vertical lines (Python `more_v_lines`, default true via enhance_box_line)
    * @param {boolean} [opts.extend_line=true] - Gate: whether to run finalAdjustLines (Python `extend_line`, default true via enhance_box_line)

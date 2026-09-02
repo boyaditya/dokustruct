@@ -17,7 +17,7 @@
  *
  * @param {(deadline?: IdleDeadline) => void} fn
  * @param {IdleWorkOptions} [opts]
- * @returns {number} Handle that can be passed to cancelIdleWork().
+ * @returns {number} Handle that can be passed to cancelIdleWork.
  */
 export function scheduleIdleWork(fn, opts = {}) {
   if (typeof requestIdleCallback === 'function') {

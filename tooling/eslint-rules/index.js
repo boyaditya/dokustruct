@@ -27,9 +27,9 @@ const rapiddocPlugin = {
   },
   rules: {
     /**
-     * Warn when Math.round() is used for bounding-box coordinate arithmetic.
-     * Use intTrunc() from rapid_doc/utils/math_utils.js instead.
-     * References: Audit L9, R5, R7, R8, R9, T10 — Requirements 9.2
+     * Warn when Math.round is used for bounding-box coordinate arithmetic.
+     * Use intTrunc from rapid_doc/utils/math_utils.js instead.
+     * References: —
      */
     'no-math-round-bbox': noMathRoundBbox,
   },

@@ -1,13 +1,13 @@
 /**
  * ui/render/markdown.js
  *
- * Preserves render-pipeline order (Requirement 7.1):
+ * Preserves render-pipeline order ():
  *   protect math → marked.parse → DOMPurify.sanitize → render KaTeX
  *   → applyMarkdownImageSources → applyLayoutBasedStyling
  *   → attachBlockActions → linkMarkdownBlocks
  *
  * For markdown.length > 500_000, inserts skeleton synchronously and yields
- * with scheduleIdleWork between heading-bounded chunks (Requirement 3.5).
+ * with scheduleIdleWork between heading-bounded chunks.
  */
 
 import { marked } from 'marked';
@@ -40,7 +40,7 @@ const _ctx = {
 };
 
 /**
- * Wire the render context. Called once from app.js init().
+ * Wire the render context. Called once from app.js init.
  * @param {MarkdownRenderContext} ctx
  */
 export function initMarkdownRenderer(ctx) {

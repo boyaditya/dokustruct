@@ -18,9 +18,9 @@ const browserFileStore = new Map();
  * PORTING NOTE: base.DataWriter ABC → JS base class
  */
 export class DataWriter {
-  /** @param {string} _path  @param {Uint8Array} _data */
+  /** @param {string} _path @param {Uint8Array} _data */
   write(_path, _data) { throw new Error('DataWriter.write() not implemented'); }
-  /** @param {string} _path  @param {string} _data */
+  /** @param {string} _path @param {string} _data */
   writeString(_path, _data) { throw new Error('DataWriter.writeString() not implemented'); }
 }
 
@@ -29,9 +29,9 @@ export class DataWriter {
  * PORTING NOTE: base.DataReader ABC → JS base class
  */
 export class DataReader {
-  /** @param {string} _path  @returns {Uint8Array} */
+  /** @param {string} _path @returns {Uint8Array} */
   readAt(_path) { throw new Error('DataReader.readAt() not implemented'); }
-  /** @param {string} path  @returns {Uint8Array} */
+  /** @param {string} path @returns {Uint8Array} */
   read(path) { return this.readAt(path); }
 }
 

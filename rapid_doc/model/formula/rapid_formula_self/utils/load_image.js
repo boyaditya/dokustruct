@@ -1,7 +1,7 @@
 // Copyright (c) Opendatalab. All rights reserved.
 // PORTING NOTE: load_image.py → load_image.js
 // Python PIL/cv2 image loading → browser OpenCV.js (cv global)
-// W5: All cv.Mat objects must be freed in try/finally blocks
+// All cv.Mat objects must be freed in try/finally blocks
 
 /**
  * Load and decode an image from various input types into a cv.Mat (BGR, uint8).

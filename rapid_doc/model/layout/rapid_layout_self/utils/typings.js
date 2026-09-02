@@ -66,9 +66,9 @@ export const PP_DOCLAYOUT_PLUS_L_Threshold = Object.freeze({
 
 export const PP_DOCLAYOUTV2_Threshold = Object.freeze({
   0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5,
-  5: 0.5,  // FIXED: was 0.4 (Audit L6)
+  5: 0.5,  // was 0.4 — parity fix
   6: 0.5, 7: 0.5, 8: 0.5, 9: 0.5, 10: 0.5, 11: 0.5, 12: 0.5, 13: 0.5, 14: 0.5,
-  15: 0.5, // FIXED: was 0.4 (Audit L6)
+  15: 0.5, // was 0.4 — parity fix
   16: 0.5, 17: 0.5, 18: 0.5, 19: 0.5, 20: 0.45, 21: 0.5, 22: 0.4, 23: 0.4, 24: 0.5,
 });
 
@@ -131,7 +131,7 @@ export const PP_DOCLAYOUTV2_layout_merge_bboxes_mode = Object.freeze({
 export { RapidLayoutOutput } from '../../../../utils/typings.js';
 
 // Re-export shared threshold/shape-mode tables so layout-local importers
-// pick up the canonical (fixed) values — single source of truth (Audit L7, 9.1)
+// pick up the canonical (fixed) values — single source of truth (9.1)
 export {
   PP_DOCLAYOUT_L_Threshold,
   PP_DOCLAYOUT_SHAPE_MODE,

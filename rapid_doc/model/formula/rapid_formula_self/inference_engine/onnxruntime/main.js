@@ -1,7 +1,7 @@
 // Copyright (c) Opendatalab. All rights reserved.
 // PORTING NOTE: inference_engine/onnxruntime/main.py → main.js
-// W1: Python synchronous __init__ → static async create()
-//     Python __call__ → async run()
+// Python synchronous __init__ → static async create
+//     Python __call__ → async run
 
 import { InferSession } from "../base.js";
 import { ProviderConfig } from "./provider_config.js";

@@ -13,7 +13,7 @@ import { formatPipelineError, MAX_CONCURRENT_BATCHES, yieldToBrowser } from '../
 import { RecPreProcess } from './ocr_preprocess.js';
 import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 
-// FIX P10: scale MAX_CONCURRENT_BATCHES based on detected device tier.
+// Porting fix: scale MAX_CONCURRENT_BATCHES based on detected device tier.
 // User-provided recBatchNum config overrides this at the recognizer level.
 //
 // Note: the device tier is derived from system RAM (deviceMemory API), not
@@ -25,19 +25,19 @@ import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 // itself; queueing the next inputs can still allocate.
 function getMaxConcurrentBatches(useWebGpu) {
   if (useWebGpu) return Math.min(2, MAX_CONCURRENT_BATCHES);
-  // WASM: ONNX Runtime session.run() is NOT thread-safe for concurrent calls
+  // WASM: ONNX Runtime session.run is NOT thread-safe for concurrent calls
   // on the same session. The GPU mutex (acquireGlobalGpu) serialises WebGPU
   // calls; WASM has no equivalent protection. Cap at 1 to prevent corrupted
-  // recognition output from interleaved session.run() invocations. Throughput
+  // recognition output from interleaved session.run invocations. Throughput
   // is preserved because recBatchNum (default 6) already batches multiple
-  // crops into a single session.run() call, and the WASM thread pool handles
+  // crops into a single session.run call, and the WASM thread pool handles
   // intra-call parallelism.
   return 1;
 }
 
 /**
  * Yield execution back to the browser event loop between OCR rec batches.
- * FIX P11: keeps the event loop responsive between non-critical OCR rec batches.
+ * Porting fix: keeps the event loop responsive between non-critical OCR rec batches.
  *
  * NOTE: this used to call requestIdleCallback (falling back to setTimeout), but
  * both are heavily throttled — or suspended entirely — in hidden/background
@@ -212,7 +212,7 @@ export class TextRecognizer {
       if (inFlight.size >= cap) {
         await Promise.race(inFlight);
       }
-      // FIX P11: first batch is critical — start immediately without yielding.
+      // Porting fix: first batch is critical — start immediately without yielding.
       // Subsequent batches are non-critical; yield to idle so the browser event
       // loop stays responsive between batches.
       if (isFirstBatch) {

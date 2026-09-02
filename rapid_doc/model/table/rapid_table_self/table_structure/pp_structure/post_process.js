@@ -1,12 +1,12 @@
 // Copyright (c) Opendatalab. All rights reserved.
-// PORTING NOTE: table_structure/pp_structure/post_process.py → post_process.js
+// Copyright (c) Opendatalab. All rights reserved.
 // TableLabelDecode: decode character probabilities → HTML structure tokens + cell bboxes
 
 import { ModelType, normalizeTableModelType } from '../../utils/typings.js';
 
 /**
  * Decode table structure predictions from an ONNX model.
- * PORTING NOTE: TableLabelDecode(dict_character, cfg)
+ * Decode table structure predictions from an ONNX model.
  * - decode(bbox_preds, structure_probs, shape_list, ori_imgs)
  * - Handles SLANETPLUS_RESCALE and general bbox decode
  */
@@ -37,7 +37,7 @@ export class TableLabelDecode {
 
   /**
    * Full decode: probs → structure tokens + cell bboxes + per-image mean confidence score.
-   * FIX T11b: include mean score in decode output (matches Python TableLabelDecode)
+   * Porting fix: include mean score in decode output (matches Python TableLabelDecode)
    * @param {import('onnxruntime-web').Tensor|null} bboxPreds - [N, SeqLen, 4] or null
    * @param {import('onnxruntime-web').Tensor} structureProbs - [N, SeqLen, VocabSize]
    * @param {number[][]} shapeList - [[origH,origW,ratioH,ratioW,padH,padW],...]
@@ -54,14 +54,14 @@ export class TableLabelDecode {
 
     const allStructures = [];
     const allCellBboxes = [];
-    // FIX T11b: accumulate per-image mean confidence scores
+    // Porting fix: accumulate per-image mean confidence scores
     const allScores = [];
 
     for (let n = 0; n < N; n++) {
       const shape = shapeList[n];
       const tokens = [];
       const bboxes = [];
-      // FIX T11b: collect argmax probabilities (maxVal) per token step
+      // Porting fix: collect argmax probabilities (maxVal) per token step
       const stepScores = [];
 
       for (let s = 0; s < SeqLen; s++) {
@@ -78,7 +78,7 @@ export class TableLabelDecode {
         const char = this.character[maxIdx];
         
         // Skip sos/eos tokens (Python parity)
-        // FIX T11a: only break on EOS if idx > 0 (matches Python)
+        // Porting fix: only break on EOS if idx > 0 (matches Python)
         if (s > 0 && char === 'eos') break;
         if (char === "sos") continue;
         
@@ -86,12 +86,12 @@ export class TableLabelDecode {
         if (char === undefined || char === null) continue;
         
         tokens.push(char);
-        // FIX T11b: record argmax prob for this token step
+        // Porting fix: record argmax prob for this token step
         stepScores.push(maxVal);
 
         // Decode bounding box for <td> tokens only (Python parity)
         // Python: if text in self.td_token (checks ["<td>", "<td", "<td></td>"])
-        // FIX T11c: exact in-list check (matches Python td_token contains check, not startsWith)
+        // Porting fix: exact in-list check (matches Python td_token contains check, not startsWith)
         const isTdToken = this.td_token.includes(char);
         if (bboxData && isTdToken) {
           const bboxOffset = (n * SeqLen + s) * bboxDims;
@@ -105,7 +105,7 @@ export class TableLabelDecode {
 
       allStructures.push(tokens);
 
-      // FIX T11b: compute mean score for this image (0 if no tokens decoded)
+      // Porting fix: compute mean score for this image (0 if no tokens decoded)
       const meanScore = stepScores.length > 0
         ? stepScores.reduce((a, b) => a + b, 0) / stepScores.length
         : 0;
@@ -113,7 +113,7 @@ export class TableLabelDecode {
 
       // Python: normalize_bboxes → rescale_cell_bboxes (SLANETPLUS only) + filter_blank_bbox
       let finalBboxes = bboxes.filter(b => b.some(v => v !== 0));
-      // FIX T12: normalize model_type before comparison (use ModelType constant, not literal)
+      // Porting fix: normalize model_type before comparison (use ModelType constant, not literal)
       const modelType = normalizeTableModelType(this.cfg.model_type ?? this.cfg.modelType ?? '');
       if (modelType === ModelType.SLANETPLUS) {
         const oriImg = oriImgs[n];

@@ -1,7 +1,7 @@
 /**
  * ui/render/overlay.js
  *
- * Uses DocumentFragment per page (Requirement 3.4) to reduce forced reflows.
+ * Uses DocumentFragment per page () to reduce forced reflows.
  * ≤2 forced reflows per call (one read phase, one write phase).
  */
 
@@ -43,7 +43,7 @@ const _ctx = {
 };
 
 /**
- * Wire the overlay render context. Called once from app.js init().
+ * Wire the overlay render context. Called once from app.js init.
  * @param {OverlayRenderContext} ctx
  */
 export function initOverlayRenderer(ctx) {
@@ -53,7 +53,7 @@ export function initOverlayRenderer(ctx) {
 
 /**
  * Render layout overlay boxes for all pages.
- * Uses DocumentFragment per page to batch DOM writes (Requirement 3.4).
+ * Uses DocumentFragment per page to batch DOM writes.
  */
 export function renderLayoutOverlay() {
   if (!_ctx.renderedPages.length) return;

@@ -1,7 +1,7 @@
 /**
  * DocLayoutPostProcess: confidence masking, scaleBoxes rescaling, class lookup.
  *
- * INPUT:  preds = ort.Tensor[] (returned by OrtInferSession.run())
+ * INPUT: preds = ort.Tensor[] (returned by OrtInferSession.run())
  *         Also accepts plain Float32Array (for direct tensor data passing)
  * OUTPUT: { boxes: number[][], scores: number[], labels: string[] }
  */
@@ -11,8 +11,8 @@ import { scaleBoxes } from './utils.js';
 export class DocLayoutPostProcess {
   /**
    * @param {string[]} labels
-   * @param {number}   [confThres=0.2]
-   * @param {number}   [iouThres=0.5]   (retained for API parity; NMS done inside ONNX)
+   * @param {number} [confThres=0.2]
+   * @param {number} [iouThres=0.5] (retained for API parity; NMS done inside ONNX)
    */
   constructor(labels, confThres = 0.2, iouThres = 0.5) {
     this.labels = labels;
@@ -25,9 +25,9 @@ export class DocLayoutPostProcess {
    * Mirrors: __call__(preds, ori_img_shape, img_shape=(1024, 1024))
    *
    * @param {import('onnxruntime-web').Tensor[]|Float32Array[]} preds
-   *        preds[0] shape: [1, num_boxes, 6]  (x1,y1,x2,y2,conf,cls)
-   * @param {[number,number]} oriImgShape  - [H, W] of original image
-   * @param {[number,number]} [imgShape]   - [H, W] of model input (default 1024×1024)
+   *        preds[0] shape: [1, num_boxes, 6] (x1,y1,x2,y2,conf,cls)
+   * @param {[number,number]} oriImgShape - [H, W] of original image
+   * @param {[number,number]} [imgShape] - [H, W] of model input (default 1024×1024)
    * @returns {{ boxes: number[][], scores: number[], labels: string[] }}
    */
   call(preds, oriImgShape, imgShape = [1024, 1024]) {

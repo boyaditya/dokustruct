@@ -2,7 +2,7 @@
  * ui/linking/events.js
  *
  * Extracted from ui/app.js. Includes keyboard parity (focusin/focusout)
- * per Requirement 2.6.
+ * per
  */
 
 import { ctx } from './context.js';
@@ -63,7 +63,7 @@ export function handleMarkdownLinkClick(event) {
   pinLinkedBlock(shell.dataset.linkId, { source: 'output' });
 }
 
-// ── Keyboard parity (Requirement 2.6) ────────────────────────────────────
+// ── Keyboard parity () ────────────────────────────────────
 
 export function handleMarkdownLinkFocusIn(event) {
   const shell = event.target.closest?.('.block-shell[data-link-id]');
@@ -97,7 +97,7 @@ export function wireLinkingEvents() {
     linkingListenerBag.add(markdownContent, 'mouseover', handleMarkdownLinkHover);
     linkingListenerBag.add(markdownContent, 'mouseout', handleMarkdownLinkLeave);
     linkingListenerBag.add(markdownContent, 'click', handleMarkdownLinkClick);
-    // keyboard parity — focusin/focusout delegation (Requirement 2.6)
+    // keyboard parity — focusin/focusout delegation
     linkingListenerBag.add(markdownContent, 'focusin', handleMarkdownLinkFocusIn);
     linkingListenerBag.add(markdownContent, 'focusout', handleMarkdownLinkFocusOut);
   }

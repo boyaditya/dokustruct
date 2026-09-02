@@ -5,10 +5,10 @@
  * WORKAROUND: platform.system() / platform.machine() / platform.mac_ver()
  * REASON: No `platform` module in browser
  * SOLUTION: Use navigator.platform / userAgent heuristics
- *   - isWindowsEnvironment() → navigator.platform check for Win
- *   - isMacEnvironment() → navigator.platform check for Mac
- *   - isAppleSiliconCpu() → hardcoded false (no ARM detection in browser)
- *   - isMacOsVersionSupported() → hardcoded false (no OS version in browser)
+ *   - isWindowsEnvironment → navigator.platform check for Win
+ *   - isMacEnvironment → navigator.platform check for Mac
+ *   - isAppleSiliconCpu → hardcoded false (no ARM detection in browser)
+ *   - isMacOsVersionSupported → hardcoded false (no OS version in browser)
  */
 
 /**

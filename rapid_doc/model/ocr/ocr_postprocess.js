@@ -182,7 +182,7 @@ const MIN_RECT_SIDE = 3;
  *   - 'poly': returns raw polygon contours from the binary mask, matching Python
  *             `polygons_from_bitmap` (rapid_ocr_onnxruntime). Used for seal text.
  *
- * FIX O2 (Audit O2): added `box_type='poly'` path — `polygons_from_bitmap`.
+ * Porting fix: added `box_type='poly'` path — `polygons_from_bitmap`.
  */
 export class DetPostProcess {
   /**
@@ -201,13 +201,13 @@ export class DetPostProcess {
     this.minSize = minSize;
     this.useDilation = useDilation;
     this.maxCandidates = maxCandidates;
-    // FIX O2: store box_type for quad vs poly dispatch
+    // Porting fix: store box_type for quad vs poly dispatch
     this.boxType = boxType === 'poly' ? 'poly' : 'quad';
     this.dilationKernel = useDilation ? [[1, 1], [1, 1]] : null;
-    // FIX P4 (Audit P4): Cache the 2×2 dilation kernel cv.Mat once at construction
-    // time rather than recreating it on every _applyDilation call.  Only allocated
+    // Porting fix: Cache the 2×2 dilation kernel cv.Mat once at construction
+    // time rather than recreating it on every _applyDilation call. Only allocated
     // when useDilation=true to avoid unnecessary WASM heap allocation.
-    // Must be released by calling dispose() when this instance is no longer needed.
+    // Must be released by calling dispose when this instance is no longer needed.
     this._dilationKernelMat = useDilation ? cv.matFromArray(2, 2, cv.CV_8UC1, [1, 1, 1, 1]) : null;
   }
 
@@ -233,7 +233,7 @@ export class DetPostProcess {
 
     const segmentation = this._binarize(pred, H, W);
 
-    // FIX O2 (Audit O2): dispatch to poly path when box_type='poly'.
+    // Porting fix: dispatch to poly path when box_type='poly'.
     // polygons_from_bitmap extracts raw contour polygons instead of min-area-rect quads.
     if (this.boxType === 'poly') {
       return await this._polygonsFromBitmap(segmentation, pred, H, W, srcH, srcW);
@@ -263,7 +263,7 @@ export class DetPostProcess {
   }
 
   /**
-   * FIX O2 (Audit O2): polygons_from_bitmap — poly box_type path.
+   * Porting fix: polygons_from_bitmap — poly box_type path.
    *
    * Matches Python `rapid_ocr_onnxruntime` `polygons_from_bitmap`:
    *   1. Find contours on the binary mask.
@@ -423,7 +423,7 @@ export class DetPostProcess {
   _applyDilation(mask) {
     if (!this.useDilation || !this._dilationKernelMat) return mask;
 
-    // FIX P4 (Audit P4): Reuse the cached kernel Mat instead of allocating a new one.
+    // Porting fix: Reuse the cached kernel Mat instead of allocating a new one.
     const dilated = new cv.Mat();
     try {
       cv.dilate(mask, dilated, this._dilationKernelMat);
@@ -441,8 +441,8 @@ export class DetPostProcess {
     const scores = [];
     const numContours = Math.min(contours.size(), this.maxCandidates);
 
-    // FIX P2 (Audit P2): Hoist the quad-points cv.Mat and its MatVector out of the
-    // hot contour loop.  The pts Mat always has shape 4×1 CV_32SC2 (4 corners, x/y
+    // Porting fix: Hoist the quad-points cv.Mat and its MatVector out of the
+    // hot contour loop. The pts Mat always has shape 4×1 CV_32SC2 (4 corners, x/y
     // int32); pre-allocating once and updating data in-place via data32S avoids a
     // per-iteration WASM heap alloc + data copy for every contour.
     //
@@ -510,11 +510,11 @@ export class DetPostProcess {
   }
 
   /**
-   * FIX P2 (Audit P2): Accept optional hoisted pts Mat + MatVector to avoid
+   * Porting fix: Accept optional hoisted pts Mat + MatVector to avoid
    * per-call cv.matFromArray allocation for the 4 box corner points.
    * When hoistedPtsMat/Vec are provided the method writes corner data in-place
    * via data32S; they must have shape 4×1 CV_32SC2 and already be pushed into
-   * the MatVector.  The maskMat is still allocated per-call because its
+   * the MatVector. The maskMat is still allocated per-call because its
    * dimensions (maskH × maskW) differ per contour and cannot be pre-allocated.
    *
    * @param {Float32Array} bitmap

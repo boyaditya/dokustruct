@@ -53,8 +53,8 @@ export class PPPostProcess {
   /**
    * Apply post-processing to raw detection boxes.
    *
-   * @param {Float32Array|number[][]} boxes  - shape (N, 6|7|8): [cls_id, score, x1, y1, x2, y2, ...]
-   * @param {[number, number]} imgSize       - [width, height] of the original image
+   * @param {Float32Array|number[][]} boxes - shape (N, 6|7|8): [cls_id, score, x1, y1, x2, y2, ...]
+   * @param {[number, number]} imgSize - [width, height] of the original image
    * @param {Uint8Array[]|null} [masks=null] - Per-detection binary masks (optional)
    * @param {string} [layoutShapeMode='auto']
    * @returns {Object[]} List of box dicts
@@ -492,7 +492,7 @@ function bboxIouFromPolygons(p1, p2, mode) {
 
 /**
  * Calculate polygon overlap ratio using Sutherland-Hodgman clipping.
- * Replaces Python: calculate_polygon_overlap_ratio() / Shapely.
+ * Replaces Python: calculate_polygon_overlap_ratio / Shapely.
  *
  * @param {number[][]|number[]} polygon1 - [[x,y], ...] or flat [x,y,x,y,...]
  * @param {number[][]|number[]} polygon2
@@ -585,8 +585,8 @@ export function restructuredBoxes(boxes, labels, imgSize, polygonPoints = null) 
     const box = boxes[idx];
     let [, , xmin, ymin, xmax, ymax] = box;
 
-    // intTrunc matches Python int() truncation, not Math.round
-    // Python uses bare int() which truncates toward zero (not round-half-up).
+    // intTrunc matches Python int truncation, not Math.round
+    // Python uses bare int which truncates toward zero (not round-half-up).
     // Math.round caused ±1 px jitter vs Python baseline on non-integer coords.
     xmin = Math.max(0, intTrunc(xmin));
     ymin = Math.max(0, intTrunc(ymin));
@@ -958,12 +958,12 @@ export function convertPolygonToQuad(polygon) {
  * Extract polygon points from segmentation masks for each detected box.
  * Matches Python: extract_polygon_points_by_masks(boxes, masks, scale_ratio, layout_shape_mode)
  *
- * @param {number[][]} boxes       - [[cls, score, x1, y1, x2, y2], ...]
- * @param {Uint8Array[]} masks     - Per-box binary masks
- * @param {number[]} scaleRatio    - [scaleW, scaleH]
+ * @param {number[][]} boxes - [[cls, score, x1, y1, x2, y2], ...]
+ * @param {Uint8Array[]} masks - Per-box binary masks
+ * @param {number[]} scaleRatio - [scaleW, scaleH]
  * @param {string} layoutShapeMode
- * @param {number} [maskH=0]       - explicit mask height (0 = infer from mask length assuming square)
- * @param {number} [maskW=0]       - explicit mask width  (0 = infer from mask length assuming square)
+ * @param {number} [maskH=0] - explicit mask height (0 = infer from mask length assuming square)
+ * @param {number} [maskW=0] - explicit mask width (0 = infer from mask length assuming square)
  * @returns {(number[][])[]}
  */
 export function extractPolygonPointsByMasks(boxes, masks, scaleRatio, layoutShapeMode, maskH = 0, maskW = 0) {

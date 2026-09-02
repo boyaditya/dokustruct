@@ -16,7 +16,7 @@ const DB_VERSION = 2;
 const STORE_NAME = 'models';
 
 // ─── In-memory cache with LRU eviction ────────────────────────────────────────
-// The audit flagged an unbounded memoryCache (~530 MiB of model buffers held
+// Memory profiling flagged an unbounded memoryCache (~530 MiB of model buffers held
 // for the page lifetime) and object URLs that were never revoked. Both are
 // addressed here: an LRU cap bounds the memory cache, and every object URL is
 // revoked when its entry is evicted (or the cache is cleared).
@@ -359,7 +359,7 @@ export class DownloadFile {
     }));
     const bytes = toUint8Array(buffer);
 
-    // FIX: SHA-256 verification (Audit/Requirement 1.1)
+    // Porting fix: SHA-256 verification
     if (cfg.sha256) {
       const computed = await computeSha256Hex(bytes);
       if (computed && computed !== cfg.sha256.toLowerCase()) {

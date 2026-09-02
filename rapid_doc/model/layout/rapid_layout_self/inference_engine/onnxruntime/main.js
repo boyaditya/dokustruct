@@ -4,7 +4,7 @@
  * Execution providers: ['webgpu', 'wasm'] in priority order.
  *
  * BROWSER WORKAROUND: Session loading is async (fetch + ArrayBuffer).
- * Model loaded via IndexedDB-cached fetch() (download_file.js).
+ * Model loaded via IndexedDB-cached fetch (download_file.js).
  * Threading controls are only effective when SharedArrayBuffer is available.
  */
 
@@ -62,7 +62,7 @@ export class OrtInferSession extends InferSession {
     const modelBuffer = await downloadFile(modelUrl);
 
     // ── Merge engine config ─────────────────────────────────────────────────
-    // Python: self.engine_cfg[cfg.engine_type.value]  (loaded from YAML at class level)
+    // Python: self.engine_cfg[cfg.engine_type.value] (loaded from YAML at class level)
     const engineTypeKey = (cfg?.engineType ?? cfg?.engine_type ?? EngineType.ONNXRUNTIME);
     const baseCfg = DEFAULT_ENGINE_CFG[engineTypeKey] ?? DEFAULT_ENGINE_CFG[EngineType.ONNXRUNTIME];
     const engineCfg = InferSession.updateParams(baseCfg, cfg?.engineCfg ?? cfg?.engine_cfg ?? {});
@@ -137,9 +137,9 @@ export class OrtInferSession extends InferSession {
   /**
    * Run ONNX inference.
    *
-   * @param {Float32Array}      inputContent  - Flat NCHW float32 tensor
+   * @param {Float32Array} inputContent - Flat NCHW float32 tensor
    * @param {Float32Array|null} [scaleFactor] - Optional [N, 2] scale tensor
-   * @param {number[]|null}     [inputShape]  - [N, C, H, W] — required when
+   * @param {number[]|null} [inputShape] - [N, C, H, W] — required when
    *                                            scaleFactor is provided
    * @returns {Promise<ort.Tensor[]>} Output tensors in output-name order
    */
@@ -246,7 +246,7 @@ export class OrtInferSession extends InferSession {
    * shape metadata is available (dynamic shapes).
    *
    * @param {Float32Array} data
-   * @param {string}       inputName
+   * @param {string} inputName
    * @returns {number[]}
    */
   _inferInputShape(data, inputName) {

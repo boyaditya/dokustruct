@@ -33,10 +33,10 @@ export function reductOverlap(bboxes) {
  * PORTING NOTE: Direct port of tie_up_category_by_distance_v3()
  *
  * @param {Function} getSubjectsFunc - () => subject array
- * @param {Function} getObjectsFunc  - () => object array
+ * @param {Function} getObjectsFunc - () => object array
  * @param {Function|null} extractSubjectFunc
  * @param {Function|null} extractObjectFunc
- * @returns {object[]}  [{sub_bbox, obj_bboxes, sub_idx}]
+ * @returns {object[]} [{sub_bbox, obj_bboxes, sub_idx}]
  */
 export function tieUpCategoryByDistanceV3(
   getSubjectsFunc,

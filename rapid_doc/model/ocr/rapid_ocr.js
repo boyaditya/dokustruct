@@ -53,12 +53,12 @@ const logger = getLogger('RapidOcrModel');
 export class RapidOcrModel {
   /** @private */
   constructor() {
-    /** @type {TextDetector}  */ this.textDetector = null;
+    /** @type {TextDetector} */ this.textDetector = null;
     /** @type {TextDetector|null} */ this._sealDetector = null;
     /** @type {TextRecognizer}*/ this.textRecognizer = null;
     this.dropScore = 0.5;
     this.enableMergeDetBoxes = true;
-    // FIX P10: default recBatchNum; overridable via config.
+    // Porting fix: default recBatchNum; overridable via config.
     this.recBatchNum = REC_BATCH_NUM;
   }
 
@@ -101,7 +101,7 @@ export class RapidOcrModel {
     );
     inst.textDetector = new TextDetector(detSession, detPre, detPost, { useWebGpu });
 
-    // FIX O1: initialise seal detector when isSeal/is_seal param is set (Audit O1)
+    // Porting fix: initialise seal detector when isSeal/is_seal param is set
     const isSealMode = params.isSeal === true || params.is_seal === true
       || cfg.isSeal === true || cfg.is_seal === true;
     if (isSealMode) {
@@ -133,7 +133,7 @@ export class RapidOcrModel {
 
   /**
    * Initialise the seal-specific DB detector.
-   * FIX O1 (Audit O1): seal params — box_type='poly', limit_side_len=736,
+   * Porting fix: seal params — box_type='poly', limit_side_len=736,
    *   limit_type='min', unclip_ratio=0.5, box_thresh=0.6, thresh=0.3.
    * @private
    */
@@ -151,7 +151,7 @@ export class RapidOcrModel {
       throw new Error(`ONNX session creation failed (OCR seal det): ${detail}`);
     }
 
-    // FIX O1: seal-specific preprocessing params
+    // Porting fix: seal-specific preprocessing params
     const sealPre = new DetPreProcess(
       736,       // limit_side_len
       'min',     // limit_type
@@ -159,8 +159,8 @@ export class RapidOcrModel {
       [0.229, 0.224, 0.225],
     );
 
-    // FIX O1: seal-specific postprocessing params
-    // FIX O2 (Audit O2): box_type='poly' — use polygons_from_bitmap path in DetPostProcess
+    // Porting fix: seal-specific postprocessing params
+    // Porting fix: box_type='poly' — use polygons_from_bitmap path in DetPostProcess
     const sealPost = new DetPostProcess(
       0.3,   // thresh
       0.6,   // box_thresh
@@ -240,7 +240,7 @@ export class RapidOcrModel {
    * @returns {Promise<Array|null>}
    */
   async ocr(img, opts = {}) {
-    // FIX O1: seal branch — route to _ocrSeal when is_seal=true (Audit O1)
+    // Porting fix: seal branch — route to _ocrSeal when is_seal=true
     if (opts.is_seal === true) {
       const matImg = img instanceof cv.Mat ? img : checkImg(img);
       const shouldDeleteMat = !(img instanceof cv.Mat);
@@ -371,16 +371,16 @@ export class RapidOcrModel {
 
   /**
    * Run seal OCR on an image.
-   * FIX O1 (Audit O1): use seal-specific detection params and poly path.
+   * Porting fix: use seal-specific detection params and poly path.
    *
    * Seal detection uses `pp-ocrv4_mobile_seal_det.onnx` with:
    *   box_type='poly', limit_side_len=736, limit_type='min',
    *   unclip_ratio=0.5, box_thresh=0.6, thresh=0.3
    *
-   * The detected poly boxes are sorted (FIX O2) and cropped via
+   * The detected poly boxes are sorted and cropped via
    * perspective warp before text recognition.
    *
-   * @param {cv.Mat} image  - preprocessed BGR Mat (caller must not delete before return)
+   * @param {cv.Mat} image - preprocessed BGR Mat (caller must not delete before return)
    * @param {object} [opts]
    * @returns {Promise<Array>}
    */
@@ -400,10 +400,10 @@ export class RapidOcrModel {
       return [[]];
     }
 
-    // FIX O2: sort polys by min-y then min-x (matches Python SortPolyBoxes)
+    // Porting fix: sort polys by min-y then min-x (matches Python SortPolyBoxes)
     const sortedPolys = sortPolyBoxes(rawBoxes);
 
-    // FIX O2: crop each polygon region for recognition
+    // Porting fix: crop each polygon region for recognition
     const crops = cropByPolys(image, sortedPolys);
     try {
       const recRes = await this.textRecognizer.call(crops);

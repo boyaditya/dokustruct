@@ -48,10 +48,10 @@ function sortLayoutParsingBlocks(layoutParsingPage) {
 
 /**
  * Pre-process layout/OCR data: match boxes to regions, fix labels, handle overlaps.
- * @param {ImageData|object} image  - {width, height} or ImageBitmap-like
- * @param {object} regionDetRes   - {boxes: [{coordinate, label, score}]}
- * @param {object} layoutDetRes   - {boxes: [{coordinate, label, score}]}
- * @param {object} overallOcrRes  - {rec_boxes, rec_texts, rec_scores, rec_polys, dt_polys, rec_labels}
+ * @param {ImageData|object} image - {width, height} or ImageBitmap-like
+ * @param {object} regionDetRes - {boxes: [{coordinate, label, score}]}
+ * @param {object} layoutDetRes - {boxes: [{coordinate, label, score}]}
+ * @param {object} overallOcrRes - {rec_boxes, rec_texts, rec_scores, rec_polys, dt_polys, rec_labels}
  * @param {number|null} textRecScoreThresh
  * @returns {[object, object, object]} [regionBlockOcrIdxMap, regionDetRes, layoutDetRes]
  */
@@ -71,7 +71,7 @@ function standardizedData(
   if (!layoutDetRes || !layoutDetRes.boxes) {
     layoutDetRes = { boxes: [] };
   }
-  // FIX R3: use Map (insertion-order preserving) instead of plain object (integer keys sort differently)
+  // Porting fix: use Map (insertion-order preserving) instead of plain object (integer keys sort differently)
   const matchedOcrDict = new Map();
   const regionToBlockMap = {};
   const blockToOcrMap = {};
@@ -442,15 +442,15 @@ function getLayoutParsingObjects(
 }
 
 // ─────────────────────────────────────────────────────────────
-// get_layout_parsing_res  (main entry point)
+// get_layout_parsing_res (main entry point)
 // ─────────────────────────────────────────────────────────────
 
 /**
  * Full pipeline: standardise → build objects → sort.
- * @param {object} image           {width:N, height:N} or array-like
- * @param {object} regionDetRes    {boxes:[...]}
- * @param {object} layoutDetRes    {boxes:[...]}
- * @param {object} overallOcrRes   {rec_boxes, rec_texts, rec_scores, rec_polys, dt_polys, rec_labels}
+ * @param {object} image {width:N, height:N} or array-like
+ * @param {object} regionDetRes {boxes:[...]}
+ * @param {object} layoutDetRes {boxes:[...]}
+ * @param {object} overallOcrRes {rec_boxes, rec_texts, rec_scores, rec_polys, dt_polys, rec_labels}
  * @returns {LayoutBlock[]}
  */
 function getLayoutParsingRes(image, regionDetRes, layoutDetRes, overallOcrRes) {

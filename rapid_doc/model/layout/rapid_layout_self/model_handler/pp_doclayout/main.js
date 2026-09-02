@@ -16,12 +16,12 @@ import { tensorToNumber } from '../../../../../utils/math_utils.js';
 
 export class PPDocLayoutModelHandler extends BaseModelHandler {
   /**
-   * @param {string[]}   labels
+   * @param {string[]} labels
    * @param {number|Object} confThres
-   * @param {number}     iouThres
+   * @param {number} iouThres
    * @param {import('../../inference_engine/base.js').InferSession} session
-   * @param {string}     modelType
-   * @param {string}     layoutShapeMode
+   * @param {string} modelType
+   * @param {string} layoutShapeMode
    */
   constructor(labels, confThres, iouThres, session, modelType, layoutShapeMode) {
     super();
@@ -176,17 +176,7 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
         // S/M/L models have no native reading order and fall back to XY-Cut;
         // V2/V3/Plus-L emit model-native sequential order (matches Python baseline)
 
-        // const isNativeOrderModel = [
-        //   ModelType.PP_DOCLAYOUTV2,
-        //   ModelType.PP_DOCLAYOUTV3,
-        //   ModelType.PP_DOCLAYOUT_PLUS_L,
-        // ].includes(this.modelType);
-        // orders = isNativeOrderModel
-        //   ? Array.from({ length: datas.length }, (_, i) => i)
-        //   : null; // S/M/L: no native reading order — fallback to XY-Cut
-
         // INTENTIONAL - set orders = null for non-native-order models to trigger XY-Cut in post-processing;
-  
         orders = null;
 
         // Drop polygon_points if any p is null (matches Python)
@@ -234,7 +224,7 @@ export class PPDocLayoutModelHandler extends BaseModelHandler {
     }
 
     // ── Instance Segmentation: 3 outputs [boxes, box_nums, masks] ──────────
-    // ── Standard detection:    2 outputs [boxes, box_nums]        ──────────
+    // ── Standard detection: 2 outputs [boxes, box_nums] ──────────
     const hasMasks = pred.length === 3;
 
     // Dynamically resolve tensors by their dimension length to prevent name sorting bugs

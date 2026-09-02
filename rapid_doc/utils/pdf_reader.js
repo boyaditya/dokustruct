@@ -4,9 +4,8 @@
  *
  * WORKAROUND: pypdfium2.PdfPage.render(scale=...) → pdfjs-dist page.render({viewport})
  * REASON: pypdfium2 not available in browser
-
-import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
  * SOLUTION: Use pdfjs-dist (pdfjsLib) to render pages to OffscreenCanvas / HTMLCanvasElement.
+ *           The worker is wired up in pdfjs_loader.js.
  *
  * WORKAROUND: PIL.Image → ImageBitmap / HTMLCanvasElement
  * SOLUTION: OffscreenCanvas-based rendering; output is { canvas, scale } or Uint8Array/base64.

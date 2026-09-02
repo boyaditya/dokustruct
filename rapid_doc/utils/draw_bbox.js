@@ -130,7 +130,7 @@ export function drawPolygon(ctx, points, rgb, fill) {
 /**
  * Draw bounding boxes (or polygons) for all items on page `i` without labels.
  *
- * @param {number}   pageIdx
+ * @param {number} pageIdx
  * @param {Array<Array<{bbox?:number[], polygon_points?:number[][]}>>} bboxList
  * @param {{ pageWidth:number, pageHeight:number, rotation:number }} pageInfo
  * @param {CanvasRenderingContext2D} ctx
@@ -166,13 +166,13 @@ export function drawBboxWithoutNumber(pageIdx, bboxList, pageInfo, ctx, rgbConfi
 /**
  * Draw bounding boxes with sequence numbers.
  *
- * @param {number}   pageIdx
- * @param {Array}    bboxList
+ * @param {number} pageIdx
+ * @param {Array} bboxList
  * @param {{ pageWidth:number, pageHeight:number, rotation:number }} pageInfo
  * @param {CanvasRenderingContext2D} ctx
  * @param {[number,number,number]} rgbConfig
- * @param {boolean}  fillConfig
- * @param {boolean}  [drawBbox=true]
+ * @param {boolean} fillConfig
+ * @param {boolean} [drawBbox=true]
  */
 export function drawBboxWithNumber(pageIdx, bboxList, pageInfo, ctx, rgbConfig, fillConfig, drawBbox = true) {
   const pageData = bboxList[pageIdx] ?? [];
@@ -248,7 +248,7 @@ async function renderPageToCanvas(pdfPage, scale = 1.0) {
  * Render layout bounding box overlays onto each PDF page.
  * Returns an array of PNG Blobs (one per page).
  *
- * @param {Object[]} pdfInfo   - Parsed middle-JSON page structures
+ * @param {Object[]} pdfInfo - Parsed middle-JSON page structures
  * @param {ArrayBuffer} pdfBytes
  * @returns {Promise<Blob[]>}
  */

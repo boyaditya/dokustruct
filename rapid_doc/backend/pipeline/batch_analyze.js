@@ -106,7 +106,7 @@ export class BatchAnalyze {
     this._externalProgressTracker = Boolean(progressTracker);
     this.batchOffset = batchOffset;  // Offset for multi-batch processing
     /** @type {string[]} User-visible warnings for recoverable stage failures
-     *  (audit: silent skips degraded output quality with no notice). */
+     *  . */
     this.stageSkipWarnings = [];
     this.lastStageTimings = {
       layout: 0,
@@ -374,7 +374,7 @@ export class BatchAnalyze {
     const totalPages = npImages.length;
     let processedPages = 0;
     
-    // Batch processing dengan progress tracking
+    // Batch processing with progress tracking
     const batchSize = this.layoutBaseBatchSize;
     const batches = [];
     for (let i = 0; i < npImages.length; i += batchSize) {
@@ -390,7 +390,7 @@ export class BatchAnalyze {
       // Update progress with batch offset
       this.progressTracker?.update('layout', this.batchOffset + processedPages);
       
-      // Yield untuk smooth UI update
+      // Yield to keep the UI responsive
       await yieldToBrowser();
     }
     
@@ -564,7 +564,7 @@ export class BatchAnalyze {
         processedFormulas += batch.images.length;
         this.progressTracker?.update('formula', processedFormulas, totalFormulas);
         
-        // Yield untuk smooth UI update
+        // Yield to keep the UI responsive
         await yieldToBrowser();
       }
 

@@ -3,7 +3,7 @@
  * PDF text extraction utilities using pdfjs-dist.
  *
  * Browser workaround: Python uses pdftext library (get_chars, get_spans, get_lines, get_blocks).
- * Here we use pdfjs-dist getTextContent() and reconstruct the same page dict structure.
+ * Here we use pdfjs-dist getTextContent and reconstruct the same page dict structure.
  */
 
 const LINE_TOLERANCE = 4;  // px — y-proximity threshold for grouping spans into lines
@@ -16,9 +16,9 @@ const BLOCK_GAP = 16;      // px — vertical gap threshold for splitting lines 
  *
  * @param {import('pdfjs-dist').PDFPageProxy} page
  * @param {object} [opts]
- * @param {boolean}   [opts.quoteLoosebox=true]
- * @param {number}    [opts.superscriptHeightThreshold=0.7]
- * @param {number}    [opts.lineDistanceThreshold=0.1]
+ * @param {boolean} [opts.quoteLoosebox=true]
+ * @param {number} [opts.superscriptHeightThreshold=0.7]
+ * @param {number} [opts.lineDistanceThreshold=0.1]
  * @returns {Promise<object>}
  */
 export async function getPage(page, {

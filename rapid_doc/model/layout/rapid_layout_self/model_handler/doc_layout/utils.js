@@ -2,7 +2,7 @@
  * LetterBox, scaleBoxes, clipBoxes — image resize/pad and box coordinate utilities.
  *
  * This module returns raw cv.Mat objects. Callers are responsible
- * for calling .delete() on every Mat returned (try/finally pattern).
+ * for calling .delete on every Mat returned (try/finally pattern).
  */
 
 /* global cv */
@@ -40,9 +40,9 @@ export class LetterBox {
    * Resize + pad an image into the target shape.
    * Mirrors: __call__(labels=None, image=None)
    *
-   * @param {cv.Mat} image    - Input BGR cv.Mat
+   * @param {cv.Mat} image - Input BGR cv.Mat
    * @param {Object} [labels] - Optional label dict (update not implemented; pass {} to skip)
-   * @returns {cv.Mat}        - New cv.Mat (caller must delete)
+   * @returns {cv.Mat} - New cv.Mat (caller must delete)
    */
   call(image, labels = {}) {
     const [srcH, srcW] = [image.rows, image.cols];
@@ -71,10 +71,10 @@ export class LetterBox {
     // When center=true, divide padding between both sides.
     // When center=false, all padding goes to bottom/right (top=0, left=0).
     // Python: if self.center: dw /= 2; dh /= 2
-    //         top  = int(round(dh - 0.1)) if self.center else 0
+    //         top = int(round(dh - 0.1)) if self.center else 0
     //         left = int(round(dw - 0.1)) if self.center else 0
-    //         bottom = int(round(dh + 0.1))   # uses dh AFTER optional /2
-    //         right  = int(round(dw + 0.1))   # uses dw AFTER optional /2
+    //         bottom = int(round(dh + 0.1)) # uses dh AFTER optional /2
+    //         right = int(round(dw + 0.1)) # uses dw AFTER optional /2
     const halfDw = this.center ? dw / 2 : 0;
     const halfDh = this.center ? dh / 2 : 0;
     const padLeft   = this.center ? Math.round(halfDw - 0.1) : 0;
@@ -120,11 +120,11 @@ export class LetterBox {
  * Mirrors: scale_boxes(img1_shape, boxes, img0_shape, ratio_pad, padding, xywh)
  *
  * @param {[number,number]} img1Shape - [H1, W1] — augmented image shape
- * @param {Float32Array}    boxes     - Flat array of boxes in [x1,y1,x2,y2] order (every 4 elements)
+ * @param {Float32Array} boxes - Flat array of boxes in [x1,y1,x2,y2] order (every 4 elements)
  * @param {[number,number]} img0Shape - [H0, W0] — original image shape
  * @param {null|[[number,number],[number,number]]} [ratioPad]
- * @param {boolean}         [padding=true]
- * @param {boolean}         [xywh=false]
+ * @param {boolean} [padding=true]
+ * @param {boolean} [xywh=false]
  * @returns {Float32Array}
  */
 export function scaleBoxes(img1Shape, boxes, img0Shape, ratioPad = null, padding = true, xywh = false) {
@@ -170,7 +170,7 @@ export function scaleBoxes(img1Shape, boxes, img0Shape, ratioPad = null, padding
  * Clip boxes to stay within the image boundaries.
  * Mirrors: clip_boxes(boxes, shape)
  *
- * @param {Float32Array}    boxes
+ * @param {Float32Array} boxes
  * @param {[number,number]} shape - [H, W]
  * @returns {Float32Array}
  */

@@ -54,7 +54,7 @@ export const ctx = {
 
 /**
  * Wire the linking context to the live app.js state.
- * Called once during init() after DOM elements are resolved.
+ * Called once during init after DOM elements are resolved.
  *
  * @param {object} elRef - The `el` object from app.js
  * @param {object} fns - Scroll/nav helpers from app.js

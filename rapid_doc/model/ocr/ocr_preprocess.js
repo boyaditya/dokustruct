@@ -54,7 +54,7 @@ export class DetPreProcess {
   /**
    * Converts a resized BGR Mat to NCHW Float32Array with ImageNet normalization.
    *
-   * AUDIT P3 (OPTIONAL — SIMD investigation): WebAssembly SIMD intrinsics for
+   * Optional SIMD investigation: WebAssembly SIMD intrinsics for
    * uint8→float32 conversion were evaluated here. Key findings:
    *   • V8 already auto-vectorises simple typed-array loops at -O2 / on
    *     WASM-SIMD builds (--experimental-wasm-simd), so a hand-rolled WASM
@@ -135,10 +135,10 @@ export class RecPreProcess {
    * Converts resized crop to NCHW Float32Array normalized to [-1, 1].
    * Pads remaining width with zeros (which maps to -1 after normalization).
    *
-   * AUDIT P3 (OPTIONAL — SIMD investigation): Same analysis applies as in
+   * Optional SIMD investigation: Same analysis applies as in
    * DetPreProcess._normalizeToNchw. Recognition crops are narrow (typically
    * H=48, W≤320) so the kernel runs on ≤15 360 pixels per crop; auto-
-   * vectorisation by V8/WASM-SIMD already captures the easy gains.  The
+   * vectorisation by V8/WASM-SIMD already captures the easy gains. The
    * hoisted area/area2 constants and per-row offsets below are the practical
    * JS-level micro-optimisations chosen in lieu of a WASM SIMD module.
    * @private

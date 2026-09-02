@@ -855,7 +855,7 @@ export function pdfTxtBboxToTableOcrBbox(bbox, usefulList, scale) {
 
 /**
  * Compute image contrast from cv.Mat.
- * @param {any} mat  cv.Mat (RGBA from getCropNpImg)
+ * @param {any} mat cv.Mat (RGBA from getCropNpImg)
  * @returns {number}
  */
 export function calculateContrastMat(mat) {

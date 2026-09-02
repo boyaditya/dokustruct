@@ -53,7 +53,7 @@ const BENCHMARK_MODE = (queryStringParam('benchmarkMode', queryStringParam('mode
   : 'strict';
 const DEFAULT_PDF_PAGES_BATCH = AUTOMATION_MODE && QUERY_EP !== 'wasm' ? 8 : 64;
 const PDF_PAGES_BATCH = queryIntParam('pdfPagesBatch', DEFAULT_PDF_PAGES_BATCH, 1);
-const AUDIT_PROVENANCE = BENCHMARK_MODE === 'strict';
+const VERIFY_PROVENANCE = BENCHMARK_MODE === 'strict';
 const CHECK_CONTENT_STABILITY = BENCHMARK_MODE === 'strict';
 const BENCHMARK_RESET_STRATEGY = 'periodic_plus_error';
 const BENCHMARK_RESET_INTERVAL = 25;
@@ -841,7 +841,7 @@ async function runBenchmark() {
   };
 
   // Model-file provenance (hash served ONNX, verify against manifest).
-  if (AUDIT_PROVENANCE) {
+  if (VERIFY_PROVENANCE) {
   try {
     log('Hashing model files for provenance…', 'info');
     const mh = await hashModelFiles();
@@ -871,7 +871,7 @@ async function runBenchmark() {
 
     // Input-file provenance (hash bytes + kind) so JS↔Python input parity can
     // be proven (same bytes fed to both systems).
-    if (AUDIT_PROVENANCE) {
+    if (VERIFY_PROVENANCE) {
       try {
         const prov = await hashInputFile(file);
         fileInputProvenance.set(file.name, prov);

@@ -2,27 +2,27 @@
  * PORTING NOTE: inference_engine/onnxruntime/provider_config.py → provider_config.js
  *
  * WORKAROUND: Python checks CUDA / DirectML / CANN execution providers via
- *             onnxruntime.get_available_providers() and platform detection.
+ *             onnxruntime.get_available_providers and platform detection.
  * REASON: None of those native GPU backends exist in the browser. ort-web
  *         exposes exactly two execution providers: 'webgpu' and 'wasm'.
  * SOLUTION:
- *   - EP enum → Object.freeze() with browser EP names ('webgpu', 'wasm')
- *   - CUDA check → isWebGpuAvailable() via `navigator.gpu`
+ *   - EP enum → Object.freeze with browser EP names ('webgpu', 'wasm')
+ *   - CUDA check → isWebGpuAvailable via `navigator.gpu`
  *   - DirectML / CANN checks → always false in browser (logged as info)
- *   - get_ep_list() → returns ort-web-compatible executionProviders array
+ *   - get_ep_list → returns ort-web-compatible executionProviders array
  *     in priority order: [webgpu (if available), wasm-cpu fallback]
  *   - ProviderConfig constructor stays synchronous (no async needed for
  *     browser EP detection)
- *   - verify_providers() logic retained — warns if expected EP wasn't chosen
+ *   - verify_providers logic retained — warns if expected EP wasn't chosen
  *
  * AFFECTED METHODS:
- *   EP (Enum)              → EP (Object.freeze)
- *   ProviderConfig.__init__ → constructor(engineCfg)         [sync]
- *   get_ep_list()           → getEpList()  [returns string[] for ort-web]
- *   is_cuda_available()     → isWebGpuAvailable()
- *   is_dml_available()      → always false
- *   is_cann_available()     → always false
- *   verify_providers()      → verifyProviders(sessionProviders)
+ *   EP (Enum) → EP (Object.freeze)
+ *   ProviderConfig.__init__ → constructor(engineCfg) [sync]
+ *   get_ep_list → getEpList [returns string[] for ort-web]
+ *   is_cuda_available → isWebGpuAvailable
+ *   is_dml_available → always false
+ *   is_cann_available → always false
+ *   verify_providers → verifyProviders(sessionProviders)
  */
 
 import { getLogger } from '../../../../../utils/logger.js';
@@ -78,7 +78,7 @@ export class ProviderConfig {
   // ── Provider availability checks ───────────────────────────────────────────
 
   /**
-   * Mirrors is_cuda_available() — checks WebGPU availability in the browser.
+   * Mirrors is_cuda_available — checks WebGPU availability in the browser.
    * If use_cuda (or use_webgpu) is false in config, always returns false.
    * @returns {boolean}
    */
@@ -129,22 +129,22 @@ export class ProviderConfig {
 
   /**
    * Return the ordered list of ort-web execution providers.
-   * Matches Python: get_ep_list() → List[Tuple[str, Dict]]
+   * Matches Python: get_ep_list → List[Tuple[str, Dict]]
    *
    * In ort-web, executionProviders is a string[] or {name, ...options}[].
    * We return an array compatible with ort.InferenceSession.create()'s
    * `executionProviders` option.
    *
    * Priority (highest first):
-   *   1. webgpu  — if navigator.gpu is present and config allows GPU
-   *   2. wasm    — always last (CPU fallback)
+   *   1. webgpu — if navigator.gpu is present and config allows GPU
+   *   2. wasm — always last (CPU fallback)
    *
    * LAYOUT MODEL OPTIMIZATION:
    *   Layout models support batching [N, 3, H, W] where:
    *   - PP-DocLayout: 640×640 or 800×800 per image
    *   - DocLayout YOLO: 1024×1024 per image
    *   - Typical batch: 1-4 pages processed together
-   *   
+   *
    *   WebGPU benefits:
    *   - Batched inference amortizes kernel launch overhead
    *   - Medium-sized images (640-1024) benefit from GPU parallelism

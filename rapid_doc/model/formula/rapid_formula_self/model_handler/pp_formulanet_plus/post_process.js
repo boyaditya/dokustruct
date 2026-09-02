@@ -92,7 +92,7 @@ export class UniMERNetDecode {
    * @returns {string}
    */
   tokenToStr(tokenIds) {
-    // FIX F4: HuggingFace byte-level BPE inverse map for Greek/CJK token decoding
+    // Porting fix: HuggingFace byte-level BPE inverse map for Greek/CJK token decoding
     const tokens = [];
     for (const id of tokenIds) {
       if (this.specialIds.has(id)) continue;
@@ -104,7 +104,7 @@ export class UniMERNetDecode {
       tokens.push(token);
     }
 
-    // FIX F4: Python calls HuggingFace tokenizer.decode() on the full id sequence.
+    // Porting fix: Python calls HuggingFace tokenizer.decode on the full id sequence.
     // Decode after concatenation so multi-byte UTF-8 sequences split across BPE tokens survive.
     const inverseMap = gpt2BytesToUnicodeInverse();
     const decoded = decodeByteLevelToken(tokens.join(""), inverseMap);
@@ -127,7 +127,7 @@ export class UniMERNetDecode {
     
     // 3. ftfy.fix_text - skip in JS (optional text cleanup)
     
-    // FIX F5: _normalize workaround removed — F1 BGR/RGB swap fixed in pre_process.js
+    // Porting fix: _normalize workaround removed — F1 BGR/RGB swap fixed in pre_process.js
     
     return result.trim();
   }

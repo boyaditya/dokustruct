@@ -28,7 +28,7 @@ export class RapidFormulaInput {
    * @param {object} [params.engineCfg]
    */
   constructor({
-    // INTENTIONAL F2: browser default uses S for cleaner/faster UI output; Python parity callers should pass M explicitly.
+    // INTENTIONAL browser default uses S for cleaner/faster UI output; Python parity callers should pass M explicitly.
     modelType = ModelType.PP_FORMULANET_PLUS_S,
     modelDirOrPath = null,
     dictKeysPath = null,

@@ -636,8 +636,8 @@ function _remapPoly(poly, pasteX, pasteY, xmin, ymin) {
 
 /**
  * Sort polygon boxes by min-y then min-x, matching Python SortPolyBoxes.
- * FIX O1/O2: used in _ocrSeal path for poly-type boxes.
- * @param {Array<Array<[number,number]>>} polys  - each poly is an array of [x,y] points
+ * Porting fix: used in _ocrSeal path for poly-type boxes.
+ * @param {Array<Array<[number,number]>>} polys - each poly is an array of [x,y] points
  * @returns {Array<Array<[number,number]>>}
  */
 export function sortPolyBoxes(polys) {
@@ -658,7 +658,7 @@ export function sortPolyBoxes(polys) {
  * for curved text the full AutoRectifier is used in Python; here we use minAreaRect
  * perspective warp which is equivalent for circular-seal text (4-point approximation).
  *
- * FIX O2: poly path — perspective crop per polygon.
+ * Porting fix: poly path — perspective crop per polygon.
  * @param {cv.Mat} image
  * @param {Array<Array<[number,number]>>} polys
  * @returns {cv.Mat[]} Caller must delete each returned Mat.

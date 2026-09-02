@@ -3,7 +3,7 @@
  * PDF classification: determines whether a PDF needs OCR or can use text extraction.
  *
  * Browser workarounds:
- * - pdfminer → pdfjs-dist getTextContent() / getOperatorList()
+ * - pdfminer → pdfjs-dist getTextContent / getOperatorList
  * - numpy.random.choice → crypto.getRandomValues Fisher-Yates sampling
  * - pypdfium2 page extraction → pdf-lib
  */

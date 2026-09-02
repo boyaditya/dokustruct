@@ -15,10 +15,10 @@
 export const PP_DOCLAYOUTV2_Threshold = Object.freeze({
   // Index → threshold (matches Python rapid_layout/rapid_layout_self/utils/typings.py)
   0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5,
-  5: 0.5,  // FIXED: was 0.4 (Audit L6)
+  5: 0.5,  // was 0.4 — parity fix
   6: 0.5, 7: 0.5, 8: 0.5, 9: 0.5,
   10: 0.5, 11: 0.5, 12: 0.5, 13: 0.5, 14: 0.5,
-  15: 0.5, // FIXED: was 0.4 (Audit L6)
+  15: 0.5, // was 0.4 — parity fix
   16: 0.5, 17: 0.5, 18: 0.5, 19: 0.5, 20: 0.5, 21: 0.5,
 });
 
@@ -53,7 +53,7 @@ export const PP_DOCLAYOUT_L_Threshold = Object.freeze({
   4: 0.5,  // abstract
   5: 0.5,  // content
   6: 0.5,  // figure_title
-  7: 0.5,  // formula         FIXED: was 0.3 (Audit L7)
+  7: 0.5,  // formula         was 0.3 — parity fix
   8: 0.5,  // table
   9: 0.5,  // table_title
   10: 0.5, // reference
@@ -62,7 +62,7 @@ export const PP_DOCLAYOUT_L_Threshold = Object.freeze({
   13: 0.5, // header
   14: 0.5, // algorithm
   15: 0.5, // footer
-  16: 0.45, // seal           FIXED: was 0.2 (Audit L7)
+  16: 0.45, // seal           was 0.2 — parity fix
   17: 0.5, // header_image
   18: 0.5, // footer_image
   19: 0.5, // aside_text
@@ -137,7 +137,7 @@ export const LayoutShapeMode = Object.freeze({
  * @typedef {Object} RapidLayoutInputData
  * @property {string} [modelType]
  * @property {string} [engineType]
- * @property {string} [modelUrl]        - URL to the ONNX model (replaces model_dir_or_path)
+ * @property {string} [modelUrl] - URL to the ONNX model (replaces model_dir_or_path)
  * @property {number} [confThresh]
  * @property {number} [batchNum]
  * @property {string[]} [markdownIgnoreLabels]
@@ -174,23 +174,23 @@ export class RapidLayoutInput {
 
 /**
  * @typedef {Object} LayoutDetBox
- * @property {number[]} bbox      - [x1, y1, x2, y2]
- * @property {string}   label
- * @property {number}   score
- * @property {string}   [shapeType]
+ * @property {number[]} bbox - [x1, y1, x2, y2]
+ * @property {string} label
+ * @property {number} score
+ * @property {string} [shapeType]
  * @property {number[][]} [poly]
  */
 
 /**
  * @typedef {Object} RapidLayoutOutputData
- * @property {LayoutDetBox[]}  boxes
- * @property {string[]}        [class_names]
- * @property {number[]}        [scores]
+ * @property {LayoutDetBox[]} boxes
+ * @property {string[]} [class_names]
+ * @property {number[]} [scores]
  * @property {number[][]|null} [polygon_points]
- * @property {number[]|null}   [orders]
- * @property {cv.Mat}          [img]
- * @property {number}          [elapse]
- * @property {Object}          [elapsedTime]
+ * @property {number[]|null} [orders]
+ * @property {cv.Mat} [img]
+ * @property {number} [elapse]
+ * @property {Object} [elapsedTime]
  */
 
 export class RapidLayoutOutput {

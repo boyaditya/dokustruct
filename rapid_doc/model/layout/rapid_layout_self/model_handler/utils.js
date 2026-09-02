@@ -10,7 +10,7 @@ export { ModelType } from '../utils/typings.js';
 const logger = getLogger('ModelProcessor');
 
 // Models are served locally from public/models/ (Vite static assets).
-// FIX (Audit 1.2): SHA-256 values updated to match locally-patched ONNX files
+// SHA-256 values updated to match locally-patched ONNX files
 // (patch_ppdoclayout.py post-processes layout models; hashes reflect patched versions).
 // Models not present locally (PP-DocLayout-L/M/S, doclayout_docstructbench, RT-DETR)
 // retain their upstream hashes — validate against actual files when deployed.

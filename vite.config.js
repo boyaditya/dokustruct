@@ -9,7 +9,7 @@ export default defineConfig({
   publicDir: path.resolve(__dirname, 'public'),
   cacheDir: 'node_modules/.vite_rapiddoc',
   
-  // SOLUSI 1: Membatasi entry point hanya ke index.html 
+  // SOLUSI 1: Membatasi entry point hanya ke index.html
   // Agar Vite tidak menscan file HTML legacy/rusak di folder lain
   build: {
     target: 'es2022',

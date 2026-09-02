@@ -2,7 +2,7 @@
  * Browser asset manifest for local-first downloads with external fallback.
  *
  * Local `/models`, `/opencv`, and `/ort` paths are tried first (served by
- * Vite dev server or static host).  External URLs (HuggingFace / CDN) are
+ * Vite dev server or static host). External URLs (HuggingFace / CDN) are
  * used as fallback when the local file is absent or the request fails.
  */
 
@@ -303,7 +303,7 @@ export function getAssetSourceUrls(assetId) {
 
 export function getRequiredAssets(config = {}) {
   // Runtime assets (OpenCV, ORT loader/binary) are loaded by <script>/bundler,
-  // NOT through this cache path — the audit measured ~33.8 MiB downloaded and
+  // NOT through this cache path — measurement showed ~33.8 MiB downloaded and
   // never read back. Exclude them from required downloads.
   const required = new Set();
 

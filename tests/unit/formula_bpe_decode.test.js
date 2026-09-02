@@ -1,12 +1,12 @@
 /**
- * Unit tests for Audit F4: HuggingFace byte-level BPE inverse map.
+ * Unit tests for HuggingFace byte-level BPE inverse map.
  *
  * Tests cover:
  *   1. `gpt2BytesToUnicodeInverse()` helper — map correctness & caching
  *   2. `decodeByteLevelToken()` — Greek/CJK escape round-trip, ASCII pass-through, LaTeX fall-back
  *   3. `UniMERNetDecode.tokenToStr()` — byte-encoded tokens produce correct UTF-8 in output
  *
- * Validates: Requirements 7.6
+ *
  */
 
 import { describe, it, expect } from 'vitest';

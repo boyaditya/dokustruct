@@ -1,8 +1,8 @@
 // Copyright (c) Opendatalab. All rights reserved.
 // PORTING NOTE: rapid_table_self/inference_engine/onnxruntime/main.py → main.js
-// Key difference from formula: cfg is a plain dict (not dataclass); getCharacterList uses splitlines().
+// Key difference from formula: cfg is a plain dict (not dataclass); getCharacterList uses splitlines.
 // Also supports cfg.session = custom pre-built session injection.
-// W1: __init__(cfg) → static async create(cfg)
+// __init__(cfg) → static async create(cfg)
 
 import { InferSession } from "../base.js";
 import { ProviderConfig } from "./provider_config.js";

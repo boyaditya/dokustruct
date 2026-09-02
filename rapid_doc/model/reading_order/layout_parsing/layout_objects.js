@@ -19,9 +19,9 @@ export { TextSpan, TextLine, LayoutBlock, LayoutRegion };
 
 class TextSpan {
   /**
-   * @param {number[]} box  [x1,y1,x2,y2]
-   * @param {string}   text
-   * @param {string}   label
+   * @param {number[]} box [x1,y1,x2,y2]
+   * @param {string} text
+   * @param {string} label
    */
   constructor(box, text, label) {
     this.box = box;
@@ -133,7 +133,7 @@ class TextLine {
             // no live re-inference available — matches Python: crop_img_rec_score = 0
             const recScore = 0;
             span.text = "-"; // preserve text="-" assignment for parity
-            // FIX R1: skip low-score spans in formula path (Audit R1)
+            // Porting fix: skip low-score spans in formula path
             if (recScore < textRecScoreThresh) continue;
           }
           newSpans.push(span);
@@ -298,7 +298,7 @@ class LayoutBlock {
   constructor(label, bbox, content = "") {
     this.label = label;
     this.order_label = null;
-    // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
+    // Porting fix: intTrunc matches Python int truncation
     this.bbox = bbox.map(intTrunc);
     this.content = content;
     this.seg_start_coordinate = Infinity;
@@ -325,7 +325,7 @@ class LayoutBlock {
    * Generator that yields own serializable [key, value] pairs lazily.
    * Callers that need only a subset of properties can iterate and break early
    * without materialising the full object — reducing peak memory on dense pages.
-   * FIX P12: streaming property serializer (Audit P12).
+   * Porting fix: streaming property serializer.
    * @yields {[string, *]}
    */
   *entries() {
@@ -336,8 +336,8 @@ class LayoutBlock {
 
   /**
    * Serialize to a plain object (backward-compatible).
-   * Internally driven by the lazy entries() generator.
-   * FIX P12: replaces eager spread `{ ...this }` (Audit P12).
+   * Internally driven by the lazy entries generator.
+   * Porting fix: replaces eager spread `{ ...this }`.
    * @returns {Object}
    */
   toDict() {

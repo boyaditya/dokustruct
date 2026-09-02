@@ -1,11 +1,11 @@
 /**
- * Feature: rapid-doc-js-refactor, Property 9: Pipeline Resilience on Non-Critical Errors
+ * Property: Pipeline Resilience on Non-Critical Errors
  *
  * Tests that when a non-critical error occurs (e.g., one table fails, one formula fails
  * recognition), the pipeline continues processing other pages/elements. Also verifies
  * that AbortException IS propagated (not caught).
  *
- * Validates: Requirements 9.2, 9.5
+ * , 9.5
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AbortException } from '@rapid_doc/utils/exceptions.js';

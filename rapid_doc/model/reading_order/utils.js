@@ -70,9 +70,9 @@ export function _getMinboxIfOverlapByRatio(bbox1, bbox2, ratio, smaller = true) 
 
 /**
  * Remove overlapping bounding boxes.
- * @param {number[][]} bboxes  List of [x1,y1,x2,y2]
+ * @param {number[][]} bboxes List of [x1,y1,x2,y2]
  * @param {number} threshold
- * @param {boolean} smaller   Drop the smaller box when true
+ * @param {boolean} smaller Drop the smaller box when true
  * @returns {[number[][], number[][]]} [updatedBboxes, droppedBoxes]
  */
 export function removeOverlapBlocks(bboxes, threshold = 0.65, smaller = true) {

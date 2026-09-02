@@ -4,9 +4,7 @@
  *
  * Responsibilities:
  *  1. Build pipeline config from AppState
- *  2. Register model download handlers on ModelManager
  *  3. Drive AppState stages/progress/timings during execution
- *  4. Handle research-mode repeat runs
  *  5. Forward results to AppState on completion
  *
  * The actual inference is delegated to the browser engine entry point (demo.js /
@@ -740,8 +738,6 @@ function mergeTimings(a, b) {
 
 export class PipelineAdapter {
   constructor() {
-    /** @type {import('../components/ModelManager.js').ModelManager|null} */
-    this._modelManager = null;
     this._abortController = null;
     this._lastModelConfigKey = null;
     this._preparedKey = null;
@@ -759,29 +755,6 @@ export class PipelineAdapter {
     return getDefaultPdfPagesBatch(state) > 0;
   }
 
-  // ── Registration ──────────────────────────────────────────────────────────
-
-  /**
-   * Called by index.html after ModelManager is mounted.
-   * Registers download callbacks so ModelManager cards can trigger downloads.
-   * @param {import('../components/ModelManager.js').ModelManager} mm
-   */
-  registerModelManager(mm) {
-    this._modelManager = mm;
-
-    // Register per-model download stubs (real download happens inside engine load)
-    const { MODEL_CATALOG } = mm.constructor;
-    if (!MODEL_CATALOG) return;
-
-    for (const model of MODEL_CATALOG) {
-      mm.onDownload(model.id, async () => {
-        await this._downloadSingleModel(model.id);
-      });
-      mm.onDownload(`${model.id}_clear`, () => {
-        this._clearModelCache(model.id);
-      });
-    }
-  }
 
   // ── Main entry point ──────────────────────────────────────────────────────
 
@@ -852,7 +825,7 @@ export class PipelineAdapter {
     try { resume = JSON.parse(resumeRaw); } catch { return false; }
     if (!resume.startPage || resume.startPage <= 0) return false;
 
-    console.log(
+    console.debug(
       `[pipelineAdapter] Resuming from crash — page ${resume.startPage}, ` +
       `${resume.accumulatedPageCount} prior pages`
     );
@@ -1240,7 +1213,7 @@ export class PipelineAdapter {
 
       if (useChunking) {
         // ── Chunked path: sequential docAnalyze invocations with engineReset ──
-        console.log(
+        console.debug(
           `[pipelineAdapter] Chunked mode — ${totalPages} pages in ` +
           `${totalChunks} chunks of ≤${chunkSize} pages with engineReset between chunks`
         );
@@ -1273,7 +1246,7 @@ export class PipelineAdapter {
           fileBytes = fb.buffer.slice(fb.byteOffset, fb.byteOffset + fb.byteLength);
           // Re-build config from saved state for consistency.
           Object.assign(config, resumeState.config);
-          console.log(
+          console.debug(
             `[pipelineAdapter] Resumed from page ${resumeState.startPage} — ` +
             `${accumulatedPageCount} pages already accumulated`
           );
@@ -1311,7 +1284,7 @@ export class PipelineAdapter {
           const chunkEnd = Math.min(chunkStart + chunkSize - 1, totalPages - 1);
           const chunkPages = chunkEnd - chunkStart + 1;
 
-          console.log(
+          console.debug(
             `[pipelineAdapter] Chunk ${chunkIdx + 1}/${totalChunks} — ` +
             `pages ${chunkStart}-${chunkEnd} (${chunkPages} pages)`
           );
@@ -1533,7 +1506,7 @@ export class PipelineAdapter {
         // Preserve all imageWriters for cleanup in finally block
         _chunkImageWriters = allImageWriters;
 
-        console.log(
+        console.debug(
           `[pipelineAdapter] Chunked processing complete — ` +
           `${totalChunks} chunks, ${accumulatedPageCount} pages, ` +
           `${accumulatedMarkdown.length} chars markdown, ` +
@@ -1546,7 +1519,7 @@ export class PipelineAdapter {
         const onWindowResult = pdfPagesBatch > 0
           ? async ({ markdown, contentList, pageCount, imageWriter }) => {
               streamingImageWriter = streamingImageWriter || imageWriter;
-              console.log(`[adapter] onWindowResult fired — markdown: ${(markdown || '').length} chars, pages: ${pageCount}, contentList: ${contentList?.length ?? 0} items`);
+              console.debug(`[adapter] onWindowResult fired — markdown: ${(markdown || '').length} chars, pages: ${pageCount}, contentList: ${contentList?.length ?? 0} items`);
               const images = streamingImageWriter
                 ? await this._collectImageMap(streamingImageWriter)
                 : {};
@@ -1822,7 +1795,7 @@ export class PipelineAdapter {
       // ── Step 8: done ───────────────────────────────────────────────────────
       state.finishProcessing(results);
       // Surface recoverable stage skips instead of silently degrading output
-      // (audit: inference failures were swallowed without user notice).
+      //.
       const skipCount = results?._stageSkipWarnings?.length ?? 0;
       if (skipCount > 0) {
         this._toast(`Some content could not be extracted (${skipCount} issue(s) — see console).`, 'warning');

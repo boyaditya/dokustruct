@@ -1,9 +1,9 @@
 /**
  * Property-based tests for overlap filtering.
  *
- * Feature: rapid-doc-js-refactor, Property 6: Overlap Filtering Correctness
+ * Property: Overlap Filtering Correctness
  *
- * Validates: Requirements 7.7
+ *
  */
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
@@ -195,7 +195,7 @@ function bboxArea(bbox) {
 
 // --- Property 6: Overlap Filtering Correctness ---
 
-describe('Feature: rapid-doc-js-refactor, Property 6: Overlap Filtering Correctness', () => {
+describe('Property: Overlap Filtering Correctness', () => {
   it('(a) boxes with width or height < 6px are removed from the result', () => {
     fc.assert(
       fc.property(

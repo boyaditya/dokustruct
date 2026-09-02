@@ -58,7 +58,7 @@ export function releaseCanvas(canvas) {
 }
 
 /**
- * Releases an ImageBitmap by calling close().
+ * Releases an ImageBitmap by calling close.
  * Null-safe: guards against null/undefined input.
  * @param {ImageBitmap|null|undefined} bitmap - The ImageBitmap to release
  */
@@ -96,7 +96,7 @@ export function disposeOutputMap(outputMap) {
 
 /**
  * RAII-style resource guard for Mat operations.
- * Calls factory() to create Mats, passes them to operation(), and ensures
+ * Calls factory to create Mats, passes them to operation(), and ensures
  * all Mats are deleted in a finally block even if operation throws.
  *
  * @param {function(): Array} factory - Function that returns an array of Mats

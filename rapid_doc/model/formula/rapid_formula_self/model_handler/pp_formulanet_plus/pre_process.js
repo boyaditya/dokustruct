@@ -109,7 +109,7 @@ export class PPPreProcess {
   }
 
   /**
-   * Stage 1: UniMERNetImgDecode.img_decode()
+   * Stage 1: UniMERNetImgDecode.img_decode
    * PORTING NOTE: Matches Python lines 133-163
    * @param {cv.Mat} img
    * @returns {cv.Mat|null} RGB image, padded and resized (caller must delete)
@@ -191,7 +191,7 @@ export class PPPreProcess {
   }
 
   /**
-   * Stage 2: UniMERNetTestTransform.transform()
+   * Stage 2: UniMERNetTestTransform.transform
    * PORTING NOTE: Matches Python lines 188-208
    * Normalizes with mean/std, converts to gray, merges to 3 channels.
    * @param {cv.Mat} img - RGB uint8 image
@@ -209,7 +209,7 @@ export class PPPreProcess {
     //   squeezed = np.squeeze(grayscale_image)
     //   img = cv2.merge([squeezed] * 3)
     //
-    // FIX F1: INTENTIONAL R/B coefficient swap — matches Python training distribution. DO NOT "FIX".
+    // Porting fix: INTENTIONAL R/B coefficient swap — matches Python training distribution. DO NOT "FIX".
     // Python's pipeline feeds RGB-ordered data into cv2.COLOR_BGR2GRAY, which applies
     // BGR weights (0.114·B + 0.587·G + 0.299·R) to what it thinks is BGR but is actually
     // RGB. The net effect is the swapped formula: Y = 0.114·R + 0.587·G + 0.299·B.
@@ -225,7 +225,7 @@ export class PPPreProcess {
         const b = (pixels[i * ch + 0] * SCALE - MEAN) / STD;
         const g = (pixels[i * ch + 1] * SCALE - MEAN) / STD;
         const r = (pixels[i * ch + 2] * SCALE - MEAN) / STD;
-        // INTENTIONAL R/B swap (do not "fix" this — see Audit F1)
+        // INTENTIONAL R/B swap (do not "fix" this — see )
         grayVal = 0.114 * r + 0.587 * g + 0.299 * b;
       } else {
         grayVal = (pixels[i] * SCALE - MEAN) / STD;
@@ -239,7 +239,7 @@ export class PPPreProcess {
   }
 
   /**
-   * Stage 3: LatexImageFormat.format()
+   * Stage 3: LatexImageFormat.format
    * PORTING NOTE: Matches Python lines 229-246
    * Pads to multiple of 16, takes channel 0, outputs [1, 1, padH, padW]
    * @param {Float32Array} data - [H, W, 3] normalized data

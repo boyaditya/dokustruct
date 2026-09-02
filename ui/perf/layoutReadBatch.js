@@ -2,7 +2,7 @@
  * ui/perf/layoutReadBatch.js
  *
  * Pattern: schedule(target, readFn) → readFn runs in the read phase, its return
- * value is passed to the write phase. flush() executes all reads then all writes.
+ * value is passed to the write phase. flush executes all reads then all writes.
  *
  * Usage:
  *   const batch = createLayoutReadBatch();

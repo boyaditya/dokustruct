@@ -2,7 +2,7 @@
  * ui/lifecycle/subscriptionBag.js
  *
  * Wraps appState.subscribe / subscribeAll / subscribeImmediate calls and
- * provides a single dispose() that unsubscribes all of them.
+ * provides a single dispose that unsubscribes all of them.
  *
  * Usage:
  *   const bag = createSubscriptionBag('linking');

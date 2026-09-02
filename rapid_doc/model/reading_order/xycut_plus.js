@@ -8,8 +8,8 @@ import { intTrunc } from '../../utils/math_utils.js';
 
 /**
  * Generate a 1-D projection histogram from bounding boxes along one axis.
- * @param {number[][]} boxes  [[x1,y1,x2,y2], ...]
- * @param {0|1} axis  0 = x-axis (columns), 1 = y-axis (rows)
+ * @param {number[][]} boxes [[x1,y1,x2,y2], ...]
+ * @param {0|1} axis 0 = x-axis (columns), 1 = y-axis (rows)
  * @returns {Int32Array}
  */
 export function projectionByBboxes(boxes, axis) {
@@ -31,7 +31,7 @@ export function projectionByBboxes(boxes, axis) {
 
   const projection = new Int32Array(maxLength);
   for (const box of boxes) {
-    // FIX R6/R11: removed swap [start, end] — matches Python (no swap in Python baseline)
+    // Porting fix: removed swap [start, end] — matches Python (no swap in Python baseline)
     let start = Math.abs(Math.round(box[axis]));
     let end = Math.abs(Math.round(box[axis + 2]));
     start = Math.max(0, start);
@@ -44,8 +44,8 @@ export function projectionByBboxes(boxes, axis) {
 /**
  * Split a projection histogram into segments.
  * @param {Int32Array|number[]} arr
- * @param {number} minValue  Only indices with arr[i] > minValue are significant
- * @param {number} minGap    Minimum gap width between segments
+ * @param {number} minValue Only indices with arr[i] > minValue are significant
+ * @param {number} minGap Minimum gap width between segments
  * @returns {[number[], number[]]|null} [starts, ends] or null
  */
 export function splitProjectionProfile(arr, minValue, minGap) {
@@ -73,7 +73,7 @@ export function splitProjectionProfile(arr, minValue, minGap) {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Y-first recursive cut.  Modifies `res` in-place.
+ * Y-first recursive cut. Modifies `res` in-place.
  * @param {number[][]} boxes
  * @param {number[]} indices
  * @param {number[]} res
@@ -140,7 +140,7 @@ export function recursiveYxCut(boxes, indices, res, minGap = 1) {
 }
 
 /**
- * X-first recursive cut.  Modifies `res` in-place.
+ * X-first recursive cut. Modifies `res` in-place.
  * @param {number[][]} boxes
  * @param {number[]} indices
  * @param {number[]} res
@@ -213,7 +213,7 @@ export function recursiveXyCut(boxes, indices, res, minGap = 1) {
  * Determine bbox direction based on aspect ratio.
  * @param {number} width
  * @param {number} height
- * @param {number} directionRatio  Default 1.0
+ * @param {number} directionRatio Default 1.0
  * @returns {"horizontal"|"vertical"}
  */
 export function getBboxDirection(width, height, directionRatio = 1.0) {
@@ -222,8 +222,8 @@ export function getBboxDirection(width, height, directionRatio = 1.0) {
 
 /**
  * Determine dominant text-line direction from a list of bboxes.
- * @param {number[][]} bboxes  [[x1,y1,x2,y2], ...]
- * @param {number} directionRatio  Default 1.5
+ * @param {number[][]} bboxes [[x1,y1,x2,y2], ...]
+ * @param {number} directionRatio Default 1.5
  * @returns {"horizontal"|"vertical"}
  */
 export function calculateTextLineDirection(bboxes, directionRatio = 1.5) {
@@ -244,14 +244,14 @@ export function calculateTextLineDirection(bboxes, directionRatio = 1.5) {
 
 /**
  * Sort bounding boxes using recursive XY-cut.
- * @param {number[][]} blockBboxes  [[x1,y1,x2,y2], ...]
+ * @param {number[][]} blockBboxes [[x1,y1,x2,y2], ...]
  * @param {"horizontal"|"vertical"} direction
  * @param {number} minGap
- * @returns {number[]}  Sorted indices into blockBboxes
+ * @returns {number[]} Sorted indices into blockBboxes
  */
 export function sortByXycut(blockBboxes, direction = "vertical", minGap = 1) {
   if (!blockBboxes.length) return [];
-  // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
+  // Porting fix: intTrunc matches Python int truncation
   const intBoxes = blockBboxes.map((b) => b.map(intTrunc));
   const indices = Array.from({ length: intBoxes.length }, (_, i) => i);
   const res = [];
@@ -268,10 +268,10 @@ export function sortByXycut(blockBboxes, direction = "vertical", minGap = 1) {
  *
  * Main public API — mirrors Python `xycut_plus_sort`.
  *
- * @param {number[][]} bboxes  [[x1,y1,x2,y2], ...]
+ * @param {number[][]} bboxes [[x1,y1,x2,y2], ...]
  * @param {"horizontal"|"vertical"|null} direction
  *   If null, direction is inferred from the bboxes themselves.
- * @returns {number[]}  Sorted indices (integers) into the input array
+ * @returns {number[]} Sorted indices (integers) into the input array
  */
 export function xycutPlusSort(bboxes, direction = null) {
   if (!bboxes || !bboxes.length) return [];

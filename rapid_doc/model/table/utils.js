@@ -2,7 +2,7 @@
 
 /**
  * Count physical <td>/<th> elements in an HTML string.
- * Mirrors count_table_cells_physical() in Python: basic substring count
+ * Mirrors count_table_cells_physical in Python: basic substring count
  * on lowercased html (handles attributes since match is "<td" / "<th").
  * @param {string|null} html
  * @returns {number}
@@ -38,11 +38,11 @@ function _collectCells(html) {
 
 /**
  * Select the best table model output (wired vs wireless).
- * 1:1 port of select_best_table_model() in Python. The decision
+ * 1:1 port of select_best_table_model in Python. The decision
  * combines physical cell count, OCR text matches, blank cells, and a
  * heuristic on non-blank cell counts. Falls back to wired by default.
  *
- * @param {Array} ocrResult   - OCR results structured as [boxes, texts, scores]
+ * @param {Array} ocrResult - OCR results structured as [boxes, texts, scores]
  * @param {string|null} wiredHtml
  * @param {string|null} wirelessHtml
  * @returns {{ bestHtml: string, modelType: string }}

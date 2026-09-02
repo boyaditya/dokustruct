@@ -48,7 +48,7 @@ export async function disposeModelResource(resource, seen = new WeakSet()) {
   try { resource[DISPOSED_MARK] = true; } catch { /* non-extensible objects */ }
 
   // If the WebGPU device is already lost, every ORT session referencing it
-  // is invalid. Calling release() throws "invalid session id" which is just
+  // is invalid. Calling release throws "invalid session id" which is just
   // noise. Skip release calls; JS GC will clean up the wrappers.
   let deviceLost = false;
   try {
@@ -515,7 +515,7 @@ export class MineruPipelineModel {
   /**
    * Release references held by this pipeline model.
    * Does NOT deeply dispose the underlying model instances — those are owned
-   * by AtomModelSingleton and disposed via retainKeys()/clear().
+   * by AtomModelSingleton and disposed via retainKeys()/clear.
    */
   async dispose() {
     this.layoutModel = null;

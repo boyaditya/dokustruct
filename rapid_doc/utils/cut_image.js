@@ -2,8 +2,8 @@
  * Image cropping utilities for document pipeline.
  * Handles Mat-based and Canvas-based image cropping with proper resource cleanup.
  *
- * Browser workaround: Python uses PIL.Image.crop() + filesystem writes via image_writer.
- * Here we use cv.Mat ROI or OffscreenCanvas for cropping, and imageWriter.write() for storage.
+ * Browser workaround: Python uses PIL.Image.crop + filesystem writes via image_writer.
+ * Here we use cv.Mat ROI or OffscreenCanvas for cropping, and imageWriter.write for storage.
  */
 
 import { getLogger } from './logger.js';
@@ -30,11 +30,11 @@ export function checkImgBbox(bbox) {
 
 /**
  * Crop a region from a cv.Mat according to a scaled bbox.
- * Caller must .delete() the returned Mat.
+ * Caller must .delete the returned Mat.
  *
  * @param {number[]} bbox - [x0, y0, x1, y1] in original (unscaled) coordinates
- * @param {cv.Mat}  mat  - Source image Mat (BGR or RGBA)
- * @param {number}  [scale=2]
+ * @param {cv.Mat} mat - Source image Mat (BGR or RGBA)
+ * @param {number} [scale=2]
  * @returns {cv.Mat} Cropped Mat
  */
 export function getCropMat(bbox, mat, scale = 2) {
@@ -98,15 +98,15 @@ export async function matToPngBlob(mat) {
  * Crop a span's bbox from a page image, hash the path, store the PNG via
  * imageWriter, and return the stored key.
  *
- * @param {Object}      span
- * @param {Object[]}    oriImageList            - [{bbox, mat: cv.Mat}, ...]
- * @param {boolean}     extractOriginalImage
- * @param {number}      extractOriginalImageIouThresh
- * @param {number}      pageNum
- * @param {cv.Mat}      pageMat                 - Page image as BGR cv.Mat
- * @param {string|null} returnPath              - Logical path prefix
+ * @param {Object} span
+ * @param {Object[]} oriImageList - [{bbox, mat: cv.Mat}, ...]
+ * @param {boolean} extractOriginalImage
+ * @param {number} extractOriginalImageIouThresh
+ * @param {number} pageNum
+ * @param {cv.Mat} pageMat - Page image as BGR cv.Mat
+ * @param {string|null} returnPath - Logical path prefix
  * @param {{write(key:string, blob:Blob):void}} imageWriter
- * @param {number}      [scale=2]
+ * @param {number} [scale=2]
  * @returns {Promise<string>} Stored PNG key (SHA-256 hash + '.png')
  */
 export async function cutImage(
@@ -162,15 +162,15 @@ export async function cutImage(
  * Crop an image or table span from a page and write the PNG via imageWriter.
  * Mutates span.image_path in-place, then returns the span.
  *
- * @param {Object}      span
- * @param {Object[]}    oriImageList
- * @param {boolean}     extractOriginalImage
- * @param {number}      extractOriginalImageIouThresh
- * @param {cv.Mat}      pageMat
- * @param {string}      pageImgMd5
- * @param {number}      pageId
+ * @param {Object} span
+ * @param {Object[]} oriImageList
+ * @param {boolean} extractOriginalImage
+ * @param {number} extractOriginalImageIouThresh
+ * @param {cv.Mat} pageMat
+ * @param {string} pageImgMd5
+ * @param {number} pageId
  * @param {{write(key:string, blob:Blob):void}|null} imageWriter
- * @param {number}      [scale=2]
+ * @param {number} [scale=2]
  * @returns {Promise<Object>} The mutated span
  */
 export async function cutImageAndTable(

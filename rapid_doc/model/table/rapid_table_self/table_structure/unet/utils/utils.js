@@ -57,7 +57,7 @@ export function labelConnectedComponents(mask, width, height, connectivity = 4) 
 
 /**
  * Resize image while preserving aspect ratio, then zero-pad to (targetH, targetW).
- * FIX T6: aspect-preserving resize with zero-pad (matches Python resize_img keep_ratio=True)
+ * Porting fix: aspect-preserving resize with zero-pad (matches Python resize_img keep_ratio=True)
  * Adaptive interpolation: INTER_AREA for downscale, INTER_CUBIC for upscale.
  * @param {cv.Mat} img - Input image (BGR)
  * @param {number} targetH - Target height (e.g. 1024)

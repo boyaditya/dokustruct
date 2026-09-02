@@ -13,7 +13,7 @@ const logger = getLogger('ModelHandler');
 export class ModelHandler {
   /**
    * @param {import('../utils/typings.js').RapidLayoutInput} cfg
-   * @param {import('../inference_engine/base.js').InferSession}   session
+   * @param {import('../inference_engine/base.js').InferSession} session
    */
   constructor(cfg, session) {
     this.modelProcessors = this._initHandler(cfg, session);

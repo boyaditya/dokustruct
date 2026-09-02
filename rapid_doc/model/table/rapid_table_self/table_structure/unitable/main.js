@@ -14,7 +14,7 @@
  * This class intentionally throws on construction so that callers receive a
  * clear error rather than silently producing wrong results.
  *
- * See documentation/KNOWN_ISSUES.md (T5/T23) for full details.
+ * See documentation/KNOWN_ISSUES.md for full details.
  */
 export class UniTableStructure {
   constructor() {

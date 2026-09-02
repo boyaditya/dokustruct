@@ -11,7 +11,7 @@
  * WORKAROUND 2: File-based input paths (os.path, pathlib.Path, open())
  * REASON: Browser has no direct filesystem access.
  * SOLUTION: parseDoc() accepts File objects (from <input type="file">) or
- *   ArrayBuffers. read_fn() is replaced with arrayBufferFromFile().
+ *   ArrayBuffers. read_fn is replaced with arrayBufferFromFile.
  *   PDF bytes are obtained directly as ArrayBuffer / Uint8Array.
  * AFFECTED METHODS: parseDom, parseDoc
  *
@@ -92,7 +92,7 @@ export class ParseResult {
 /**
  * Parse a list of PDF documents and return results for each.
  *
- * This is the main entry point, analogous to demo.py's do_parse().
+ * This is the main entry point, analogous to demo.py's do_parse.
  *
  * @param {object} opts
  * @param {string[]} opts.pdfFileNames - Logical file name for each PDF (no extension).

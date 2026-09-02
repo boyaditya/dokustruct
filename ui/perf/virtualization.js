@@ -5,7 +5,7 @@
  * the scroll container keeps its natural height. Items are revealed as they enter
  * the viewport.
  *
- * Threshold gating (per spec Requirement 3.7):
+ * Threshold gating (per spec ):
  *   - History list: activate when item count > 50
  *   - Markdown blocks: activate when block count > 100
  *   - JSON viewer lines: activate when line count > 100
@@ -16,8 +16,8 @@
  *     threshold: 50,
  *     rootMargin: '200px',
  *   });
- *   vlist.observe(items);   // items: NodeList or Array<Element>
- *   vlist.disconnect();     // cleanup
+ *   vlist.observe(items); // items: NodeList or Array<Element>
+ *   vlist.disconnect(); // cleanup
  */
 
 /**

@@ -62,7 +62,7 @@ export class RapidTable {
         predHtmls,
         cellBboxes,
         logicPoints: logicPointsList,
-        // FIX T11b: include per-image mean decode scores
+        // Porting fix: include per-image mean decode scores
         scores,
         elapse,
       });
@@ -82,7 +82,7 @@ export class RapidTable {
         predHtmls: result.predHtmls,
         cellBboxes: result.cellBboxes,
         logicPointsList: result.logicPointsList,
-        // FIX T11b: UNET path does not produce decode scores; use empty array for shape consistency
+        // Porting fix: UNET path does not produce decode scores; use empty array for shape consistency
         scores: result.scores ?? [],
       };
     }
@@ -91,7 +91,7 @@ export class RapidTable {
     const predHtmls = [];
     const allCellBboxes = [];
     const logicPointsList = [];
-    // FIX T11b: collect per-image mean scores from decode output
+    // Porting fix: collect per-image mean scores from decode output
     const allScores = [];
 
     for (let i = 0; i < structures.length; i++) {

@@ -1,5 +1,5 @@
 /**
- * Regression test for Audit F5: _normalize workaround removal.
+ * Regression test for _normalize workaround removal.
  *
  * The `_normalize` method in `UniMERNetDecode` was a workaround that masked
  * the root-cause bug (F1 BGR/RGB swap in pre_process.js). Now that F1 is fixed,
@@ -10,7 +10,7 @@
  *   2. `_normalize` is NOT exported from the post_process module.
  *   3. `tokenToStr` still works correctly without the workaround.
  *
- * Validates: Requirements 7.5
+ *
  */
 
 import { describe, it, expect } from 'vitest';
@@ -34,7 +34,7 @@ const MINIMAL_TOKENIZER_JSON = JSON.stringify({
   ],
 });
 
-// ─── FIX F5 regression: _normalize must not exist ────────────────────────────
+// ─── the fix regression: _normalize must not exist ────────────────────────────
 
 describe('FIX F5 — _normalize workaround removed from UniMERNetDecode', () => {
   it('UniMERNetDecode instance does NOT have a _normalize method', () => {

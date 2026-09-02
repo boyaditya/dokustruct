@@ -26,7 +26,7 @@ export function createDisposerChain(label = 'unnamed') {
 
   return {
     /**
-     * Register a cleanup function. Called in LIFO order by runAll().
+     * Register a cleanup function. Called in LIFO order by runAll.
      * @param {() => any} fn
      */
     add(fn) {

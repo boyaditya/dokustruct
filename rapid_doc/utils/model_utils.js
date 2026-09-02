@@ -10,7 +10,7 @@
  *
  * @param {cv.Mat|OffscreenCanvas|ImageBitmap} img
  * @returns {{ mat: cv.Mat, owned: boolean }}
- *   owned=true means the caller MUST call mat.delete() when finished.
+ *   owned=true means the caller MUST call mat.delete when finished.
  */
 export function toMatBgr(img) {
   if (typeof cv !== 'undefined' && img instanceof cv.Mat) {

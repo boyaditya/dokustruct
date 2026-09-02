@@ -25,7 +25,7 @@ export class LoadImage {
 
   /**
    * Load and normalise any supported image type to a BGR cv.Mat.
-   * Caller MUST call .delete() on the returned Mat when done.
+   * Caller MUST call .delete on the returned Mat when done.
    *
    * @param {InputType} img
    * @returns {Promise<cv.Mat>} BGR cv.Mat

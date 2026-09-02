@@ -3,7 +3,7 @@
  *
  * Applies CSS classes and data attributes to rendered markdown elements based on
  * the layout model's original_label values. Off-viewport blocks are deferred via
- * scheduleIdleWork (Requirement 3.6). Reads before writes (Requirement 7.2).
+ * scheduleIdleWork. Reads before writes.
  *
  * Requirements: 3.6, 7.2
  */
@@ -32,7 +32,7 @@ const _ctx = {
 };
 
 /**
- * Wire the styling render context. Called once from app.js init().
+ * Wire the styling render context. Called once from app.js init.
  * @param {StylingRenderContext} ctx
  */
 export function initStylingRenderer(ctx) {
@@ -139,7 +139,7 @@ function populateMapFromSourceData(layoutLabelMap, sourceData) {
 
 /**
  * Apply layout-model-derived CSS classes and data attributes to rendered markdown.
- * Off-viewport elements are deferred via scheduleIdleWork (Requirement 3.6).
+ * Off-viewport elements are deferred via scheduleIdleWork.
  */
 export function applyLayoutBasedStyling() {
   const mc = _ctx.markdownContent;
@@ -193,7 +193,7 @@ export function applyLayoutBasedStyling() {
     }
   });
 
-  // Defer off-viewport blocks (Requirement 3.6)
+  // Defer off-viewport blocks
   if (deferred.length > 0) {
     scheduleIdleWork(() => {
       deferred.forEach(applyToElement);

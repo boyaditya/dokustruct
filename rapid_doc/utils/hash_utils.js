@@ -46,8 +46,8 @@ export function strMd5(text) {
  *
  * - dict/object → JSON-stringified with sorted keys
  *   (objects with a 'custom_model' key have that value replaced by its type name)
- * - array       → JSON-stringified with each element made hashable
- * - all others  → returned as-is
+ * - array → JSON-stringified with each element made hashable
+ * - all others → returned as-is
  *
  * @param {*} value
  * @returns {*}

@@ -13,7 +13,7 @@ let gpuDeviceLostListenerAttached = false;
 
 /**
  * Point ORT at the Vite-resolved WASM loader + binary. This MUST run before
- * any InferenceSession.create() — otherwise ORT falls back to its default path
+ * any InferenceSession.create — otherwise ORT falls back to its default path
  * (/node_modules/.vite_rapiddoc/deps/ort-wasm-*.mjs), the fetch 404s, and the
  * failed init poisons ORT's internal state (`aborted = true`) so every later
  * session also fails with "no available backend found".
@@ -41,11 +41,11 @@ let reserveMainThreadCore = false;
  *
  * Shape:
  *   {
- *     label:           string  // "vendor / arch / description" or "unknown"
+ *     label: string // "vendor / arch / description" or "unknown"
  *     looksIntegrated: boolean // heuristic match against integrated GPU names
- *     limits: {                // promoted device limits (when supported)
- *       maxBufferSize?:                 number
- *       maxStorageBufferBindingSize?:   number
+ *     limits: { // promoted device limits (when supported)
+ *       maxBufferSize?: number
+ *       maxStorageBufferBindingSize?: number
  *       maxComputeWorkgroupStorageSize?:number
  *       maxComputeInvocationsPerWorkgroup?:number
  *     }
@@ -149,7 +149,7 @@ export async function configureOrtRuntime(opts = {}) {
     // initialising the main thread first makes proxy throw "worker not ready".
     // Both modes cannot coexist in one page load — main-thread WASM is the
     // only mode that supports provider switching without a reload. UI
-    // responsiveness is instead handled by scheduler.yield() between batches
+    // responsiveness is instead handled by scheduler.yield between batches
     // plus the reserved-core thread cap above.
     runtime.env.wasm.proxy = false;
   }
@@ -362,7 +362,7 @@ export async function releaseGpuDevice() {
   gpuDeviceLostListenerAttached = false;
   configured = false;
   adapterMetadata = null;
-  // Mark device as lost so any pending dispose() calls skip release().
+  // Mark device as lost so any pending dispose calls skip release.
   deviceLost = true;
 
   try {
@@ -414,7 +414,7 @@ function attachDeviceLostListener(device) {
       gpuDeviceLostListenerAttached = false;
       configured = false;
       adapterMetadata = null;
-      // Mark device as lost so dispose paths skip session.release() (calling
+      // Mark device as lost so dispose paths skip session.release (calling
       // release on a dead device throws "cannot release session, invalid
       // session id" which masks the real WebGPU failure).
       deviceLost = true;
@@ -424,15 +424,15 @@ function attachDeviceLostListener(device) {
 }
 
 // ─── GLOBAL WEBGPU MUTEX ──────────────────────────────────────────────────────
-// ORT WebGPU uses a global device context. Concurrent session.run() calls 
+// ORT WebGPU uses a global device context. Concurrent session.run calls
 // across *any* session instance will crash with 'Session already started'.
 // This global mutex ensures strictly serialized GPU access application-wide.
 let globalGpuMutexQueue = Promise.resolve();
 
 /**
  * Acquire the global WebGPU lock.
- * Returns a release function that MUST be called immediately after session.run()
- * completes (before await getData() or any CPU postprocessing) to keep the GPU fed.
+ * Returns a release function that MUST be called immediately after session.run
+ * completes (before await getData or any CPU postprocessing) to keep the GPU fed.
  * @returns {Promise<() => void>}
  */
 export const acquireGlobalGpu = () => {

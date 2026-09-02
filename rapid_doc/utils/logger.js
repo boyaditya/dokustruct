@@ -4,7 +4,7 @@
  * WORKAROUND: Python uses loguru for structured logging
  * REASON: loguru is not available in the browser
  * SOLUTION: Thin wrapper around console.* with module-name prefix,
- *           matching the Logger(logger_name=__name__).get_log() pattern.
+ *           matching the Logger(logger_name=__name__).get_log pattern.
  *
  * AFFECTED METHODS: Logger class → console wrapper class
  */
@@ -19,7 +19,7 @@ export class Logger {
   }
 
   /**
-   * Returns this logger instance (mirrors Python's .get_log() pattern).
+   * Returns this logger instance (mirrors Python's .get_log pattern).
    * @returns {Logger}
    */
   getLog() {
@@ -73,7 +73,7 @@ export class Logger {
 
 /**
  * Convenience factory matching Python usage pattern:
- *   logger = Logger(logger_name=__name__).get_log()
+ *   logger = Logger(logger_name=__name__).get_log
  *
  * @param {string} moduleName
  * @returns {Logger}

@@ -1,11 +1,11 @@
 /**
  * Property-based tests for error handling.
  *
- * Feature: rapid-doc-js-refactor, Property 7: Null-Safe Input Handling
- * Feature: rapid-doc-js-refactor, Property 10: AbortException Propagation
- * Feature: rapid-doc-js-refactor, Property 11: Error Message Format Consistency
+ * Property: Null-Safe Input Handling
+ * Property: AbortException Propagation
+ * Property: Error Message Format Consistency
  *
- * Validates: Requirements 8.1, 8.5, 8.6, 9.6, 9.1
+ * , 8.5, 8.6, 9.6, 9.1
  */
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
@@ -136,7 +136,7 @@ const pageModelInfoWithNullFields = fc.record({
 
 // --- Property 7: Null-Safe Input Handling ---
 
-describe('Feature: rapid-doc-js-refactor, Property 7: Null-Safe Input Handling', () => {
+describe('Property: Null-Safe Input Handling', () => {
   it('MagicModel constructor handles null/undefined pageModelInfo without throwing TypeError', () => {
     fc.assert(
       fc.property(nullablePageModelInfo, nullableScale, (pageModelInfo, scale) => {
@@ -236,7 +236,7 @@ describe('Feature: rapid-doc-js-refactor, Property 7: Null-Safe Input Handling',
 
 // --- Property 10: AbortException Propagation ---
 
-describe('Feature: rapid-doc-js-refactor, Property 10: AbortException Propagation', () => {
+describe('Property: AbortException Propagation', () => {
   it('AbortException is never swallowed by a standard try/catch pattern', () => {
     fc.assert(
       fc.property(
@@ -334,7 +334,7 @@ describe('Feature: rapid-doc-js-refactor, Property 10: AbortException Propagatio
 
 // --- Property 11: Error Message Format Consistency ---
 
-describe('Feature: rapid-doc-js-refactor, Property 11: Error Message Format Consistency', () => {
+describe('Property: Error Message Format Consistency', () => {
   it('formatPipelineError output always contains module name in brackets', () => {
     fc.assert(
       fc.property(pipelineErrorInput, (input) => {

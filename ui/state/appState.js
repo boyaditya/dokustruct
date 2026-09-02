@@ -25,8 +25,6 @@
  *
  *   // Reset to initial state
  *   state.reset();
- *
- * Research Artifact: System A — ,  2025
  */
 
 // ---------------------------------------------------------------------------
@@ -68,84 +66,84 @@
  * @typedef {object} AppStateShape
  *
  * — Input —
- * @property {File[]}        files
- * @property {number}        currentFileIndex
- * @property {PageRange}     pageRange
- * @property {number}        maxPages
+ * @property {File[]} files
+ * @property {number} currentFileIndex
+ * @property {PageRange} pageRange
+ * @property {number} maxPages
  *
  * — Parse options —
  * @property {'auto'|'ocr'|'txt'} parseMethod
- * @property {boolean}       forceOcr
- * @property {string}        language
+ * @property {boolean} forceOcr
+ * @property {string} language
  * @property {'auto'|'txt'|'ocr'} useDetMode
  *
  * — Feature toggles —
- * @property {boolean}       formulaEnable
- * @property {boolean}       tableEnable
- * @property {boolean}       checkboxEnable
- * @property {0|1}           formulaLevel
+ * @property {boolean} formulaEnable
+ * @property {boolean} tableEnable
+ * @property {boolean} checkboxEnable
+ * @property {0|1} formulaLevel
  *
  * — Layout config —
- * @property {string}        layoutModelType
- * @property {number}        layoutConfThresh
+ * @property {string} layoutModelType
+ * @property {number} layoutConfThresh
  * @property {'auto'|'rect'} layoutShapeMode
- * @property {string[]}      markdownIgnoreLabels
+ * @property {string[]} markdownIgnoreLabels
  *
  * — Table config —
- * @property {string}        tableModelType
- * @property {boolean}       tableForceOcr
- * @property {boolean}       tableUseWordBox
- * @property {boolean}       tableFormulaEnable
- * @property {boolean}       tableImageEnable
- * @property {boolean}       skipTextInImage
- * @property {boolean}       tableUseImg2table
- * @property {boolean}       tableCompareMode
+ * @property {string} tableModelType
+ * @property {boolean} tableForceOcr
+ * @property {boolean} tableUseWordBox
+ * @property {boolean} tableFormulaEnable
+ * @property {boolean} tableImageEnable
+ * @property {boolean} skipTextInImage
+ * @property {boolean} tableUseImg2table
+ * @property {boolean} tableCompareMode
  *
  * — Output options —
- * @property {boolean}       dumpMd
- * @property {boolean}       dumpMiddleJson
- * @property {boolean}       dumpModelOutput
- * @property {boolean}       dumpContentList
- * @property {boolean}       drawLayoutBbox
- * @property {boolean}       drawSpanBbox
- * @property {boolean}       dumpMdHtml
- * @property {boolean}       dumpMdDocx
+ * @property {boolean} dumpMd
+ * @property {boolean} dumpMiddleJson
+ * @property {boolean} dumpModelOutput
+ * @property {boolean} dumpContentList
+ * @property {boolean} drawLayoutBbox
+ * @property {boolean} drawSpanBbox
+ * @property {boolean} dumpMdHtml
+ * @property {boolean} dumpMdDocx
  * @property {'mm_markdown'|'nlp_markdown'|'content_list'} makeMode
  * @property {'a'|'b'|'all'} latexDelimiterType
  *
  * — Processing state —
- * @property {boolean}       isProcessing
- * @property {string|null}   processingStage
- * @property {Progress}      progress
+ * @property {boolean} isProcessing
+ * @property {string|null} processingStage
+ * @property {Progress} progress
  * @property {AbortController|null} abortController
  *
  * — Results —
- * @property {object|null}   results
+ * @property {object|null} results
  * @property {'markdown'|'raw'|'json_content'|'json_middle'|'json_model'|'layout_vis'} activeOutputTab
- * @property {boolean}       showOutputPanel
+ * @property {boolean} showOutputPanel
  *
  * — Benchmarks —
- * @property {Timings}       timings
- * @property {string|null}   activeExecutionProvider
- * @property {number}        peakMemoryMb
+ * @property {Timings} timings
+ * @property {string|null} activeExecutionProvider
+ * @property {number} peakMemoryMb
  *
  * — Model management —
  * @property {Object.<string, ModelStatusValue>} modelStatus
- * @property {Object.<string, number>}           modelProgress
- * @property {Object.<string, number>}           modelSizeMb
+ * @property {Object.<string, number>} modelProgress
+ * @property {Object.<string, number>} modelSizeMb
  * @property {'idle'|'runtime_loading'|'model_warming'|'ready'|'error'} runtimeStatus
  * @property {'idle'|'runtime_loading'|'model_warming'|'ready'|'error'} warmupStatus
- * @property {string|null}   warmupConfigKey
- * @property {Timings}       startupTimings
- * @property {string|null}   warmupError
+ * @property {string|null} warmupConfigKey
+ * @property {Timings} startupTimings
+ * @property {string|null} warmupError
  *
  * — UI state —
- * @property {boolean}       leftDrawerOpen
- * @property {boolean}       rightSheetOpen
- * @property {boolean}       showPdfPreview
- * @property {string[]}      expandedSections
+ * @property {boolean} leftDrawerOpen
+ * @property {boolean} rightSheetOpen
+ * @property {boolean} showPdfPreview
+ * @property {string[]} expandedSections
  * @property {'layout'|'span'|'none'} activeBboxLayer
- * @property {string[]}      hiddenBboxCategories
+ * @property {string[]} hiddenBboxCategories
  */
 
 /** @returns {AppStateShape} */
@@ -296,7 +294,7 @@ export class AppState {
    */
   #subscribers = new Map();
 
-  /** Batching flag — suppresses individual notifications during patch(). */
+  /** Batching flag — suppresses individual notifications during patch. */
   #batching = false;
 
   /** Keys changed during a batch — flushed after batch completes. */

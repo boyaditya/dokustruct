@@ -32,7 +32,7 @@ const PDF_IMAGE_DPI = 200;
 const PDF_POINTS_PER_INCH = 72;
 // Non-windowed fallback batch size. The windowed path (pdf_pages_batch) is the
 // primary UI path; this constant only matters for direct engine calls without
-// windowing. 384 held every page result in memory at once (audit: dead but
+// windowing. 384 held every page result in memory at once (dead but
 // OOM-risky path); 24 keeps the same per-batch semantics with a bounded spike.
 const MIN_BATCH_INFERENCE_SIZE = 24;
 
@@ -275,7 +275,7 @@ export async function docAnalyze(
 
   // Windowed processing for large PDFs
   if (pdf_pages_batch > 0) {
-    console.log(`[docAnalyze] Windowed mode — pdf_pages_batch=${pdf_pages_batch}, pages=${normalizedPdfBytesList.length} PDF(s), has on_window_result=${!!on_window_result}`);
+    console.debug(`[docAnalyze] Windowed mode — pdf_pages_batch=${pdf_pages_batch}, pages=${normalizedPdfBytesList.length} PDF(s), has on_window_result=${!!on_window_result}`);
     return await _docAnalyzeWindowed(normalizedPdfBytesList, {
       lang_list, parse_method, formula_enable, table_enable,
       force_ocr, layout_config, ocr_config, formula_config, table_config,
@@ -462,8 +462,8 @@ async function _runBatchProcessing(imagesWithExtraInfo, opts) {
   const totalPages = imagesWithExtraInfo.length;
   const hasOrientation = layout_config?.use_doc_orientation_classify ?? layout_config?.useDocOrientationClassify ?? false;
   
-  console.log(`[_runBatchProcessing] Creating shared ProgressTracker for ${totalPages} total pages`);
-  console.log(`[_runBatchProcessing] hasOrientation=${hasOrientation}, batches=${batchImages.length}`);
+  console.debug(`[_runBatchProcessing] Creating shared ProgressTracker for ${totalPages} total pages`);
+  console.debug(`[_runBatchProcessing] hasOrientation=${hasOrientation}, batches=${batchImages.length}`);
   
   progressTracker.initStage('orientation', hasOrientation ? totalPages : 0);
   progressTracker.initStage('layout', totalPages);
@@ -745,7 +745,7 @@ async function _docAnalyzeWindowed(pdfBytesList, opts) {
   // ── Final cross-page processing (deferred from per-window skipGlobalPost) ──
   // paraSplit already ran per-window inside resultToMiddleJson (skipCrossPageMerge
   // keeps it enabled) so streaming unionMake output is readable immediately.
-  // Re-running it here reprocessed every page a second time (audit RISK-07).
+  // Re-running it here reprocessed every page a second time.
   // Only crossPageTableMerge is deferred to the end — it needs the full page set.
   if (accumulatedPdfInfo.length > 0) {
     crossPageTableMerge(accumulatedPdfInfo);
@@ -883,7 +883,7 @@ export async function batchImageAnalyze(
   const results = await batchModel.call(imagesWithExtraInfo);
   results._stageTimings = { ...(batchModel.lastStageTimings || {}) };
   // Propagate recoverable-stage failures upward so the UI can warn the user
-  // that some content was skipped (audit: silent skips degraded quality).
+  // that some content was skipped.
   const skipSummary = batchModel.getStageSkipSummary?.();
   if (skipSummary) {
     results._stageSkipSummary = skipSummary;
@@ -995,7 +995,7 @@ export async function engineReset(opts = {}) {
     await cleanMemory(device, { releaseGpu: false });
   }
 
-  // 4) Release the in-memory model-buffer cache + object URLs. The audit
+  // 4) Release the in-memory model-buffer cache + object URLs. Profiling
   //    flagged that engineReset never cleared the ~530 MiB memoryCache, so
   //    repeated runs (or provider switches) kept every downloaded model
   //    buffer alive for the whole page lifetime.

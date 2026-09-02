@@ -1,7 +1,7 @@
 // Copyright (c) Opendatalab. All rights reserved.
 // PORTING NOTE: table_structure/pp_structure/pre_process.py → pre_process.js
 // TablePreprocess: resize → normalize → pad → CHW
-// W2: cv.Mat objects cleaned in try/finally
+// cv.Mat objects cleaned in try/finally
 
 import { intTrunc } from '../../../../../utils/math_utils.js';
 
@@ -29,7 +29,7 @@ export class TablePreprocess {
   resizeImage(img) {
     const h = img.rows, w = img.cols;
     const ratio = this.maxLen / Math.max(h, w);
-    // intTrunc matches Python int() truncation
+    // intTrunc matches Python int truncation
     const newH = intTrunc(h * ratio);
     const newW = intTrunc(w * ratio);
     const resized = new cv.Mat();
@@ -43,7 +43,7 @@ export class TablePreprocess {
    * @returns {cv.Mat} float32 BGR Mat (caller must delete)
    */
   normalize(img) {
-    // FIX T4: keep BGR for SLANET_plus inference (matches Python).
+    // Porting fix: keep BGR for SLANET_plus inference (matches Python).
     let float32 = new cv.Mat();
     img.convertTo(float32, cv.CV_32F, 1.0 / 255.0);
 

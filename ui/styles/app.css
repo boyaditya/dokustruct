@@ -398,7 +398,7 @@ input:focus-visible {
     outline-offset: 2px;
 }
 
-/* AUDIT-U4: stronger focus-visible outline on interactive elements (Requirement 5.4).
+/* stronger focus-visible outline on interactive elements.
    Uses --accent (teal) for better contrast against the blue primary palette. */
 .layout-box:focus-visible,
 .block-shell:focus-visible,
@@ -1441,7 +1441,7 @@ input:focus-visible {
     margin: 8px auto;
 }
 
-/* AUDIT-FORMULA-CENTER-4: tighten KaTeX's default 1em vertical margin inside our shells
+/* tighten KaTeX's default 1em vertical margin inside our shells
    so display formulas don't add excessive whitespace. */
 .block-shell--formula .katex-display {
     margin: 0 auto;
@@ -1856,7 +1856,7 @@ input:focus-visible {
     outline-color: rgba(255, 138, 0, 0.72);
 }
 
-/* AUDIT-FORMULA-LINK-2: distinct hover/linked palette for paragraphs and standalone display math
+/* distinct hover/linked palette for paragraphs and standalone display math
    that contain formula content. Mirrors .layout-box--formula's emerald accent so preview ↔ output
    linking stays visually consistent. Idle state inherits .block-shell defaults. */
 .block-shell--formula::after {
@@ -1873,7 +1873,7 @@ input:focus-visible {
     box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.22);
 }
 
-/* AUDIT-FORMULA-CENTER: standalone display-math shells always centered horizontally.
+/* standalone display-math shells always centered horizontally.
    Two cases handled:
    1. Image path: marked emits `<div class="katex-display-placeholder">` as a top-level
       block. attachBlockActions wraps it directly → shell carries `--display-formula`.
@@ -1910,7 +1910,7 @@ input:focus-visible {
     background: rgba(5, 150, 105, 0.08);
 }
 
-/* AUDIT-FORMULA-CENTER-4: tighten KaTeX's default 1em vertical margin inside our shells
+/* tighten KaTeX's default 1em vertical margin inside our shells
    so display formulas don't add excessive whitespace. */
 
 .block-action-bar {
@@ -4052,15 +4052,15 @@ json-viewer {
     }
 }
 
-/* ===== WAVE 2 AUDIT FIXES ===== */
+/* ===== UI polish fixes ===== */
 
-/* AUDIT-U7: Remove hover-label transition-delay on layout boxes (Requirement 5.7).
+/* Remove hover-label transition-delay on layout boxes.
    The ::after tooltip should appear instantly on hover, not after a delay. */
 .layout-box::after {
     transition-delay: 0ms;
 }
 
-/* AUDIT-U5: aria-disabled visual feedback — dim controls that are aria-disabled
+/* aria-disabled visual feedback — dim controls that are aria-disabled
    during processing without mutating native disabled (which breaks form semantics). */
 [aria-disabled="true"] {
     opacity: 0.45;
@@ -4068,18 +4068,18 @@ json-viewer {
     cursor: not-allowed;
 }
 
-/* AUDIT-U8: ARIA role=status for progress overlay — ensure it is announced.
+/* ARIA role=status for progress overlay — ensure it is announced.
    role=alert for error toasts is set in JS via showRecoverableError. */
 #progressOverlay[role="status"] {
     /* No visual change — role is semantic only */
 }
 
-/* AUDIT-U8: aria-live polite region for elapsed time */
+/* aria-live polite region for elapsed time */
 #timeElapsed[aria-live="polite"] {
     /* No visual change — aria-live is semantic only */
 }
 
-/* AUDIT-U6: Quick-nav scroll-to-top button — hidden by default, shown by JS
+/* Quick-nav scroll-to-top button — hidden by default, shown by JS
    when markdown content is long (scrollHeight > 200 || textLength > 10000). */
 #scrollToTopBtn {
     position: fixed;

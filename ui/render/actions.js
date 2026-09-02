@@ -25,7 +25,7 @@ const _ctx = {
 };
 
 /**
- * Wire the actions render context. Called once from app.js init().
+ * Wire the actions render context. Called once from app.js init.
  * @param {ActionsRenderContext} ctx
  */
 export function initActionsRenderer(ctx) {
@@ -106,7 +106,7 @@ export function blockHasFormula(block) {
  * middle-json paragraphs (which carry bare LaTeX — no surrounding $...$/$$...$$
  * wrappers, per pipelineAdapter.extractLayoutLabelBlocks).
  *
- * FIX FORMULA-LINK-3
+ * Apply formula-link styling.
  *
  * @param {Element|null} block
  * @returns {string}
@@ -138,7 +138,7 @@ export function extractBlockLinkText(block) {
  * place (now possibly empty or with surrounding text); attachBlockActions
  * then wraps each new block separately.
  *
- * FIX FORMULA-CENTER-3
+ * Center standalone display-math shells.
  *
  * @param {Element|null} root
  */
@@ -190,13 +190,13 @@ export function hoistDisplayFormulaPlaceholders(root) {
  * copy-action button bar. Idempotent — blocks already inside a .block-shell
  * are skipped.
  *
- * Requirement 4.6: every content block must be actionable (copy).
+ * : every content block must be actionable (copy).
  */
 export function attachBlockActions() {
   const mc = _ctx.markdownContent;
   if (!mc) return;
 
-  // FIX LINK-LIST: each <li> becomes its own shell — the pipeline's
+  // each <li> becomes its own shell — the pipeline's
   // content_list emits one TEXT entry per list line, so each list item must
   // carry its own data-link-id. Wrapping the whole <ol>/<ul> as a single
   // shell made one candidate consume an entire list and shifted every

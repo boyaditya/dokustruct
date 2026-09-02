@@ -1,10 +1,10 @@
 /**
  * Property-based tests for geometry utilities.
  *
- * Feature: rapid-doc-js-refactor, Property 4: Bounding Box Normalization Precision
- * Feature: rapid-doc-js-refactor, Property 8: Geometry Function Type Correctness
+ * Property: Bounding Box Normalization Precision
+ * Property: Geometry Function Type Correctness
  *
- * Validates: Requirements 7.3, 8.3
+ * , 8.3
  */
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
@@ -62,7 +62,7 @@ const validBboxPair = fc.tuple(validIntBbox, validIntBbox);
 
 // --- Property 4: Bounding Box Normalization Precision ---
 
-describe('Feature: rapid-doc-js-refactor, Property 4: Bounding Box Normalization Precision', () => {
+describe('Property: Bounding Box Normalization Precision', () => {
   it('normalizeToIntBbox produces integer coordinates within 1 pixel of correct rounding', () => {
     fc.assert(
       fc.property(validFloatBbox, (bbox) => {
@@ -108,7 +108,7 @@ describe('Feature: rapid-doc-js-refactor, Property 4: Bounding Box Normalization
 
 // --- Property 8: Geometry Function Type Correctness ---
 
-describe('Feature: rapid-doc-js-refactor, Property 8: Geometry Function Type Correctness', () => {
+describe('Property: Geometry Function Type Correctness', () => {
   it('calculateIou always returns a finite number for valid bbox pairs', () => {
     fc.assert(
       fc.property(validBboxPair, ([bbox1, bbox2]) => {

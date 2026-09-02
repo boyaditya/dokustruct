@@ -9,14 +9,14 @@ import {
 } from '@rapid_doc/utils/resource_utils.js';
 
 /**
- * Feature: rapid-doc-js-refactor, Property 3: Resource Cleanup Invariant
+ * Property: Resource Cleanup Invariant
  *
  * For any valid input processed through the pipeline, whether the processing
  * succeeds or fails with an error, the total number of cv.Mat allocations
- * should equal the total number of cv.Mat.delete() calls, and all
+ * should equal the total number of cv.Mat.delete calls, and all
  * OffscreenCanvas/ImageBitmap resources should be released.
  *
- * Validates: Requirements 5.1, 5.2, 5.3, 5.4
+ * , 5.2, 5.3, 5.4
  */
 
 /**

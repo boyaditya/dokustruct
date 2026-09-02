@@ -2,10 +2,10 @@
  * DocLayoutPreProcess: resize with letterbox, flip channels BGR→RGB, transpose
  * HWC → NCHW, normalise to [0, 1].
  *
- * INPUT:  cv.Mat (BGR, uint8, HWC)
+ * INPUT: cv.Mat (BGR, uint8, HWC)
  * OUTPUT: { data: Float32Array, shape: [1, 3, H, W] }
  *
- * The letterbox result Mat is deleted inside call() (try/finally).
+ * The letterbox result Mat is deleted inside call (try/finally).
  */
 
 /* global cv */
@@ -45,8 +45,8 @@ export class DocLayoutPreProcess {
         H * W * channels,
       );
 
-      // Build Float32 NCHW tensor:  N=1, C=3, H, W
-      // Python: input_img[..., ::-1]   ← flip BGR→RGB then transpose
+      // Build Float32 NCHW tensor: N=1, C=3, H, W
+      // Python: input_img[..., ::-1] ← flip BGR→RGB then transpose
       const data = new Float32Array(H * W * 3);
       for (let h = 0; h < H; h++) {
         for (let w = 0; w < W; w++) {

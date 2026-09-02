@@ -2,7 +2,7 @@
  * ui/linking/index.js
  *
  * Re-exports all public linking API so app.js can import from one place.
- * Also provides ensureLinkingActive / ensureLinkingInactive (Requirement 2.5).
+ * Also provides ensureLinkingActive / ensureLinkingInactive.
  */
 
 export { ctx, initLinkingContext } from './context.js';

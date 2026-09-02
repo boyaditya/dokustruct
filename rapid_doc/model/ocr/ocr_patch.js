@@ -2,13 +2,12 @@
  * OCR patch registry — documents the parity status of every OCR-related patch
  * between the Python RapidDoc baseline and this JS/browser port.
  *
- * Requirement 4.5 / Audit finding O3:
- *   This module replaces the previous NO-OP stub with:
+ *   This module provides:
  *   (a) accurate documentation of patches already baked into the JS implementation,
  *   (b) patches not yet ported and the rationale for deferral, and
  *   (c) a queryable API via `getOcrPatchStatus()`.
  *
- * Patch ID convention: O1, O2, ... matches the PARITY_AUDIT_2026-05-23.md finding IDs.
+ * Patch ID convention: O1, O2, ... sequential IDs grouped by subsystem.
  * Status values: 'ported' | 'deferred' | 'not_applicable'
  */
 
@@ -18,12 +17,12 @@
  * Canonical list of OCR patches tracked for Python→JS parity.
  *
  * @typedef {Object} OcrPatchDescriptor
- * @property {string} id         - Audit finding ID (e.g. 'O1')
- * @property {string} name       - Human-readable patch name
+ * @property {string} id - Patch ID (e.g. 'O1')
+ * @property {string} name - Human-readable patch name
  * @property {'ported'|'deferred'|'not_applicable'} status
- * @property {string} jsFile     - Primary JS file that implements/defers the patch
- * @property {string} pyRef      - Corresponding Python module / function reference
- * @property {string} notes      - Implementation notes and links to related fixes
+ * @property {string} jsFile - Primary JS file that implements/defers the patch
+ * @property {string} pyRef - Corresponding Python module / function reference
+ * @property {string} notes - Implementation notes and links to related fixes
  */
 
 /** @type {OcrPatchDescriptor[]} */
@@ -38,7 +37,7 @@ const OCR_PATCHES = Object.freeze([
       'Seal detection model: pp-ocrv4_mobile_seal_det.onnx (registered in ocr_helpers.js).',
       'Activated when ocr(img, { is_seal: true }) or RapidOcrModel.create({ is_seal: true }).',
       'DetPostProcess constructed with box_type="poly" — dispatches to _polygonsFromBitmap.',
-      'See also: FIX O2 (sortPolyBoxes, cropByPolys) which are part of the seal pipeline.',
+      'See also: patch O2 (sortPolyBoxes, cropByPolys) which are part of the seal pipeline.',
     ].join(' '),
   },
   {
@@ -77,7 +76,7 @@ const OCR_PATCHES = Object.freeze([
     jsFile: 'rapid_doc/model/ocr/ocr_ctc_decode.js (CTCLabelDecode constructor)',
     pyRef: 'rapid_ocr_onnxruntime/utils.py:CTCLabelDecode.__init__ — character = ["blank"] + charDict',
     notes: [
-      'FIX O8 (Audit O8): blank token always inserted at index 0 explicitly.',
+      'Patch O8: blank token always inserted at index 0 explicitly.',
       'Previous JS implementation auto-detected blank by checking charList[0] === "blank",',
       '  which fails when the dict file omits the blank entry.',
     ].join(' '),
@@ -115,12 +114,12 @@ const OCR_PATCHES = Object.freeze([
  * Return the full list of OCR patch descriptors with their porting status.
  *
  * Each descriptor has:
- *   - id      {string}  audit finding / patch identifier
- *   - name    {string}  human-readable name
- *   - status  {'ported'|'deferred'|'not_applicable'}
- *   - jsFile  {string}  JS implementation location
- *   - pyRef   {string}  Python reference location
- *   - notes   {string}  implementation details and rationale
+ *   - id {string} patch identifier
+ *   - name {string} human-readable name
+ *   - status {'ported'|'deferred'|'not_applicable'}
+ *   - jsFile {string} JS implementation location
+ *   - pyRef {string} Python reference location
+ *   - notes {string} implementation details and rationale
  *
  * @returns {Readonly<OcrPatchDescriptor[]>}
  */
@@ -133,7 +132,7 @@ export function getOcrPatchStatus() {
  *
  * In the browser/onnxruntime-web port all patches from `OCR_PATCHES` with
  * status='ported' are **baked directly into the JS class implementations**
- * (see `jsFile` in each descriptor).  There is no monkey-patching at runtime.
+ * (see `jsFile` in each descriptor). There is no monkey-patching at runtime.
  *
  * This function is kept for structural parity with `apply_ocr_patch()` in the
  * Python baseline so import sites need not change if a future patch does

@@ -26,8 +26,7 @@
  * file are not blocked if they are clearly non-coordinate (e.g., display
  * rounding for UI strings). Fix Math.round → intTrunc where the flag is correct.
  *
- * Implements: Requirement 9.2 (ESLint rule for Math.round bbox usage)
- * References: Audit findings L9, R5, R7, R8, R9, T10, 12.5
+ * Implements: ESLint rule enforcing bankerRound/intTrunc for bbox coordinates.
  */
 
 // ---------------------------------------------------------------------------

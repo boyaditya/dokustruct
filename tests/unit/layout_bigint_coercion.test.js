@@ -1,30 +1,30 @@
 /**
- * Smoke tests for BigInt coercion in the layout inference pipeline (Audit L1).
+ * Smoke tests for BigInt coercion in the layout inference pipeline.
  *
  * These tests exercise:
  *   1. OrtInferSession.run coercion path — int64 tensor data must be converted
  *      to Float64Array so downstream arithmetic never throws
  *      "TypeError: Cannot mix BigInt and other types".
  *   2. PPDocLayoutModelHandler._formatOutput coercion — boxNumsData[idx] must
- *      be wrapped with tensorToNumber() before arithmetic on it.
+ *      be wrapped with tensorToNumber before arithmetic on it.
  *
  * The tests are unit-level: they do NOT load real ONNX models or require a
  * browser environment. They validate the coercion logic directly.
  *
- * Validates: Requirements 2.1
+ *
  */
 
 import { describe, it, expect } from 'vitest';
 import { tensorToNumber, tensorDataToFloat64 } from '../../rapid_doc/utils/math_utils.js';
 
-// ─── Helper: mimic the coercion logic added to OrtInferSession.run (FIX L1) ──
+// ─── Helper: mimic the coercion logic added to OrtInferSession.run ──
 
 /**
  * Replicate the data-extraction + coercion step from OrtInferSession.run.
  * The real implementation does:
  *
  *   const rawData = typeof tensor.getData === 'function'
- *     ? await tensor.getData()
+ *     ? await tensor.getData
  *     : tensor.data;
  *   const data = (rawData instanceof BigInt64Array || tensor.type === 'int64')
  *     ? tensorDataToFloat64(rawData)
@@ -33,34 +33,34 @@ import { tensorToNumber, tensorDataToFloat64 } from '../../rapid_doc/utils/math_
  */
 function extractAndCoerce(tensor) {
   const rawData = tensor.data;
-  // FIX L1: coerce BigInt to Number for arithmetic
+  // Porting fix: coerce BigInt to Number for arithmetic
   const data = (rawData instanceof BigInt64Array || tensor.type === 'int64')
     ? tensorDataToFloat64(rawData)
     : rawData;
   return data.slice();
 }
 
-// ─── Helper: mimic the _formatOutput loop body (FIX L1) ──────────────────────
+// ─── Helper: mimic the _formatOutput loop body ──────────────────────
 
 /**
  * Replicate the key part of _formatOutput that was fixed:
  *
  *   for (let idx = 0; idx < boxNumsData.length; idx++) {
- *     // FIX L1: coerce BigInt to Number for arithmetic
+ *     // Porting fix: coerce BigInt to Number for arithmetic
  *     const np_boxes_num = tensorToNumber(boxNumsData[idx]);
- *     const boxIdxEnd    = boxIdxStart + np_boxes_num;
+ *     const boxIdxEnd = boxIdxStart + np_boxes_num;
  *     ...
- *     const totalBoxes   = boxNumsData.reduce((a, b) => a + tensorToNumber(b), 0) || 1;
+ *     const totalBoxes = boxNumsData.reduce((a, b) => a + tensorToNumber(b), 0) || 1;
  *   }
  */
 function simulateFormatOutputLoop(boxNumsData) {
   const results = [];
   let boxIdxStart = 0;
-  // FIX L1: use tensorToNumber in reduce
+  // Porting fix: use tensorToNumber in reduce
   const totalBoxes = Array.from(boxNumsData).reduce((a, b) => a + tensorToNumber(b), 0) || 1;
 
   for (let idx = 0; idx < boxNumsData.length; idx++) {
-    // FIX L1: coerce BigInt to Number for arithmetic
+    // Porting fix: coerce BigInt to Number for arithmetic
     const np_boxes_num = tensorToNumber(boxNumsData[idx]);
     const boxIdxEnd = boxIdxStart + np_boxes_num;
     results.push({ start: boxIdxStart, end: boxIdxEnd, count: np_boxes_num });
@@ -98,7 +98,7 @@ describe('FIX L1 — coerce BigInt helper functions', () => {
   it('tensorDataToFloat64 result can be used in arithmetic with Number — no TypeError', () => {
     const input = new BigInt64Array([4n, 8n]);
     const result = tensorDataToFloat64(input);
-    // Prior to FIX L1, mixing BigInt64Array elements with Number would throw:
+    // Prior to the fix, mixing BigInt64Array elements with Number would throw:
     //   TypeError: Cannot mix BigInt and other types
     expect(() => {
       const _sum = result[0] + result[1] + 1.5;
@@ -106,7 +106,7 @@ describe('FIX L1 — coerce BigInt helper functions', () => {
   });
 });
 
-// ─── Smoke: OrtInferSession.run coercion path (FIX L1) ───────────────────────
+// ─── Smoke: OrtInferSession.run coercion path ───────────────────────
 
 describe('FIX L1 — OrtInferSession.run coerces int64 outputs to Float64', () => {
   it('int64 tensor (BigInt64Array data) is coerced to Float64Array', () => {
@@ -166,7 +166,7 @@ describe('FIX L1 — OrtInferSession.run coerces int64 outputs to Float64', () =
   });
 });
 
-// ─── Smoke: _formatOutput boxNumsData BigInt handling (FIX L1) ───────────────
+// ─── Smoke: _formatOutput boxNumsData BigInt handling ───────────────
 
 describe('FIX L1 — _formatOutput boxNumsData BigInt coercion', () => {
   it('does not throw when boxNumsData is a BigInt64Array (simulated pre-coercion input)', () => {
@@ -189,7 +189,7 @@ describe('FIX L1 — _formatOutput boxNumsData BigInt coercion', () => {
   });
 
   it('does not throw when boxNumsData is Float64Array (post-coercion from OrtInferSession)', () => {
-    // After OrtInferSession.run FIX L1, int64 outputs arrive as Float64Array
+    // After OrtInferSession.run the fix, int64 outputs arrive as Float64Array
     const boxNumsData = new Float64Array([4, 2]);
 
     expect(() => {
@@ -230,13 +230,13 @@ describe('FIX L1 — _formatOutput boxNumsData BigInt coercion', () => {
   });
 });
 
-// ─── Smoke: _formatOutput mask byte-offset slicing (FIX L2) ──────────────────
+// ─── Smoke: _formatOutput mask byte-offset slicing ──────────────────
 
 /**
- * Validates: Requirements 2.2
  *
- * Prior to FIX L2, masks were sliced by box-count index:
- *   allMasksData.slice(boxIdxStart, boxIdxEnd)  // only `numBoxes` bytes
+ *
+ * Prior to the fix, masks were sliced by box-count index:
+ *   allMasksData.slice(boxIdxStart, boxIdxEnd) // only `numBoxes` bytes
  *
  * Each mask is a flat buffer of H*W elements. The correct slice is:
  *   allMasksData.slice(boxIdx * H * W, (boxIdx + 1) * H * W)
@@ -245,7 +245,7 @@ describe('FIX L1 — _formatOutput boxNumsData BigInt coercion', () => {
  */
 
 /**
- * Replicate the FIX L2 mask-slicing logic from _formatOutput.
+ * Replicate the the fix mask-slicing logic from _formatOutput.
  * Returns an array of per-box mask slices (each of length H*W).
  */
 function simulateMaskByteOffsetSlicing(allMasksData, boxNumsData, maskH, maskW) {
@@ -310,7 +310,7 @@ describe('FIX L2 — _formatOutput mask byte-offset slicing', () => {
   });
 
   it('old (buggy) box-count-index slicing would produce wrong results', () => {
-    // This test documents the BEFORE behaviour to illustrate why FIX L2 matters.
+    // This test documents the BEFORE behaviour to illustrate why the fix matters.
     const maskH = 4, maskW = 4;
     const numBoxes = 3;
     const maskStride = maskH * maskW; // 16 bytes per mask

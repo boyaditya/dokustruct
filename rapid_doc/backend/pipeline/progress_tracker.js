@@ -1,7 +1,7 @@
 /**
  * PORTING NOTE: This is a browser-specific progress tracking system.
  * Python baseline does not have granular progress tracking at this level.
- * 
+ *
  * This module provides accurate progress tracking for document processing pipeline
  * by counting actual work units (pages, regions, formulas, tables) processed by each model.
  */

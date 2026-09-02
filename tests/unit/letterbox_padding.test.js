@@ -1,5 +1,5 @@
 /**
- * Unit tests for LetterBox padding correctness (Audit L8 — FIX L8).
+ * Unit tests for LetterBox padding correctness .
  *
  * Verifies that LetterBox._padCenter does NOT halve bottom/right padding
  * when center=false. All padding should go to bottom/right only.
@@ -8,18 +8,18 @@
  *   if self.center:
  *       dw /= 2
  *       dh /= 2
- *   top    = int(round(dh - 0.1)) if self.center else 0
+ *   top = int(round(dh - 0.1)) if self.center else 0
  *   bottom = int(round(dh + 0.1))
- *   left   = int(round(dw - 0.1)) if self.center else 0
- *   right  = int(round(dw + 0.1))
+ *   left = int(round(dw - 0.1)) if self.center else 0
+ *   right = int(round(dw + 0.1))
  *
- * Validates: Requirements 3.1
+ *
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // ─── Mock cv (OpenCV.js) ──────────────────────────────────────────────────────
-// LetterBox.call() uses cv.resize and cv.copyMakeBorder. We mock these to
+// LetterBox.call uses cv.resize and cv.copyMakeBorder. We mock these to
 // record the border arguments without needing a real OpenCV build.
 
 let lastBorderArgs = null;

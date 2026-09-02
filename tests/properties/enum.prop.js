@@ -1,9 +1,9 @@
 /**
  * Property-based test for enum parity with Python baseline.
  *
- * Feature: rapid-doc-js-refactor, Property 5: Enum Parity with Python Baseline
+ * Property: Enum Parity with Python Baseline
  *
- * Validates: Requirements 7.6
+ *
  */
 import { describe, it, expect } from 'vitest';
 import { CategoryId } from '../../rapid_doc/utils/enum_class.js';
@@ -31,7 +31,7 @@ const PYTHON_CATEGORY_ID_BASELINE = Object.freeze({
   CheckBox: 200,
 });
 
-describe('Feature: rapid-doc-js-refactor, Property 5: Enum Parity with Python Baseline', () => {
+describe('Property: Enum Parity with Python Baseline', () => {
   it('every Python CategoryId entry exists in JS with the same numeric value', () => {
     for (const [key, pythonValue] of Object.entries(PYTHON_CATEGORY_ID_BASELINE)) {
       expect(CategoryId).toHaveProperty(key);

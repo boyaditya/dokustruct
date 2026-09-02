@@ -8,12 +8,12 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const RAPID_DOC_DIR = path.join(ROOT, 'rapid_doc');
 
 /**
- * Feature: rapid-doc-js-refactor, Property 1: Public API Export Integrity
+ * Property: Public API Export Integrity
  *
  * For any named export in `rapid_doc/index.js`, importing that export should
  * yield a defined value (function, class, or constant) — never `undefined`.
  *
- * Validates: Requirements 1.6
+ *
  */
 describe('Property 1: Public API Export Integrity', () => {
   it('all named exports from rapid_doc/index.js resolve to defined values', async () => {
@@ -97,13 +97,13 @@ describe('Property 1: Public API Export Integrity', () => {
 });
 
 /**
- * Feature: rapid-doc-js-refactor, Property 2: Barrel File Purity
+ * Property: Barrel File Purity
  *
  * For any barrel/index file (`index.js`) in the `rapid_doc/` tree, the file
  * should contain only `import` and `export` declarations — no function
  * definitions, class definitions, or executable statements.
  *
- * Validates: Requirements 4.3, 10.3
+ * , 10.3
  */
 describe('Property 2: Barrel File Purity', () => {
   /**

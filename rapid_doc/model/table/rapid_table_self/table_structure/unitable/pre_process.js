@@ -1,7 +1,7 @@
 // Copyright (c) Opendatalab. All rights reserved.
 // PORTING NOTE: table_structure/unitable/pre_process.py → pre_process.js
 // UniTable preprocessing: resize to 448×448, normalize.
-// W2: cv.Mat cleanup in try/finally
+// cv.Mat cleanup in try/finally
 
 const UNITABLE_MEAN = [0.86597056, 0.88463228, 0.87491467];
 const UNITABLE_STD = [0.20686628, 0.18201602, 0.18485524];

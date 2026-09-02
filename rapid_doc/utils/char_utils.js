@@ -14,7 +14,7 @@ const LINE_END_HYPHEN_RE = new RegExp(`[A-Za-z]+[${LINE_END_HYPHEN_CHARS.replace
  * Check if text line ends with English word hyphenation.
  * Only recognizes word break scenarios where letters are followed by line-end hyphen.
  * Does not handle intra-word hyphens or regular dashes.
- * 
+ *
  * @param {string} line - Text line to check
  * @returns {boolean} True if line ends with hyphenated word
  */
@@ -25,7 +25,7 @@ export function isHyphenAtLineEnd(line) {
 /**
  * Convert full-width characters to half-width (letters and numbers only).
  * Excludes punctuation marks.
- * 
+ *
  * @param {string} text - String containing full-width characters
  * @returns {string} String with full-width letters/numbers converted to half-width
  */
@@ -48,7 +48,7 @@ export function fullToHalfExcludeMarks(text) {
 /**
  * Convert full-width characters to half-width (all characters).
  * Includes letters, numbers, and punctuation.
- * 
+ *
  * @param {string} text - String containing full-width characters
  * @returns {string} String with full-width characters converted to half-width
  */

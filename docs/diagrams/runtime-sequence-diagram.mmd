@@ -1,0 +1,202 @@
+sequenceDiagram
+    %% ============================================
+    %% Runtime Sequence Diagram DokuStruct
+    %% Interaksi: User → UI → Pipeline → Model → Runtime
+    %% ============================================
+
+    actor User as 👤 Pengguna
+    participant UI as UI (app.js)
+    participant Pipeline as Pipeline Orchestrator (docAnalyze)
+    participant AssetMgr as Asset Manager (download_file)
+    participant IDB as IndexedDB (Cache Aset)
+    participant ModelMgr as Model Manager (ModelSingleton)
+    participant ONNX as ORT Runtime (ort_runtime.js)
+    participant GPU as WebGPU / WASM
+    participant PDF as PDF Renderer (PDF.js)
+    participant Batch as BatchAnalyze
+    participant Model as Model Stages (Layout/OCR/Formula/Table)
+    participant MidJSON as Middle JSON Builder
+    participant Output as Output Builder (unionMake)
+
+    %% ── Fase 1: Inisialisasi ──
+
+    User->>UI: Buka aplikasi
+    UI->>AssetMgr: getRequiredAssets(config)
+    AssetMgr->>IDB: Cek cache (openCursor)
+    
+    alt Aset belum di-cache
+        IDB-->>AssetMgr: null
+        AssetMgr->>AssetMgr: fetch(HuggingFace CDN)
+        AssetMgr->>AssetMgr: SHA-256 verify (SubtleCrypto.digest)
+        AssetMgr->>IDB: Simpan ke IndexedDB
+    else Aset sudah di-cache
+        IDB-->>AssetMgr: ArrayBuffer
+    end
+    
+    AssetMgr-->>UI: Status aset (cached/downloaded)
+    
+    User->>UI: Konfigurasi (model, bahasa, fitur)
+    UI->>Pipeline: setConfig(config)
+
+    %% ── Fase 2: Upload & Normalisasi ──
+
+    User->>UI: Upload dokumen (PDF/Gambar)
+    UI->>Pipeline: docAnalyze(pdfBytes, config)
+
+    Pipeline->>Pipeline: _normalizeInputBytes()
+    alt Input berupa gambar (PNG/JPEG/WebP)
+        Pipeline->>Pipeline: imageBytesToPdfBytes()
+        Note over Pipeline: Canvas → PNG blob → PDFDocument.embedPng()
+    end
+
+    %% ── Fase 3: Inisialisasi Model ──
+
+    Pipeline->>ModelMgr: getModel(config)
+    ModelMgr->>ModelMgr: makeKey(config) → cache lookup
+    
+    alt Model belum di-cache
+        ModelMgr->>ONNX: configureOrtRuntime({useWebGpu})
+        ONNX->>GPU: navigator.gpu.requestAdapter()
+        GPU-->>ONNX: GPUAdapter
+        ONNX->>GPU: adapter.requestDevice()
+        GPU-->>ONNX: GPUDevice (shared)
+        ONNX->>ONNX: attachDeviceLostListener()
+        ONNX->>ONNX: ort.env.wasm = {simd, threads}
+        
+        ModelMgr->>Model: MineruPipelineModel.create()
+        Model->>ONNX: InferenceSession.create(modelPath, {executionProvider})
+        ONNX-->>Model: InferenceSession × N model
+        
+        ModelMgr->>ModelMgr: AtomModelSingleton cache
+    end
+    
+    ModelMgr-->>Pipeline: MineruPipelineModel (ready)
+
+    %% ── Fase 4: Load & Render PDF ──
+
+    Pipeline->>PDF: loadImagesFromPdf(pdfBytes)
+    PDF->>PDF: PDF.js getDocument()
+    loop Untuk setiap halaman
+        PDF->>PDF: page.render({canvas, dpi:200})
+        PDF->>PDF: toMatBgr(canvas) → cv.Mat
+    end
+    PDF-->>Pipeline: npImages[] + scaleList + pdfDictList
+
+    %% ── Fase 5: Batch Processing (per halaman) ──
+
+    Pipeline->>Batch: batchImageAnalyze(imagesWithExtraInfo)
+    Batch->>Batch: new BatchAnalyze(model, config, progressTracker)
+
+    %% Orientation (optional)
+    opt useDocOrientationClassify
+        Batch->>ModelMgr: getAtomModel(ImgOrientationCls)
+        Batch->>Model: RapidOrientationModel.predict(npImg)
+        Model->>ONNX: acquireGlobalGpu()
+        ONNX-->>Model: release function
+        Model->>GPU: session.run(tensor)
+        GPU-->>Model: orientation output
+        Model->>ONNX: releaseGlobalGpu()
+        Model-->>Batch: rotateLabel (0/90/180/270)
+        alt rotasi diperlukan
+            Batch->>Batch: getRotateImage(npImg, label)
+        end
+    end
+
+    %% Layout
+    Batch->>Model: RapidLayoutModel.batchPredict(npImages)
+    Model->>ONNX: acquireGlobalGpu()
+    Model->>GPU: session.run(tensor) [batch]
+    GPU-->>Model: layout detections
+    Model->>ONNX: releaseGlobalGpu()
+    Model-->>Batch: imagesLayoutRes[{type, bbox, score}]
+
+    %% Region Grouping
+    Batch->>Batch: _collectDetectionRegions()
+    Note over Batch: Memisahkan: formula_boxes + table_boxes + ocr_boxes
+
+    %% Formula (optional)
+    opt formula_enable
+        Batch->>Model: RapidFormulaModel.batchPredict(crops)
+        Model->>ONNX: acquireGlobalGpu()
+        Model->>GPU: session.run(tensor) [batch]
+        GPU-->>Model: formula logits
+        Model->>ONNX: releaseGlobalGpu()
+        Model->>Model: CTC decode + vocabulary lookup
+        Model-->>Batch: LaTeX strings
+    end
+
+    %% OCR Detection
+    Batch->>Batch: applyMaskBoxesToImage() (masking formula)
+    Batch->>Model: OCR detector.runOcrDetBatch()
+    Model->>ONNX: acquireGlobalGpu()
+    Model->>GPU: session.run(tensor)
+    GPU-->>Model: detection output
+    Model->>ONNX: releaseGlobalGpu()
+    Model-->>Batch: text bounding boxes
+
+    %% Table (optional)
+    opt table_enable
+        Batch->>Model: RapidTableModel.batchPredict(tableImgs)
+        Note over Model: Stage 1: TableCls (wired/wireless)
+        Model->>ONNX: acquireGlobalGpu()
+        Model->>GPU: session.run(cls_tensor)
+        GPU-->>Model: table type
+        Model->>ONNX: releaseGlobalGpu()
+        Note over Model: Stage 2: Structure (UNet / SLANet Plus)
+        Model->>ONNX: acquireGlobalGpu()
+        Model->>GPU: session.run(structure_tensor)
+        GPU-->>Model: table cells + rows
+        Model->>ONNX: releaseGlobalGpu()
+        Note over Model: Stage 3: Content matching + HTML assembly
+        Model-->>Batch: HTML table strings
+    end
+
+    %% OCR Recognition
+    Batch->>Model: OCR recognizer.runOcrRecPostprocess()
+    Model->>ONNX: acquireGlobalGpu()
+    Model->>GPU: session.run(tensor) [batch]
+    GPU-->>Model: recognition logits
+    Model->>ONNX: releaseGlobalGpu()
+    Model->>Model: CTC greedy decode
+    Model-->>Batch: text strings
+
+    Batch-->>Pipeline: imagesLayoutRes (lengkap)
+
+    %% ── Fase 6: Middle JSON ──
+
+    Pipeline->>MidJSON: resultToMiddleJson(results, images, pageDicts)
+    MidJSON->>MidJSON: MagicModel filtering
+    MidJSON->>MidJSON: prepareBlockBboxes + processGroups
+    MidJSON->>MidJSON: xycutPlusSort() (reading order)
+    MidJSON->>MidJSON: fillSpansInBlocks + fixBlockSpans
+    MidJSON->>MidJSON: cutImageAndTable
+    MidJSON-->>Pipeline: Middle JSON (pdf_info)
+
+    %% ── Fase 7: Cross-Page ──
+
+    Pipeline->>Pipeline: paraSplit(pdf_info)
+    Pipeline->>Pipeline: crossPageTableMerge(pdf_info)
+
+    %% ── Fase 8: Output ──
+
+    Pipeline->>Output: unionMake(pdf_info, 'mm_markdown')
+    Output-->>Pipeline: Markdown string
+
+    Pipeline->>Output: unionMake(pdf_info, 'content_list')
+    Output-->>Pipeline: Content List array
+
+    Pipeline-->>UI: on_window_result({markdown, contentList, ...})
+    UI->>UI: markdownToHtml() → render preview
+    UI-->>User: Tampilkan hasil
+
+    %% ── Fase 9: Cleanup (opsional) ──
+
+    User->>UI: Reset / New Task
+    UI->>Pipeline: engineReset()
+    Pipeline->>ModelMgr: ModelSingleton.clear()
+    ModelMgr->>Model: session.release() × N
+    Pipeline->>ModelMgr: AtomModelSingleton.clear()
+    Pipeline->>ONNX: cleanMemory({releaseGpu: true})
+    ONNX->>GPU: device.queue.onSubmittedWorkDone()
+    ONNX->>GPU: device.destroy()
+    ONNX-->>Pipeline: GPU resources released

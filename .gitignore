@@ -1,112 +1,61 @@
-*.tar
-*.tar.gz
-*.zip
-*venv*/
-envs/
-slurm_logs/
-
-sync1.sh
-data_preprocess_pj1
-data-preparation1
-__pycache__
-*.log
-*.pyc
-.vscode
-debug/
-*.ipynb
-.idea
-
-# vscode history
-.history
-
-.DS_Store
-.env
-
-# Agent/IDE config files (internal dev only)
-.kiro/
-.agents/
-.commandcode/
-.opencode/
-
-bad_words/
-bak/
-
-app/tests/*
-temp/
-tmp/
-tmp
-.vscode
-.vscode/
-ocr_demo
-.coveragerc
-/app/common/__init__.py
-/magic_pdf/config/__init__.py
-source.dev.env
-
-magic.json
-
-tmp
-
-projects/web/node_modules
-projects/web/dist
-
-projects/web_demo/web_demo/static/
-cli_debug/
-debug_utils/
-
-# sphinx docs
-_build/
-
-
-output*/
-
-**/rapid_*_self/**/models/*
-
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Model binaries (downloaded at runtime, never committed)
 *.onnx
 *.pth
-rapidocr/
-RapidLaTeXOCR-main/
-
-
-
-dist/
-.vite/
-
-# Generated Python package metadata
-rapid_doc.egg-info/
-
-# Local model binaries (too large for normal git push)
+*.onnx_data
 public/models/
-public/test_docs/
-scripts/
-!scripts/
-scripts/*
-!scripts/check_table_init.mjs
-!scripts/check_table_model_only.mjs
-!scripts/generate_native_baseline.py
-!scripts/parity_audit.mjs
+models/
 
-mineru.net*/
-RapidOrientation-main/
-RapidTable-main/
-
-# Benchmark generated artifacts (large / reproducible from dataset + scripts)
-benchmark/omnidocbench_gt/
-benchmark/sample/
-benchmark/js_results/*
-!benchmark/js_results/.gitkeep
-benchmark/py_results/*
-!benchmark/py_results/.gitkeep
-benchmark/js_accuracy/
-benchmark/py_accuracy/
-benchmark/js_timing/
-benchmark/py_timing/
-benchmark/diffs/
+# Benchmark run artifacts (generated results, not source)
 benchmark/*.xlsx
-benchmark/_*.txt
+benchmark/try/
+benchmark/diffs/
+benchmark/sample/
+benchmark/pilot*/
+benchmark/omnidocbench_gt/
+benchmark/js_results/*
+benchmark/py_results/*
+benchmark/js_accuracy/
+benchmark/js_pilot/
+benchmark/js_timing/
+benchmark/py_accuracy/
+benchmark/py_pilot/
+benchmark/py_timing/
+!benchmark/js_results/.gitkeep
+!benchmark/py_results/.gitkeep
+benchmark/inputs/*
+!benchmark/inputs/.gitkeep
 
-OmniDocBench/
-benchmark/results*
+# Test documents (user-provided, not shipped)
+public/test_docs/
 
-graphify-out/
+# Logs
+*.log
+npm-debug.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+
+# Vercel
+.vercel/
+
+# Agent/IDE local config
+.commandcode/

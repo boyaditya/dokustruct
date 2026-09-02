@@ -1,10 +1,10 @@
-# RapidDoc-JS: Browser-Native Document Intelligence Engine
+# DokuStruct — Document Intelligence in Your Browser
 
-**RapidDoc-JS** is a browser-native document intelligence engine that performs OCR, layout analysis, formula recognition, table recognition, and reading order recovery — entirely in the browser using ONNX Runtime Web. No server, no GPU, no installation required.
+**DokuStruct** is a browser-native document intelligence engine that performs OCR, layout analysis, formula recognition, table recognition, and reading order recovery — entirely client-side using ONNX Runtime Web. No server, no upload, no installation.
 
-This project is a **JavaScript port** of [RapidDoc](https://github.com/RapidAI/RapidDoc), adapted from [MinerU](https://github.com/opendatalab/MinerU). It brings the full document parsing pipeline to the browser via WebAssembly + WebGPU.
+This project is a **JavaScript port** of [RapidDoc](https://github.com/RapidAI/RapidDoc) (itself adapted from [MinerU](https://github.com/opendatalab/MinerU)), bringing the full document parsing pipeline to the browser via WebAssembly + WebGPU.
 
-> 🎓 This repository is the implementation artifact for an undergraduate thesis. See [thesis info](#thesis) below.
+> Privacy-first: your documents never leave the browser. All models run locally via WASM or WebGPU.
 
 ---
 
@@ -18,7 +18,7 @@ This project is a **JavaScript port** of [RapidDoc](https://github.com/RapidAI/R
 - **Seal/Stamp Detection** — Optional seal text detection
 - **Document Orientation** — 90°/270° auto-correction
 - **Export** — Markdown, HTML, DOCX with formatting preserved
-- **Batch Processing** — Multiple documents in sequence
+- **Batch Processing** — Multiple documents in sequence, windowed to avoid OOM
 - **100% Browser-Based** — Models run via ONNX Runtime Web (WASM + WebGPU)
 
 ---
@@ -34,9 +34,8 @@ This project is a **JavaScript port** of [RapidDoc](https://github.com/RapidAI/R
 ## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/your-username/rapiddoc-js.git
-cd rapiddoc-js
+git clone https://github.com/boyaditya/dokustruct.git
+cd dokustruct
 
 # Install dependencies
 npm install
@@ -53,9 +52,27 @@ npm run build
 npm run preview
 ```
 
+### Testing & Linting
+
+```bash
+npm test         # unit + property tests (Vitest)
+npm run lint     # ESLint (rapid_doc/, ui/)
+npm run lint:bbox # custom banker's-rounding rule for bbox code
+```
+
 ---
 
 ## Architecture
+
+```
+PDF/Image → page slicing → layout detection (PP-DocLayout)
+                            → OCR (PP-OCRv5: det + rec)
+                            → formula recognition (PP-FormulaNet Plus)
+                            → table recognition (SLANet-Plus + UNet)
+                            → reading order (XY-cut)
+                            → orientation correction
+                            → content assembly → Markdown/HTML export
+```
 
 ```
 rapid_doc/           ← JS source (browser port)
@@ -73,11 +90,13 @@ ui/                 ← Frontend SPA (vanilla JS, no framework)
 ├── perf/               — Performance utilities
 └── styles/             — Application styles
 
-python/             ← Python reference implementation (upstream porting source)
+python/             ← Python reference implementation (porting canon)
 └── rapid_doc/          — Original Python package (same structure as JS)
+
+benchmark/          ← Comparative evaluation framework (JS vs Python)
 ```
 
-The JS port maintains **behavioral parity** with the Python reference. Each module in `rapid_doc/` has a corresponding `.py` file in `python/rapid_doc/` with the same interface contract.
+The JS port maintains **behavioral parity** with the Python reference. Each module in `rapid_doc/` has a corresponding `.py` file in `python/rapid_doc/` with the same interface contract, documented in per-file `PORTING NOTE` headers.
 
 ---
 
@@ -95,9 +114,9 @@ The JS port maintains **behavioral parity** with the Python reference. Each modu
 
 ## Benchmark
 
-On [OmniDocBench](https://github.com/RapidAI/OmniDocBench) v1.5, RapidDoc-JS achieves comparable results to the Python reference:
+On [OmniDocBench](https://github.com/RapidAI/OmniDocBench) v1.5, DokuStruct achieves comparable results to the Python reference:
 
-| Metric | RapidDoc (Python) | RapidDoc-JS (Browser) |
+| Metric | RapidDoc (Python) | DokuStruct (Browser) |
 |--------|:-:|:-:|
 | Overall ↑ | 87.81 | 87.65 |
 | Text Edit ↓ | 0.065 | 0.068 |
@@ -105,24 +124,19 @@ On [OmniDocBench](https://github.com/RapidAI/OmniDocBench) v1.5, RapidDoc-JS ach
 | Table TEDS ↑ | 80.59 | 80.21 |
 | Read Order Edit ↓ | 0.053 | 0.055 |
 
-*Full benchmark details available in the thesis document.*
+The `benchmark/` directory contains the full comparative evaluation framework: stratified OmniDocBench sampling, timing/accuracy corpora, statistical analysis (geometric mean, bootstrap CI, Wilcoxon signed-rank, Holm-Bonferroni), and per-item content-parity scoring (NED, CER/WER, TEDS, IoU). See [benchmark/README.md](./benchmark/README.md).
 
 ---
 
-## Thesis
+## Research Context
 
-This repository is the implementation artifact for:
-
-> **"Implementasi dan Optimasi Document Intelligence Engine Berbasis Arsitektur Pipeline untuk Document Parsing Skala Besar di Lingkungan Browser"**  
-> *(Implementation and Optimization of a Pipeline-Based Document Intelligence Engine for Large-Scale Document Parsing in Browser Environments)*
->
-> Undergraduate Thesis — [Your University Name], [Year]
+DokuStruct originated as a research port evaluating whether a full Python document parsing pipeline can be brought to the browser with behavioral parity — including numerical parity of bounding-box geometry (banker's rounding), WebGPU/WASM runtime equivalence, and empirical benchmarking against the Python baseline.
 
 ---
 
 ## License
 
-This project is a derivative of [MinerU](https://github.com/opendatalab/MinerU) and [RapidDoc](https://github.com/RapidAI/RapidDoc).  
+This project is a derivative of [MinerU](https://github.com/opendatalab/MinerU) and [RapidDoc](https://github.com/RapidAI/RapidDoc).
 The original YOLO models (AGPL-licensed) have been removed and replaced with PP-StructureV3 series ONNX models.
 
 Licensed under **Apache 2.0** — see [LICENSE](./LICENSE).

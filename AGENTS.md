@@ -1,12 +1,12 @@
-# AGENTS.md — RapidDoc-JS (Porting Overview)
+# AGENTS.md — DokuStruct (RapidDoc-JS Porting Overview)
 
-Proyek ini adalah **port JavaScript** dari [RapidDoc Python](https://github.com/RapidAI/RapidDoc) ke lingkungan browser, sebagai implementasi tugas akhir/skripsi. Rantai sumber: `MinerU (OpenDataLab) → RapidDoc (RapidAI, Python) → RapidDoc-JS (ini, browser)`.
+Proyek ini adalah **port JavaScript** dari [RapidDoc Python](https://github.com/RapidAI/RapidDoc) ke lingkungan browser. Rantai sumber: `MinerU (OpenDataLab) → RapidDoc (RapidAI, Python) → DokuStruct (ini, browser)`.
 
 ---
 
 ## Ringkasan Porting
 
-Seluruh `rapid_doc/` di porting file-per-file dari `python/rapid_doc/`. Kode Python yang menjadi referensi masih disertakan dalam repository sebagai `python/rapid_doc/` — bukan sebagai dependency, melainkan sebagai kanon untuk menjaga paritas perilaku.
+Seluruh `rapid_doc/` di porting file-per-file dari `python/rapid_doc/`. Kode Python yang menjadi referensi masih disertakan dalam repository sebagai `python/rapid_doc/` — bukan sebagai dependency, melainkan sebagai kanon untuk menjaga paritas perilaku. Hanya `python/rapid_doc/` + `python/LICENSE` yang disertakan; sisanya (demo assets, docker, tests, chunker) tidak dibawa dari upstream.
 
 Setiap file `.js` memiliki `PORTING NOTE` di header yang mendokumentasikan asal file `.py` dan keputusan adaptasi yang diambil.
 

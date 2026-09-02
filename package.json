@@ -1,9 +1,9 @@
 {
-  "name": "rapiddoc",
+  "name": "dokustruct",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "RapidDoc — browser-native document intelligence engine",
+  "description": "DokuStruct — browser-native document intelligence engine (RapidDoc JS port)",
   "scripts": {
     "dev": "vite --open false",
     "build": "vite build",

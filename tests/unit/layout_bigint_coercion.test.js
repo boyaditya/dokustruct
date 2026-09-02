@@ -71,7 +71,7 @@ function simulateFormatOutputLoop(boxNumsData) {
 
 // ─── Unit tests: tensorToNumber / tensorDataToFloat64 ────────────────────────
 
-describe('FIX L1 — coerce BigInt helper functions', () => {
+describe('coerce BigInt helper functions', () => {
   it('tensorToNumber converts BigInt to Number safely', () => {
     expect(tensorToNumber(5n)).toBe(5);
     expect(tensorToNumber(0n)).toBe(0);
@@ -108,7 +108,7 @@ describe('FIX L1 — coerce BigInt helper functions', () => {
 
 // ─── Smoke: OrtInferSession.run coercion path ───────────────────────
 
-describe('FIX L1 — OrtInferSession.run coerces int64 outputs to Float64', () => {
+describe('OrtInferSession.run coerces int64 outputs to Float64', () => {
   it('int64 tensor (BigInt64Array data) is coerced to Float64Array', () => {
     const tensor = {
       data: new BigInt64Array([2n, 5n]),
@@ -168,7 +168,7 @@ describe('FIX L1 — OrtInferSession.run coerces int64 outputs to Float64', () =
 
 // ─── Smoke: _formatOutput boxNumsData BigInt handling ───────────────
 
-describe('FIX L1 — _formatOutput boxNumsData BigInt coercion', () => {
+describe('_formatOutput boxNumsData BigInt coercion', () => {
   it('does not throw when boxNumsData is a BigInt64Array (simulated pre-coercion input)', () => {
     // Simulate boxNumsData as BigInt64Array — as it would arrive from an
     // int64 ONNX output BEFORE the OrtInferSession coercion fix.
@@ -249,7 +249,7 @@ describe('FIX L1 — _formatOutput boxNumsData BigInt coercion', () => {
  * Returns an array of per-box mask slices (each of length H*W).
  */
 function simulateMaskByteOffsetSlicing(allMasksData, boxNumsData, maskH, maskW) {
-  const maskStride = maskH * maskW; // FIX L2: byte-offset, not box-count
+  const maskStride = maskH * maskW; // mask uses byte-offsets, not box-count
   const results = [];
   let boxIdxStart = 0;
 
@@ -259,7 +259,7 @@ function simulateMaskByteOffsetSlicing(allMasksData, boxNumsData, maskH, maskW) 
 
     const npMasks = [];
     for (let i = 0; i < np_boxes_num; i++) {
-      const maskOffset = (boxIdxStart + i) * maskStride; // FIX L2: byte-offset
+      const maskOffset = (boxIdxStart + i) * maskStride; // byte-offset
       npMasks.push(allMasksData.slice(maskOffset, maskOffset + maskStride));
     }
     results.push({ masks: npMasks, boxIdxStart, boxIdxEnd });
@@ -268,7 +268,7 @@ function simulateMaskByteOffsetSlicing(allMasksData, boxNumsData, maskH, maskW) 
   return results;
 }
 
-describe('FIX L2 — _formatOutput mask byte-offset slicing', () => {
+describe('_formatOutput mask byte-offset slicing', () => {
   it('each per-box mask slice has exactly H*W elements', () => {
     const maskH = 4, maskW = 4; // 4x4 masks
     const numBoxes = 3;

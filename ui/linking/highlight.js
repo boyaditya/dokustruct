@@ -2,8 +2,8 @@
  * ui/linking/highlight.js
  *
  * setLinkedHighlight / clearLinkedHighlight extracted from ui/app.js.
- * Routes through rafCoalescer () and short-circuits on
- * identity match ( / B-LINK-1 fix).
+ * Routes paint work through rafCoalescer and short-circuits when
+ * the new highlight target is identical to the current one.
  */
 
 import { ctx } from './context.js';

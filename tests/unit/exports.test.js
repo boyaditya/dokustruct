@@ -15,7 +15,7 @@ const RAPID_DOC_DIR = path.join(ROOT, 'rapid_doc');
  *
  *
  */
-describe('Property 1: Public API Export Integrity', () => {
+describe('Public API Export Integrity', () => {
   it('all named exports from rapid_doc/index.js resolve to defined values', async () => {
     let indexModule;
     try {
@@ -105,7 +105,7 @@ describe('Property 1: Public API Export Integrity', () => {
  *
  * , 10.3
  */
-describe('Property 2: Barrel File Purity', () => {
+describe('Barrel File Purity', () => {
   /**
    * Collect all index.js files in rapid_doc/ tree.
    */

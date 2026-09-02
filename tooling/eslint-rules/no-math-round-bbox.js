@@ -171,8 +171,7 @@ export const noMathRoundBbox = {
       noMathRoundBbox:
         'Use intTrunc() from rapid_doc/utils/math_utils.js instead of Math.round() ' +
         'for bounding-box coordinate arithmetic. ' +
-        'Math.round() rounds half-up; Python int() truncates toward zero. ' +
-        '[Audit: L9, R5, R7, R8, R9, T10]',
+        'Math.round() rounds half-up; Python int() truncates toward zero.',
     },
   },
 

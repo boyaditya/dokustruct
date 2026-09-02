@@ -126,7 +126,8 @@ async function getExportUtils() {
 }
 
 // ===== HISTORY STORAGE =====
-const LEGACY_STORAGE_PREFIX = ['rapid', 'doc'].join('');
+// Legacy prefix from the pre-rename app ('rapiddoc'); kept for migration reads.
+const LEGACY_STORAGE_PREFIX = 'rapiddoc';
 const OLD_HISTORY_KEY = `${LEGACY_STORAGE_PREFIX}_history`;
 const HISTORY_KEY = 'dokustruct_history';
 const OLD_HISTORY_ASSET_DB = `${LEGACY_STORAGE_PREFIX}_history_assets`;
@@ -5448,7 +5449,7 @@ function showRecoverableError(err, { runId = '', retryFn = null } = {}) {
     showLoading(`Error: ${message}`, 4000);
   }
 
-  // Restore startBtn within 500ms per
+  // Restore startBtn state shortly after the run settles
   setTimeout(() => {
     if (el.startBtn && !appState.get('isProcessing')) {
       el.startBtn.disabled = !canRunExtraction();

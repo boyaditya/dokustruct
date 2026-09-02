@@ -82,7 +82,7 @@ function makeImage(h, w) {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('FIX L8 — LetterBox center=false: all padding on bottom/right', () => {
+describe('LetterBox center=false: all padding on bottom/right', () => {
   it('center=false: top=0, left=0, full dh goes to bottom, full dw goes to right', () => {
     // 100x60 image → target 640x640
     // scale = min(640/100, 640/60) = min(6.4, ~10.67) = 6.4
@@ -177,7 +177,7 @@ describe('FIX L8 — LetterBox center=false: all padding on bottom/right', () =>
   });
 });
 
-describe('FIX L8 — LetterBox center=true: symmetric padding preserved', () => {
+describe('LetterBox center=true: symmetric padding preserved', () => {
   it('center=true (default): padding split between top/bottom and left/right', () => {
     // 300x200 image → target 640x640 → dw=213, dh=0
     // center=true: left=round(213/2 - 0.1)=round(106.4)=106, right=round(106.5+0.1)=107
@@ -205,7 +205,7 @@ describe('FIX L8 — LetterBox center=true: symmetric padding preserved', () => 
   });
 });
 
-describe('FIX L8 — LetterBox padding total invariant', () => {
+describe('LetterBox padding total invariant', () => {
   it('total padding (left+right) equals dw regardless of center flag', () => {
     // This invariant must hold for both center=true and center=false.
     // 400x250 → target 640x640

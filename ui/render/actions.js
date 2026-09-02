@@ -5,8 +5,7 @@
  * copy-action button. Also exports the block-classification helpers used by
  * the linker (isMediaOutputBlock, isStandaloneDisplayFormulaBlock,
  * hoistDisplayFormulaPlaceholders, extractBlockLinkText, blockHasFormula).
- *
- * Requirements: 4.6, 7.2
+
  */
 
 /**

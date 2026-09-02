@@ -3,10 +3,8 @@
  *
  * Draws SVG connector lines between merged layout-overlay boxes that span
  * multiple pages or positions. Uses a single global SVG layer prepended to
- * el.pageStack ( — reads before writes, DocumentFragment-style
- * batching via a single innerHTML clear + grouped appends).
- *
- * Requirements: 3.4, 7.2
+ * el.pageStack. Batched via a single innerHTML clear followed by grouped
+ * appends, so reads never interleave with writes.
  */
 
 import { createRafCoalescer } from '../perf/rafCoalescer.js';

@@ -2,7 +2,7 @@
  * ui/linking/events.js
  *
  * Extracted from ui/app.js. Includes keyboard parity (focusin/focusout)
- * per
+ * so pinned highlights behave identically for mouse and keyboard users.
  */
 
 import { ctx } from './context.js';

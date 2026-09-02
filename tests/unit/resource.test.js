@@ -42,7 +42,7 @@ afterEach(() => {
   delete globalThis.cv;
 });
 
-describe('Property 3: Resource Cleanup Invariant — withMats pattern', () => {
+describe('Resource Cleanup Invariant — withMats pattern', () => {
   it('cleans up all Mats on successful operation', async () => {
     const mat1 = createMockMat();
     const mat2 = createMockMat();
@@ -156,7 +156,7 @@ describe('Property 3: Resource Cleanup Invariant — withMats pattern', () => {
   });
 });
 
-describe('Property 3: Resource Cleanup Invariant — deleteMat null-safety', () => {
+describe('Resource Cleanup Invariant — deleteMat null-safety', () => {
   it('does not throw for null input', () => {
     expect(() => deleteMat(null)).not.toThrow();
   });
@@ -199,7 +199,7 @@ describe('Property 3: Resource Cleanup Invariant — deleteMat null-safety', () 
   });
 });
 
-describe('Property 3: Resource Cleanup Invariant — deleteMatList null-safety', () => {
+describe('Resource Cleanup Invariant — deleteMatList null-safety', () => {
   it('does not throw for null input', () => {
     expect(() => deleteMatList(null)).not.toThrow();
   });

@@ -5,7 +5,7 @@
  * recognition), the pipeline continues processing other pages/elements. Also verifies
  * that AbortException IS propagated (not caught).
  *
- * , 9.5
+ * Validates pipeline stage orchestration.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AbortException } from '@rapid_doc/utils/exceptions.js';

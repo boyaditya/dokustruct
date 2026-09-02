@@ -2,15 +2,13 @@
  * Regression test for _normalize workaround removal.
  *
  * The `_normalize` method in `UniMERNetDecode` was a workaround that masked
- * the root-cause bug (F1 BGR/RGB swap in pre_process.js). Now that F1 is fixed,
- * `_normalize` was removed as dead code.
+ * the root-cause bug (a BGR/RGB channel swap in pre_process.js). Now that the
+ * swap is fixed, `_normalize` was removed as dead code.
  *
  * These tests assert that:
  *   1. `_normalize` is NOT a method on `UniMERNetDecode` instances.
  *   2. `_normalize` is NOT exported from the post_process module.
  *   3. `tokenToStr` still works correctly without the workaround.
- *
- *
  */
 
 import { describe, it, expect } from 'vitest';
@@ -36,7 +34,7 @@ const MINIMAL_TOKENIZER_JSON = JSON.stringify({
 
 // ─── the fix regression: _normalize must not exist ────────────────────────────
 
-describe('FIX F5 — _normalize workaround removed from UniMERNetDecode', () => {
+describe('UniMERNetDecode: _normalize workaround removed', () => {
   it('UniMERNetDecode instance does NOT have a _normalize method', () => {
     const decoder = new UniMERNetDecode(MINIMAL_TOKENIZER_JSON);
     expect(typeof decoder._normalize).toBe('undefined');
@@ -60,7 +58,7 @@ describe('FIX F5 — _normalize workaround removed from UniMERNetDecode', () => 
 
 // ─── Sanity: tokenToStr still works correctly after workaround removal ────────
 
-describe('FIX F5 — tokenToStr still functions without _normalize', () => {
+describe('UniMERNetDecode: tokenToStr still functions without _normalize', () => {
   it('decodes known token IDs to the expected string', () => {
     const decoder = new UniMERNetDecode(MINIMAL_TOKENIZER_JSON);
     // token IDs: x(3) + (4) =(5) → "x+=" (no special tokens)

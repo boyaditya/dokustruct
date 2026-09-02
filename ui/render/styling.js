@@ -4,8 +4,6 @@
  * Applies CSS classes and data attributes to rendered markdown elements based on
  * the layout model's original_label values. Off-viewport blocks are deferred via
  * scheduleIdleWork. Reads before writes.
- *
- * Requirements: 3.6, 7.2
  */
 
 import { scheduleIdleWork } from '../perf/idleScheduler.js';

@@ -1,12 +1,12 @@
 /**
- * Property-based tests for parity-remediation shared utilities.
+ * Property-based tests for Python-parity invariants.
  *
- * Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arithmetic
- * Feature: parity-remediation, Property 4: Threshold Table Singularity
- * Feature: parity-remediation, Property 13: SHA-256 Verification Enforced
- * Feature: parity-remediation, Property 14: Math.round-vs-int Substitution
+ * Property: BigInt-Safety in Tensor Arithmetic
+ * Property: Threshold Table Singularity
+ * Property: SHA-256 Verification Enforced
+ * Property: Math.round-vs-int Substitution
  *
- * , 1.2, 1.3, 1.4, 9.1, 9.2
+ * Validates numeric-parity invariants.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fc from 'fast-check';
@@ -37,10 +37,9 @@ import {
 
 // ─── Property 1: BigInt-Safety in Tensor Arithmetic ──────────────────────────
 
-describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arithmetic', () => {
+describe('Property: BigInt-Safety in Tensor Arithmetic', () => {
   /**
-   * ****
-   *
+     *
    * tensorToNumber(BigInt) should return a plain Number, never throw TypeError.
    */
   it('tensorToNumber(BigInt) returns a Number without throwing', () => {
@@ -63,8 +62,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * ****
-   *
+     *
    * tensorToNumber(Number) should pass through as-is.
    */
   it('tensorToNumber(Number) passes through unchanged', () => {
@@ -82,8 +80,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * ****
-   *
+     *
    * tensorToNumber result is safe for use in arithmetic with Number — no TypeError.
    */
   it('tensorToNumber result can be mixed with Number in arithmetic without TypeError', () => {
@@ -108,8 +105,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * ****
-   *
+     *
    * tensorDataToFloat64 converts BigInt64Array to Float64Array without TypeError.
    */
   it('tensorDataToFloat64 converts BigInt64Array to Float64Array without throwing', () => {
@@ -140,8 +136,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * ****
-   *
+     *
    * tensorDataToFloat64 handles Float32Array without losing type safety.
    */
   it('tensorDataToFloat64 converts Float32Array to Float64Array without throwing', () => {
@@ -167,8 +162,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
   });
 
   /**
-   * ****
-   *
+     *
    * tensorToNumber handles null/undefined safely (returns 0).
    */
   it('tensorToNumber handles null and undefined without throwing', () => {
@@ -181,7 +175,7 @@ describe('Feature: parity-remediation, Property 1: BigInt-Safety in Tensor Arith
 
 // ─── Property 4: Threshold Table Singularity ─────────────────────────────────
 
-describe('Feature: parity-remediation, Property 4: Threshold Table Singularity', () => {
+describe('Property: Threshold Table Singularity', () => {
   /**
    * **, 2.7, 2.8, 9.1**
    *
@@ -205,8 +199,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   /**
-   * ****
-   *
+     *
    * All keys in both threshold tables must have exactly one entry — no duplicates.
    * Object.freeze + Object literal literal syntax prevents JS from accepting
    * duplicate keys at parse time (strict mode); this test verifies the count.
@@ -224,8 +217,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   /**
-   * ****
-   *
+     *
    * Threshold tables are frozen — no mutation possible at runtime.
    */
   it('PP_DOCLAYOUTV2_Threshold is immutable (Object.freeze)', () => {
@@ -237,8 +229,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
   });
 
   /**
-   * ****
-   *
+     *
    * All threshold values in PP_DOCLAYOUTV2_Threshold must be valid probabilities
    * in (0, 1] — no zero thresholds, no values outside valid range.
    */
@@ -299,7 +290,7 @@ describe('Feature: parity-remediation, Property 4: Threshold Table Singularity',
 
 // ─── Property 13: SHA-256 Verification Enforced ──────────────────────────────
 
-describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforced', () => {
+describe('Property: SHA-256 Verification Enforced', () => {
   // For Property 13, we test the SHA-256 logic in DownloadFile.run by mocking
   // the fetch / cache infrastructure and directly exercising the verification branch.
   // The crypto.subtle API is available in the vitest node environment via globalThis.
@@ -407,8 +398,7 @@ describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforce
   });
 
   /**
-   * ****
-   *
+     *
    * DownloadFile.run with sha256=null must NOT throw — it should accept the
    * bytes and (in non-production) emit a console.warn.
    *
@@ -477,7 +467,7 @@ describe('Feature: parity-remediation, Property 13: SHA-256 Verification Enforce
 
 // ─── Property 14: Math.round-vs-int Substitution ─────────────────────────────
 
-describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substitution', () => {
+describe('Property: Math.round-vs-int Substitution', () => {
   /**
    * **, 9.2**
    *
@@ -584,8 +574,7 @@ describe('Feature: parity-remediation, Property 14: Math.round-vs-int Substituti
   });
 
   /**
-   * ****
-   *
+     *
    * intTrunc handles non-finite inputs safely, returning 0.
    */
   it('intTrunc returns 0 for NaN, Infinity, and -Infinity', () => {

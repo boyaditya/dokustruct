@@ -4,7 +4,7 @@
  * Property: Bounding Box Normalization Precision
  * Property: Geometry Function Type Correctness
  *
- * , 8.3
+ * Validates geometry helper behavior.
  */
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';

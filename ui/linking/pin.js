@@ -2,7 +2,7 @@
  * ui/linking/pin.js
  *
  * Extracted from ui/app.js. Single pinReleaseListener slot with
- * local-closure capture (Porting fix: bis) and group-aware outside-click .
+ * local-closure capture and group-aware outside-click dismissal.
  */
 
 import { ctx } from './context.js';

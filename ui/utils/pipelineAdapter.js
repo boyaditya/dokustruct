@@ -4,11 +4,12 @@
  *
  * Responsibilities:
  *  1. Build pipeline config from AppState
- *  3. Drive AppState stages/progress/timings during execution
- *  5. Forward results to AppState on completion
+ *  2. Drive AppState stages/progress/timings during execution
+ *  3. Forward results to AppState on completion
+ *  4. Manage asset downloads and abort/cancel signals
  *
- * The actual inference is delegated to the browser engine entry point (demo.js /
- * rapid_doc/index.js). This adapter translates between the UI contract and the
+ * The actual inference is delegated to the browser engine entry point
+ * (rapid_doc/index.js). This adapter translates between the UI contract and the
  * engine API without embedding inference logic.
  */
 
@@ -371,17 +372,10 @@ let _engineModule = null;
 async function getEngine() {
   if (_engineModule) return _engineModule;
   try {
-    // Primary: use the ported rapid_doc JS entry
     _engineModule = await import('../../rapid_doc/index.js');
   } catch (e) {
-    console.warn('[pipelineAdapter] rapid_doc/index.js failed to load:', e);
-    try {
-      // Fallback: use demo.js top-level export
-      _engineModule = await import('../../demo.js');
-    } catch (e2) {
-      console.error('[pipelineAdapter] Both engine entry points failed:', e2);
-      _engineModule = null;
-    }
+    console.error('[pipelineAdapter] rapid_doc/index.js failed to load:', e);
+    _engineModule = null;
   }
   return _engineModule;
 }
@@ -760,7 +754,6 @@ export class PipelineAdapter {
 
   /**
    * Execute the full pipeline for all queued files, driven by appState.
-   * Handles research-mode repetition automatically.
    *
    * @param {import('../state/appState.js').AppState} [state] — defaults to singleton
    */

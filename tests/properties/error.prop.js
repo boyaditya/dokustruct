@@ -5,7 +5,7 @@
  * Property: AbortException Propagation
  * Property: Error Message Format Consistency
  *
- * , 8.5, 8.6, 9.6, 9.1
+ * Validates null/undefined/empty input handling.
  */
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';

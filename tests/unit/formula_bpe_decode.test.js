@@ -241,7 +241,7 @@ describe('UniMERNetDecode.tokenToStr() — byte-level BPE tokens', () => {
     expect(decoder.tokenToStr([20, 21])).toBe('\u03b1');
   });
 
-  it('still filters special tokens correctly after F4 patch', () => {
+  it('still filters special tokens correctly after the special-token filter patch', () => {
     const { json, alphaId } = buildTokenizerWithByteEncodedTokens();
     const decoder = new UniMERNetDecode(json);
     const result = decoder.tokenToStr([0, alphaId, 2]); // SOS, alpha, EOS

@@ -2186,13 +2186,6 @@ export class PipelineAdapter {
     }
   }
 
-  _clearModelCache(modelId) {
-    const engine = window.__rapidDocEngine;
-    if (engine && typeof engine.clearModelCache === 'function') {
-      engine.clearModelCache(modelId);
-    }
-  }
-
   async _evictStaleModelCache(engine, config) {
     const key = JSON.stringify({
       language: config.language,

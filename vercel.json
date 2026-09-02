@@ -20,7 +20,7 @@
   ],
   "rewrites": [
     {
-      "source":"/((?!models/|ort/|opencv/|vendor/|favicon\\.).*)",
+      "source":"/((?!models/|ort/|opencv/|favicon\\.).*)",
       "destination": "/index.html"
     }
   ]

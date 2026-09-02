@@ -106,7 +106,7 @@ export async function markdownToHtml(markdownContent, {
       options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code'] }
     };
   </script>
-  <script src="/vendor/mathjax/tex-mml-chtml.js" async></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js" async></script>
 </head>
 <body>
 ${htmlBody}

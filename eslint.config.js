@@ -7,7 +7,7 @@
  * Run:
  *   npx eslint rapid_doc/ — lint all source files
  *   npm run lint — same via package.json script
- *   npm run lint:bbox — targeted bbox-coordinate check only
+ *   (bbox rule is active in the main lint pass)
  */
 
 import rapiddocPlugin from './tooling/eslint-rules/index.js';
@@ -20,11 +20,7 @@ export default [
     ignores: [
       'node_modules/**',
       'dist/**',
-      'output/**',
       '__pycache__/**',
-      '.venv/**',
-      'public/models/**',
-      'rapid_doc/vendor/**',
       // math_utils.js defines bankerRound which internally calls Math.round — that's intentional
       'rapid_doc/utils/math_utils.js',
     ],
@@ -34,7 +30,7 @@ export default [
   // Source files — apply parity rules
   // ---------------------------------------------------------------------------
   {
-    files: ['rapid_doc/**/*.js', 'ui/**/*.js', 'scripts/**/*.js'],
+    files: ['rapid_doc/**/*.js', 'ui/**/*.js', 'tooling/**/*.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',

@@ -56,8 +56,7 @@ npm run preview
 
 ```bash
 npm test         # unit + property tests (Vitest)
-npm run lint     # ESLint (rapid_doc/, ui/)
-npm run lint:bbox # custom banker's-rounding rule for bbox code
+npm run lint     # ESLint (rapid_doc/, ui/) incl. bbox rounding rule
 ```
 
 ---

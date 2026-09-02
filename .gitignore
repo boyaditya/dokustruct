@@ -8,7 +8,6 @@ build/
 # Environment
 .env
 .env.*
-!.env.example
 
 # Model binaries (downloaded at runtime, never committed)
 *.onnx
@@ -37,8 +36,6 @@ benchmark/py_timing/
 benchmark/inputs/*
 !benchmark/inputs/.gitkeep
 
-# Test documents (user-provided, not shipped)
-public/test_docs/
 
 # Logs
 *.log

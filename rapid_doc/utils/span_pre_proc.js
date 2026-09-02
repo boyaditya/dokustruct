@@ -860,15 +860,15 @@ export function pdfTxtBboxToTableOcrBbox(bbox, usefulList, scale) {
  */
 export function calculateContrastMat(mat) {
   if (!mat) return 0;
-  // eslint-disable-next-line no-undef
+   
   const gray = new cv.Mat();
-  // eslint-disable-next-line no-undef
+   
   cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
-  // eslint-disable-next-line no-undef
+   
   const meanMat = new cv.Mat();
-  // eslint-disable-next-line no-undef
+   
   const stdMat = new cv.Mat();
-  // eslint-disable-next-line no-undef
+   
   cv.meanStdDev(gray, meanMat, stdMat);
   const mean = meanMat.data64F[0];
   const std = stdMat.data64F[0];

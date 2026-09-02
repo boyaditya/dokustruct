@@ -23,7 +23,6 @@ import { getLogger } from '../../model/layout/rapid_layout_self/utils/logger.js'
 import { checkImg, preprocessImage, sortedBoxes, mergeDetBoxes, updateDetBoxes, getRotateCropImage, sortPolyBoxes, cropByPolys } from '../../utils/ocr_utils.js';
 import { configureOrtWasmRuntime } from '../../utils/ort_runtime.js';
 import { deleteMat, deleteMatList } from '../../utils/resource_utils.js';
-import { AbortException } from '../../utils/exceptions.js';
 import { throwIfAborted } from '../../utils/abort_registry.js';
 import { REC_BATCH_NUM, yieldToBrowser } from '../../utils/browser_utils.js';
 
@@ -33,12 +32,10 @@ import { TextDetector } from './ocr_text_detector.js';
 import { TextRecognizer } from './ocr_text_recognizer.js';
 import { calRecBoxes } from './ocr_word_boxes.js';
 import {
-  DEFAULT_DET_MODEL_URL,
   DEFAULT_REC_MODEL_URL_CH,
   DEFAULT_REC_MODEL_URL_EN,
   REMOTE_REC_MODEL_URL_EN_CANDIDATES,
   DEFAULT_SEAL_DET_MODEL_URL,
-  DEFAULT_SEAL_DET_MODEL_SHA256,
   fetchArrayBufferCached,
   fetchTextCached,
   resolveDetUrl,
@@ -79,7 +76,7 @@ export class RapidOcrModel {
     inst.recBatchNum = params.recBatchNum ?? cfg['Rec.rec_batch_num'] ?? cfg.rec_batch_num ?? REC_BATCH_NUM;
 
     const epList = resolveExecutionProviders(params, cfg);
-    const useWebGpu = epList.includes('webgpu');
+    const _useWebGpu = epList.includes('webgpu');
 
     const sessOpts = buildSessionOptions(epList, useWebGpu);
     await configureOrtWasmRuntime({ numThreads: cfg.numThreads ?? 4, useWebGpu });
@@ -239,7 +236,7 @@ export class RapidOcrModel {
    * @param {object} [opts]
    * @returns {Promise<Array|null>}
    */
-  async ocr(img, opts = {}) {
+  async ocr(img, _opts = {}) {
     // Porting fix: seal branch — route to _ocrSeal when is_seal=true
     if (opts.is_seal === true) {
       const matImg = img instanceof cv.Mat ? img : checkImg(img);
@@ -257,7 +254,7 @@ export class RapidOcrModel {
       }
     }
 
-    const { det = true, rec = true, mfdRes = null, returnWordBox = false } = opts;
+    const { det = true, rec = true, mfdRes = null, _returnWordBox = false } = opts;
 
     if (Array.isArray(img)) {
       if (!det && rec) return this._runRecOnly(img, opts);

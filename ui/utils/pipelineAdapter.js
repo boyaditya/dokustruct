@@ -15,7 +15,6 @@
 
 import { appState } from '../state/appState.js';
 import {
-  clearAsset,
   downloadAssetGroup,
   getAssetsStatus,
 } from '../../rapid_doc/utils/download_file.js';
@@ -1315,7 +1314,7 @@ export class PipelineAdapter {
             `pages ${chunkStart}-${chunkEnd} (${chunkPages} pages)`
           );
 
-          const chunkOnProgress = (stage, current, total, percent) => {
+          const chunkOnProgress = (stage, current, _total, _percent) => {
             // Stage events only flow from 1-page chunks (singlePageDocument).
             // Map them to an end-of-chunk page count so the overall bar stays
             // monotonic instead of resetting to small stage percents.

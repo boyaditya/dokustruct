@@ -6,7 +6,7 @@ import { labelConnectedComponents, getAllRegionBboxes } from "./utils.js";
 /**
  * Distance between two points.
  */
-function dist(p1, p2) {
+function _dist(p1, p2) {
   return Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2);
 }
 
@@ -32,10 +32,10 @@ function pointLineCor(p, A, B, C) {
 /**
  * Extract horizontal or vertical table lines using connected components.
  */
-export function getTableLine(binImg, width, height, axis = 0, lineMinSize = 10) {
-  const { labels, numComponents } = labelConnectedComponents(binImg, width, height, 8);
+export function getTableLine(binImg, width, _height, axis = 0, lineMinSize = 10) {
+  const { labels, numComponents } = labelConnectedComponents(binImg, width, _height, 8);
   if (numComponents === 0) return [];
-  const bboxes = getAllRegionBboxes(labels, numComponents, width, height);
+  const bboxes = getAllRegionBboxes(labels, numComponents, width, _height);
   const lines = [];
 
   for (let l = 1; l <= numComponents; l++) {
@@ -43,15 +43,15 @@ export function getTableLine(binImg, width, height, axis = 0, lineMinSize = 10) 
     if (!bbox) continue;
     // axis 1: vertical (height > lineMinSize), axis 0: horizontal (width > lineMinSize)
     if (axis === 1) {
-      if (bbox[3] - bbox[1] > lineMinSize) lines.push(minAreaRectLine(labels, l, width, height));
+      if (bbox[3] - bbox[1] > lineMinSize) lines.push(minAreaRectLine(labels, l, width, _height));
     } else {
-      if (bbox[2] - bbox[0] > lineMinSize) lines.push(minAreaRectLine(labels, l, width, height));
+      if (bbox[2] - bbox[0] > lineMinSize) lines.push(minAreaRectLine(labels, l, width, _height));
     }
   }
   return lines.filter(x => x !== null);
 }
 
-function minAreaRectLine(labels, targetLabel, width, height) {
+function minAreaRectLine(labels, targetLabel, width, _height) {
   const coords = [];
   for (let i = 0; i < labels.length; i++) {
     if (labels[i] === targetLabel) coords.push(i % width, (i / width) | 0);

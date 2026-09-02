@@ -3,7 +3,7 @@
 // Stub — original uses PyTorch directly; ONNX-based implementation possible but complex.
 // PORTING NOTE: UniTable post-processing decodes token IDs to HTML using HTML_BBOX_HTML_TOKENS + BBOX_TOKENS.
 
-import { HTML_BBOX_HTML_TOKENS, BBOX_TOKENS, EOS_TOKEN, MAX_SEQ_LEN } from "./consts.js";
+import { HTML_BBOX_HTML_TOKENS, BBOX_TOKENS, EOS_TOKEN } from "./consts.js";
 
 /**
  * Build vocabulary mapping from UniTable token lists.

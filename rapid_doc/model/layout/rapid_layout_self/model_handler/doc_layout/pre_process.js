@@ -8,7 +8,6 @@
  * The letterbox result Mat is deleted inside call (try/finally).
  */
 
-/* global cv */
 import { LetterBox } from './utils.js';
 
 export class DocLayoutPreProcess {

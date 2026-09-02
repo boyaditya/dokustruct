@@ -148,7 +148,7 @@ export class LoadImage {
    */
   convertImg(mat) {
     const channels = mat.channels();
-    const type = mat.type();
+    const _type = mat.type();
 
     // Grayscale (1 channel CV_8UC1 / CV_16UC1 etc.)
     if (channels === 1) {

@@ -775,7 +775,6 @@ let overlayVisible = true;
 let activeDrawerId = null;
 let lastDrawerTrigger = null;
 let exportCloseTimer = null;
-let overlayRenderFrame = null;
 let overlayResizeObserver = null;
 let workspaceMode = 'setup';
 let pendingHistoryDeleteId = null;
@@ -2375,15 +2374,6 @@ function renderSetupFileCards() {
   refreshIcons();
 }
 
-async function selectFile(index) {
-  currentFileIndex = index;
-  const file = selectedFiles[index];
-  if (file) {
-    await loadFile(file, { replaceQueue: false });
-    if (workspaceMode === 'setup') openSetupPreviewDialog();
-  }
-}
-
 function formatFileSize(bytes) {
   if (!Number.isFinite(Number(bytes))) return '-';
   bytes = Number(bytes);
@@ -3516,10 +3506,6 @@ function attachBlockActions() {
   return _attachBlockActions();
 }
 
-function isMediaOutputBlock(block) {
-  return _isMediaOutputBlock(block);
-}
-
 /**
  * Lift each display-math placeholder out of any inline wrapper so it renders as a
  * true block-level element. The original wrapper stays in place (now possibly empty
@@ -3530,10 +3516,6 @@ function hoistDisplayFormulaPlaceholders(root) {
 }
 
 // Returns true when the block's primary visible content is a single display formula.
-function isStandaloneDisplayFormulaBlock(block) {
-  return _isStandaloneDisplayFormulaBlock(block);
-}
-
 function linkMarkdownBlocks(_pageCount = 1, _contentList = null) {
   if (!el.markdownContent) return;
   // ── Cleanup previous dividers and linking data ──
@@ -3726,114 +3708,12 @@ function createMarkdownPageDivider(pageIndex) {
 }
 
 /**
- * Derive a markdown shell's label group from data-original-label and tag/descendant heuristics.
- * Returns null when unknown so the scorer only gates when both sides have a confident label.
- */
-function getMarkdownBlockLabelGroup(block) {
-  if (!block) return null;
-  const ol = block.getAttribute?.('data-original-label');
-  if (ol) return labelGroupKey(ol, block.getAttribute('data-block-type'));
-  const tag = String(block.tagName || '').toLowerCase();
-  // When table model is off, <table> elements in markdown may correspond to image-type
-  // candidates (the pipeline treated the table region as an image). Return null so the
-  // cross-category gate does not block the match — text scoring decides instead.
-  if (tag === 'table') return null;
-  if (tag === 'figure') return 'media_image';
-  if (block.querySelector?.('img, picture')) return 'media_image';
-  if (block.classList?.contains?.('katex-display-placeholder')) return 'equation';
-  return null;
-}
-
-/**
  * Extract link-comparison text from a rendered markdown block.
  * Substitutes KaTeX placeholders with their original LaTeX source so the scorer
  * can match middle-json paragraphs that carry bare LaTeX.
  */
 function extractBlockLinkText(block) {
   return _extractBlockLinkText(block);
-}
-
-function blockHasFormula(block) {
-  return _blockHasFormula(block);
-}
-
-function scoreMarkdownLink(blockInfo, candidate, distance = 0) {
-  const type = String(candidate?.type || candidate?.label || '').toLowerCase();
-  const label = String(candidate?.originalLabel || candidate?.label || '').toLowerCase();
-  const source = String(candidate?.source || '').toLowerCase();
-  const candidateText = normalizeLayoutText(candidate?.text);
-  let score = 0;
-
-  const candidateLabelGroup = labelGroupKey(candidate?.originalLabel, candidate?.type);
-  const blockLabelGroup = blockInfo.blockLabelGroup;
-  if (blockLabelGroup && candidateLabelGroup && blockLabelGroup !== candidateLabelGroup) {
-    const bothPlainText = blockLabelGroup === 'text' && candidateLabelGroup === 'text';
-    // Porting fix: when table model is off, tables are rendered as images in the pipeline.
-    // Treat media_image and media_table as the same group so a <table> block can match an
-    // image-type candidate (and vice versa) without being blocked by the cross-category gate.
-    const bothMedia = (blockLabelGroup === 'media_image' || blockLabelGroup === 'media_table')
-                   && (candidateLabelGroup === 'media_image' || candidateLabelGroup === 'media_table');
-    // CRITICAL: when formula model is OFF, display-formula shells render as images
-    // (LaTeX → katex-display-placeholder → SVG/img inside). The shell's blockLabelGroup
-    // may be 'equation' but the candidate in the overlay is 'media_image' (image-type).
-    const equationToImage = (blockLabelGroup === 'equation' && candidateLabelGroup === 'media_image')
-                         || (blockLabelGroup === 'media_image' && candidateLabelGroup === 'equation');
-    // When formula model is OFF, inline formulas render inside text — the pipeline
-    // may classify them as 'text' or 'formula'. Allow cross-matching text↔equation.
-    const equationToText = (blockLabelGroup === 'equation' && candidateLabelGroup === 'text')
-                        || (blockLabelGroup === 'text' && candidateLabelGroup === 'equation');
-    if (!bothPlainText && !bothMedia && !equationToImage && !equationToText) return 0;
-  }
-
-  if ((blockInfo.hasImage || blockInfo.isMedia) && /image|figure|chart|picture/.test(`${type} ${label} ${source}`)) {
-    score = Math.max(score, 66);
-  }
-  if (blockInfo.tagName === 'table' && /table/.test(type)) score = Math.max(score, 62);
-  if (blockInfo.hasImage && !candidateText && /image|figure|chart|picture/.test(`${type} ${label}`)) {
-    score = Math.max(score, 60);
-  }
-  // Porting fix: when table model is off, a <table> in markdown may correspond to an
-  // image-type candidate (the table was treated as an image region by the pipeline).
-  // Also allow an image block to match a table-type candidate for the same reason.
-  if (blockInfo.tagName === 'table' && /image|figure|chart|picture/.test(`${type} ${label} ${source}`)) {
-    score = Math.max(score, 58);
-  }
-  if ((blockInfo.hasImage || blockInfo.isMedia) && /table/.test(type)) {
-    score = Math.max(score, 58);
-  }
-
-  if (blockInfo.isStandaloneFormula && !blockInfo.hasImage && /formula|equation/.test(`${type} ${label} ${source}`)) {
-    score = Math.max(score, 64);
-  }
-
-  // Fallback for formula blocks whose LaTeX content is escaped/markdown-rendered
-  // differently than the pipeline's raw text. If the block is a formula and the
-  // candidate looks like equation, force a high score to prevent orphan shells.
-  if (blockInfo.isStandaloneFormula && !blockInfo.hasImage) {
-    if (/formula|equation|interline_equation|inline_equation/.test(`${type} ${label}`)) {
-      score = Math.max(score, 58);
-    }
-  }
-
-  const blockText = blockInfo.blockText;
-  if (blockText && candidateText) {
-    if (candidateText === blockText) {
-      score = Math.max(score, 100);
-    } else {
-      const shorter = candidateText.length < blockText.length ? candidateText : blockText;
-      const longer = candidateText.length < blockText.length ? blockText : candidateText;
-      const probe = shorter.slice(0, Math.min(120, shorter.length));
-      if (shorter.length >= 18 && longer.includes(probe)) {
-        const coverage = Math.min(shorter.length, longer.length) / Math.max(shorter.length, longer.length);
-        score = Math.max(score, 72 + coverage * 18);
-      } else if (shorter.length >= 18) {
-        const prefix = commonPrefixLength(shorter, longer);
-        if (prefix >= 18) score = Math.max(score, 48 + Math.min(22, prefix / 3));
-      }
-    }
-  }
-
-  return Math.max(0, score - Math.min(18, distance * 2));
 }
 
 function commonPrefixLength(a, b) {
@@ -5087,7 +4967,7 @@ function subscribeToState() {
     // Silenced — page-based progress via progressStage replaces this
   });
   
-  _stateBag.subscribe(appState, 'timings', (timings) => {
+  _stateBag.subscribe(appState, 'timings', (_timings) => {
     currentStageTimings = getStageTimingsFromResults();
     updateTimingsDisplay();
   });

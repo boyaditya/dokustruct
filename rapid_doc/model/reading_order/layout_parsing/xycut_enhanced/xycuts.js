@@ -155,7 +155,7 @@ function preProcess(region) {
         !maskLabels.includes(block.order_label) &&
         block.secondary_direction === cutDirection
       ) {
-        const key = JSON.stringify([
+        const _key = JSON.stringify([
           block.secondary_direction_start_coordinate,
           block.secondary_direction_end_coordinate,
         ]);

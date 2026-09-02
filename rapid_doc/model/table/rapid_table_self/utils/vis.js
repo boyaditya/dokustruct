@@ -11,7 +11,7 @@ export class VisTable {
    * @param {string[][]} [logicPoints] - Optional logic cell coordinates
    * @returns {HTMLCanvasElement}
    */
-  draw(sourceImg, cellBboxes, logicPoints = null) {
+  draw(sourceImg, cellBboxes, _logicPoints = null) {
     const canvas = document.createElement("canvas");
     const src = sourceImg instanceof ImageData
       ? this._imageDataToCanvas(sourceImg) : sourceImg;

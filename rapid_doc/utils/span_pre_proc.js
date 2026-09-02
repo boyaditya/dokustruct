@@ -884,7 +884,7 @@ export function calculateContrastMat(mat) {
  * @param {string} [imgMode='rgb']
  * @returns {number}
  */
-export function calculateContrast(canvas, imgMode = 'rgb') {
+export function calculateContrast(canvas, _imgMode = 'rgb') {
   if (!canvas) return 0;
   const ctx = canvas.getContext('2d');
   if (!ctx) return 0;

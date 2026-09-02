@@ -4,17 +4,17 @@ export class BaseModelHandler {
    * @param {cv.Mat[]} imgList
    * @returns {Promise<import('../../utils/typings.js').RapidLayoutOutput[]>}
    */
-  async call(imgList) {
+  async call(_imgList) {
     throw new Error(`${this.constructor.name}.call() not implemented`);
   }
 
   /** @param {cv.Mat} image */
-  preprocess(image) {
+  preprocess(_image) {
     throw new Error(`${this.constructor.name}.preprocess() not implemented`);
   }
 
   /** @param {...any} args */
-  postprocess(...args) {
+  postprocess(..._args) {
     throw new Error(`${this.constructor.name}.postprocess() not implemented`);
   }
 }

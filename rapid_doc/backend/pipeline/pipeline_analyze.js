@@ -24,7 +24,6 @@ import { yieldToBrowser, formatPipelineError } from "../../utils/browser_utils.j
 import { releaseImageBitmap, releaseCanvas } from "../../utils/resource_utils.js";
 import { resultToMiddleJson } from "./model_json_to_middle_json.js";
 import { unionMake } from "./pipeline_middle_json_mkcontent.js";
-import { paraSplit } from "./para_split.js";
 import { crossPageTableMerge } from "../utils/utils.js";
 import { MemoryDataWriter } from "../../data/data_reader_writer/index.js";
 

@@ -69,7 +69,7 @@ export async function fetchTextCached(url) {
  * @param {object} cfg
  * @returns {string}
  */
-export function resolveDetUrl(params, cfg) {
+export function resolveDetUrl(params, _cfg) {
   return params.detModelUrl ?? DEFAULT_DET_MODEL_URL;
 }
 

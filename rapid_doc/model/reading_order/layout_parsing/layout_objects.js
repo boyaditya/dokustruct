@@ -107,8 +107,8 @@ class TextLine {
     blockTextWidth,
     blockStartCoordinate,
     blockStopCoordinate,
-    oriImage = null,
-    textRecModel = null,
+    _oriImage = null,
+    _textRecModel = null,
     textRecScoreThresh = null
   ) {
     const spanBoxStartIndex = this.direction === "horizontal" ? 0 : 1;

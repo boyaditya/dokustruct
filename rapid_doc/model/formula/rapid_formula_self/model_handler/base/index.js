@@ -12,7 +12,7 @@ export class BaseModelHandler {
    * @param {cv.Mat[]} oriImgList
    * @returns {Promise<import('../../utils/typings.js').RapidFormulaOutput[]>}
    */
-  async run(oriImgList) {
+  async run(_oriImgList) {
     throw new Error("BaseModelHandler.run() is abstract");
   }
 
@@ -20,7 +20,7 @@ export class BaseModelHandler {
    * @param {cv.Mat[]} oriImgList
    * @returns {{ inputData: Object, imgShapes: number[][] }}
    */
-  preprocess(oriImgList) {
+  preprocess(_oriImgList) {
     throw new Error("BaseModelHandler.preprocess() is abstract");
   }
 
@@ -28,7 +28,7 @@ export class BaseModelHandler {
    * @param {Object} preds
    * @returns {string[]}
    */
-  postprocess(preds) {
+  postprocess(_preds) {
     throw new Error("BaseModelHandler.postprocess() is abstract");
   }
 }

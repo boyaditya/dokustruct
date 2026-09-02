@@ -9,7 +9,7 @@ import { UniTableStructure } from "./table_structure/unitable/main.js";
 import { TableMatch } from "./table_matcher/main.js";
 import { wrapWithHtmlStruct } from "./table_structure/utils.js";
 import { getLogger } from "./utils/logger.js";
-import { deleteMat, deleteMatList } from "../../../utils/resource_utils.js";
+import { deleteMatList } from "../../../utils/resource_utils.js";
 import { formatPipelineError } from "../../../utils/browser_utils.js";
 import { AbortException } from "../../../utils/exceptions.js";
 

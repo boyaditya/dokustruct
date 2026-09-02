@@ -4,12 +4,12 @@
  * Abstract inference session base class.
  */
 export class InferSession {
-  async run(inputContent) {
+  async run(_inputContent) {
     throw new Error("InferSession.run() is abstract");
   }
   getInputNames() { throw new Error("InferSession.getInputNames() is abstract"); }
   getOutputNames() { throw new Error("InferSession.getOutputNames() is abstract"); }
-  getCharacterList(key) { throw new Error("InferSession.getCharacterList() is abstract"); }
+  getCharacterList(_key) { throw new Error("InferSession.getCharacterList() is abstract"); }
 }
 
 /**

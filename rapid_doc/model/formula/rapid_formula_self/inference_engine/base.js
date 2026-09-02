@@ -12,7 +12,7 @@ export class InferSession {
    * @param {Object<string, import('onnxruntime-web').Tensor>} inputContent
    * @returns {Promise<import('onnxruntime-web').InferenceSession.OnnxValueMapType>}
    */
-  async run(inputContent) {
+  async run(_inputContent) {
     throw new Error("InferSession.run() is abstract — must be implemented by subclass");
   }
 
@@ -37,7 +37,7 @@ export class InferSession {
    * @param {string} [key]
    * @returns {string[]}
    */
-  getCharacterList(key) {
+  getCharacterList(_key) {
     throw new Error("InferSession.getCharacterList() is abstract");
   }
 }

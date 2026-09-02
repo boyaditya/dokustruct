@@ -16,9 +16,6 @@ const BLOCK_GAP = 16;      // px — vertical gap threshold for splitting lines 
  *
  * @param {import('pdfjs-dist').PDFPageProxy} page
  * @param {object} [opts]
- * @param {boolean} [opts.quoteLoosebox=true]
- * @param {number} [opts.superscriptHeightThreshold=0.7]
- * @param {number} [opts.lineDistanceThreshold=0.1]
  * @returns {Promise<object>}
  */
 export async function getPage(page, {

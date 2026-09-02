@@ -5,7 +5,6 @@
 
 import { PPDocLayoutModelHandler } from './pp_doclayout/index.js';
 import { DocLayoutModelHandler }   from './doc_layout/index.js';
-import { ModelType } from '../utils/typings.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('ModelHandler');

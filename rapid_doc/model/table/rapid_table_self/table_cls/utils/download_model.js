@@ -22,7 +22,7 @@ export class DownloadModel {
    * @param {string} [saveName] - Used as cache key suffix
    * @returns {Promise<Uint8Array>}
    */
-  static async download(url, saveDir = null, saveName = null) {
+  static async download(url, _saveDir = null, saveName = null) {
     try {
       const cacheUrl = saveName ? `${url}#${saveName}` : url;
       return await DownloadFile.run(new DownloadFileInput({ url: cacheUrl }));

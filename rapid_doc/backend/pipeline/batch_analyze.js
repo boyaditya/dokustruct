@@ -371,7 +371,7 @@ export class BatchAnalyze {
   // ---------------------------------------------------------------------------
 
   async _runLayoutDetection(npImages, pdfDictList, scaleList) {
-    const totalPages = npImages.length;
+    const _totalPages = npImages.length; // kept: parity with Python counter
     let processedPages = 0;
     
     // Batch processing with progress tracking
@@ -683,11 +683,9 @@ export class BatchAnalyze {
 
     for (const ocrResDict of ocrResAllPage) {
       for (const res of ocrResDict.ocr_res_list) {
-        let ocrEnable = ocrResDict.ocr_enable;
 
         if (!ocrResDict.ocr_enable) {
           if (res.need_ocr_det) {
-            ocrEnable = true;
           } else if (useDetMode === 'txt' || (useDetMode !== 'ocr' && !res.need_ocr_det)) {
             continue;
           }

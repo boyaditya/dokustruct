@@ -130,8 +130,6 @@ export async function loadHistoryItem(item) {
     setRequiredAssetsReady,
     setTotalPages,
     setCurrentPage,
-    setSyncedPageIndex,
-    setSyncedLinkId,
   } = _ctx;
 
   setWorkspaceMode('workspace');
@@ -264,8 +262,6 @@ export async function loadHistoryItem(item) {
   prepareLinkedBlocks(historicalResults);
   setTotalPages(item.pageCount || 1);
   setCurrentPage(1);
-  setSyncedPageIndex(null);
-  setSyncedLinkId(null);
   updatePageInfo();
 
   // Display the historical result

@@ -6,17 +6,14 @@
 import { appState } from './state/appState.js';
 import { pipelineAdapter } from './utils/pipelineAdapter.js';
 import { getPdfjsLib } from '../rapid_doc/utils/pdfjs_loader.js';
-import { getAssetDetailRows } from '../rapid_doc/utils/model_url_map.js';
 import { startKeepAlive, stopKeepAlive } from '../rapid_doc/utils/browser_utils.js';
 import { sanitizeFormulaLatex } from '../rapid_doc/model/formula/fix_utils.js';
 import { marked } from 'marked';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { createDisposerChain } from './lifecycle/disposerChain.js';
-import { createListenerBag } from './lifecycle/listenerBag.js';
 import { createSubscriptionBag } from './lifecycle/subscriptionBag.js';
 import { createRafCoalescer } from './perf/rafCoalescer.js';
-import { scheduleIdleWork } from './perf/idleScheduler.js';
 import { ctx as linkingCtx, initLinkingContext } from './linking/index.js';
 import {
   CheckCircle,
@@ -775,15 +772,12 @@ let pinReleaseListener = null;
 let scrollSyncFrame = null;
 let isSyncingScroll = false;
 let overlayVisible = true;
-let syncedPageIndex = null;
-let syncedLinkId = null;
 let activeDrawerId = null;
 let lastDrawerTrigger = null;
 let exportCloseTimer = null;
 let overlayRenderFrame = null;
-let mergeConnectorFrame = null;let overlayResizeObserver = null;
+let overlayResizeObserver = null;
 let workspaceMode = 'setup';
-let setupTab = 'upload';
 let pendingHistoryDeleteId = null;
 let currentRunConfig = null;
 let currentStageTimings = null;
@@ -1094,8 +1088,6 @@ async function init() {
     setRequiredAssetsReady: (r) => { requiredAssetsReady = r; },
     setTotalPages: (n) => { totalPages = n; },
     setCurrentPage: (n) => { currentPage = n; },
-    setSyncedPageIndex: (i) => { syncedPageIndex = i; },
-    setSyncedLinkId: (id) => { syncedLinkId = id; },
   });
 
   // ── Auto-resume after page reload (GPU crash recovery) ──
@@ -1457,13 +1449,7 @@ function setWorkspaceMode(mode) {
   updateSetupTabs();
 }
 
-function setSetupTab(tab) {
-  setupTab = 'upload';
-  updateSetupTabs();
-}
-
 function updateSetupTabs() {
-  setupTab = 'upload';
   el.setupUploadPanel?.classList.remove('hidden');
 }
 
@@ -1540,8 +1526,6 @@ function setOverlayVisible(visible, { persist = true } = {}) {
   if (!overlayVisible) {
     if (scheduleRenderLayoutOverlay._coalescer) scheduleRenderLayoutOverlay._coalescer.cancel();
     if (scheduleRenderMergeConnectors._coalescer) scheduleRenderMergeConnectors._coalescer.cancel();
-    overlayRenderFrame = null;
-    mergeConnectorFrame = null;
     clearLayoutOverlay();
     return;
   }
@@ -1626,14 +1610,6 @@ function emptyTimingSet() {
 function isWarmupActive() {
   const status = appState.get('warmupStatus');
   return status === 'runtime_loading' || status === 'model_warming';
-}
-
-function isCurrentRuntimeReady() {
-  return Boolean(
-    currentFile
-    && appState.get('warmupStatus') === 'ready'
-    && pipelineAdapter.isPrepared(appState, currentFile)
-  );
 }
 
 function canRunExtraction() {
@@ -2179,8 +2155,6 @@ function clearViewer() {
   }
   pinnedLinkId = null;
   pinnedGroupId = '';
-  syncedPageIndex = null;
-  syncedLinkId = null;
   // Clear markdown viewer
   if (el.markdownContent) {
     el.markdownContent.innerHTML = '';
@@ -2407,29 +2381,6 @@ async function selectFile(index) {
   if (file) {
     await loadFile(file, { replaceQueue: false });
     if (workspaceMode === 'setup') openSetupPreviewDialog();
-  }
-}
-
-function removeFile(index) {
-  const file = selectedFiles[index];
-  if (file) revokeFilePreviewUrl(file);
-  selectedFiles.splice(index, 1);
-  if (currentFileIndex >= selectedFiles.length) {
-    currentFileIndex = Math.max(0, selectedFiles.length - 1);
-  }
-  renderFileList();
-  updateUI();
-  
-  if (selectedFiles.length === 0) {
-    currentFile = null;
-    sourceCanvas = null;
-    requiredAssetsReady = false;
-    showEmptyViewer();
-    appState.patch({ files: [], currentFileIndex: 0, results: null });
-    setSetupTab('upload');
-    refreshAssetRequirements({ allowWarmup: false });
-  } else {
-    selectFile(currentFileIndex);
   }
 }
 
@@ -2685,8 +2636,6 @@ function displayResults(results, opts = {}) {
   try {
     prepareLinkedBlocks(results);
   } catch (e) { console.warn('[displayResults] prepareLinkedBlocks error:', e?.message); }
-  syncedPageIndex = null;
-  syncedLinkId = null;
   totalPages = results.page_count || totalPages || 1;
   currentPage = 1;
   updatePageInfo();
@@ -2792,7 +2741,7 @@ function displayMarkdown(markdown, pageCount = 1, contentList = null) {
     applyMarkdownImageSources();
     applyLayoutBasedStyling();
     attachBlockActions();
-    linkMarkdownBlocks(pageCount, contentList);
+    linkMarkdownBlocks();
     updateQuickNavVisibility();
   } catch (err) {
     console.error('[Markdown] Render error:', err);
@@ -3473,7 +3422,6 @@ function prepareLinkedBlocks(results) {
   }
   pinnedLinkId = null;
   pinnedGroupId = '';
-  syncedLinkId = null;
   if (!results) return linkedBlocks;
   if (
     Array.isArray(results.overlay_blocks) &&
@@ -3564,10 +3512,6 @@ function applyLayoutBasedStyling() {
   return _applyLayoutBasedStyling();
 }
 
-function centerAlignVisuals() {
-  // Delegated to applyLayoutBasedStyling via styling.js — kept as no-op for call-site compatibility.
-}
-
 function attachBlockActions() {
   return _attachBlockActions();
 }
@@ -3590,7 +3534,7 @@ function isStandaloneDisplayFormulaBlock(block) {
   return _isStandaloneDisplayFormulaBlock(block);
 }
 
-function linkMarkdownBlocks(pageCount = 1, contentList = null) {
+function linkMarkdownBlocks(_pageCount = 1, _contentList = null) {
   if (!el.markdownContent) return;
   // ── Cleanup previous dividers and linking data ──
   el.markdownContent.querySelectorAll('.markdown-page-divider').forEach(node => node.remove());
@@ -3773,169 +3717,12 @@ function linkMarkdownBlocks(pageCount = 1, contentList = null) {
   }
 }
 
-/**
- * Find the best overlay link for a markdown block within its page window.
- * Advances the per-page cursor so candidates aren't reused.
- */
-function findBestLinkForBlock(blockInfo, candidatesByPage, pageCursors) {
-
-  // Try each page's candidates starting from that page's cursor.
-  // Walk through pages in order; for each page, try a window of candidates.
-  const sortedPages = Array.from(candidatesByPage.keys()).sort((a, b) => a - b);
-  let best = null;
-  let bestScore = 0;
-
-  for (const pageIdx of sortedPages) {
-    const pageCands = candidatesByPage.get(pageIdx) || [];
-    if (!pageCands.length) continue;
-    const cursor = pageCursors.get(pageIdx) || 0;
-    if (cursor >= pageCands.length) continue;
-    const end = Math.min(pageCands.length, cursor + 15);
-    for (let i = cursor; i < end; i++) {
-      const candidate = pageCands[i];
-      const score = scoreMarkdownLink(blockInfo, candidate, Math.abs(i - cursor));
-      if (score > bestScore) {
-        best = candidate;
-        bestScore = score;
-      }
-    }
-    if (bestScore >= 44) {
-      // Advance cursor past the match.
-      const matchIdx = pageCands.indexOf(best);
-      if (matchIdx >= 0) pageCursors.set(pageIdx, matchIdx + 1);
-      return best;
-    }
-  }
-  return null;
-}
-
-/**
- * Force-match: when a block has no text (rendered image for formula/table),
- * pick the first unclaimed candidate on each page in order, preferring
- * candidates whose category is compatible. Advances the cursor for the
- * matched page only, preventing cascade.
- */
-function findForceMatch(blockLabelGroup, tagName, isStandaloneFormula, candidatesByPage, pageCursors) {
-  const sortedPages = Array.from(candidatesByPage.keys()).sort((a, b) => a - b);
-  // ── Pass 1: strict equation/formula match → same page ──
-  if (isStandaloneFormula) {
-    for (const pageIdx of sortedPages) {
-      const pageCands = candidatesByPage.get(pageIdx) || [];
-      for (let i = pageCursors.get(pageIdx) || 0; i < pageCands.length; i++) {
-        const cand = pageCands[i];
-        const candGroup = labelGroupKey(cand.originalLabel, cand.type);
-        const candType = String(cand.type || '').toLowerCase();
-        if (/formula|equation|interline_equation/.test(candType) || candGroup === 'equation') {
-          pageCursors.set(pageIdx, i + 1);
-          return cand;
-        }
-      }
-    }
-    // ── No equation candidate (model OFF). Do NOT fall back — a positional
-    //     grab from an unrelated page would cascade-mismatch all subsequent
-    //     blocks. The formula shell stays unlinked; no corruption. ──
-    return null;
-  }
-  // ── Non-formula image-like: exact label group match on each page ──
-  for (const pageIdx of sortedPages) {
-    const pageCands = candidatesByPage.get(pageIdx) || [];
-    for (let i = pageCursors.get(pageIdx) || 0; i < pageCands.length; i++) {
-      const cand = pageCands[i];
-      const candGroup = labelGroupKey(cand.originalLabel, cand.type);
-      if (blockLabelGroup && candGroup && blockLabelGroup === candGroup) {
-        pageCursors.set(pageIdx, i + 1);
-        return cand;
-      }
-    }
-  }
-  // ── Permissive: media↔media, unlabeled→image ──
-  for (const pageIdx of sortedPages) {
-    const pageCands = candidatesByPage.get(pageIdx) || [];
-    for (let i = pageCursors.get(pageIdx) || 0; i < pageCands.length; i++) {
-      const cand = pageCands[i];
-      const candGroup = labelGroupKey(cand.originalLabel, cand.type);
-      const candType = String(cand.type || '').toLowerCase();
-      const isImageLike = /image|figure|chart|picture/.test(candType) || candGroup === 'media_image';
-      const blockIsMedia = blockLabelGroup === 'media_image' || blockLabelGroup === 'media_table';
-      const candIsMedia = candGroup === 'media_image' || candGroup === 'media_table';
-      if (blockIsMedia && candIsMedia) {
-        pageCursors.set(pageIdx, i + 1);
-        return cand;
-      }
-      if (!blockLabelGroup && isImageLike) {
-        pageCursors.set(pageIdx, i + 1);
-        return cand;
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Per-page positional fallback: pick the next unused candidate from the
- * earliest page that still has candidates.
- */
-function findBestPerPageFallback(candidatesByPage, pageCursors) {
-  const sortedPages = Array.from(candidatesByPage.keys()).sort((a, b) => a - b);
-  for (const pageIdx of sortedPages) {
-    const pageCands = candidatesByPage.get(pageIdx) || [];
-    const cursor = pageCursors.get(pageIdx) || 0;
-    if (cursor < pageCands.length) {
-      pageCursors.set(pageIdx, cursor + 1);
-      return pageCands[cursor];
-    }
-  }
-  return null;
-}
-
 function createMarkdownPageDivider(pageIndex) {
   const divider = document.createElement('div');
   divider.className = 'page-divider markdown-page-divider';
   divider.dataset.pageIndex = String(pageIndex);
   divider.innerHTML = `<span>PAGE ${pageIndex + 1}</span>`;
   return divider;
-}
-
-function findNextMarkdownLink(block, candidates, startIndex) {
-  if (!block || !candidates.length) return null;
-  const blockText = extractBlockLinkText(block);
-  const hasFormula = blockHasFormula(block);
-  const isStandaloneFormula = isStandaloneDisplayFormulaBlock(block);
-  const hasImage = Boolean(block.querySelector?.('img'));
-  const tagName = block.tagName?.toLowerCase();
-  const isMedia = isMediaOutputBlock(block);
-  const blockLabelGroup = getMarkdownBlockLabelGroup(block);
-  let best = null;
-  let bestScore = 0;
-  const start = startIndex;
-  const end = Math.min(candidates.length, startIndex + 30);
-
-  for (let i = start; i < end; i += 1) {
-    const candidate = candidates[i];
-    const score = scoreMarkdownLink({ blockText, hasImage, hasFormula, isStandaloneFormula, isMedia, tagName, blockLabelGroup }, candidate, Math.abs(i - startIndex));
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-
-  if (bestScore >= 44) return best;
-
-  const pageOnly = candidates[startIndex];
-  if (pageOnly?.type === 'page') return pageOnly;
-  return null;
-}
-
-/**
- * Fallback linker: when text scoring fails, pick the next unclaimed
- * candidate so every shell-block still gets a unique linkId.
- */
-function findFallbackLink(candidates, cursor) {
-  // Walk forward from cursor to find the first unclaimed non-page candidate.
-  for (let i = cursor; i < candidates.length; i++) {
-    if (candidates[i].type !== 'page') return candidates[i];
-  }
-  return null;
 }
 
 /**
@@ -4250,8 +4037,6 @@ function scheduleRenderLayoutOverlay() {
     scheduleRenderLayoutOverlay._coalescer = createRafCoalescer(renderLayoutOverlay);
   }
   scheduleRenderLayoutOverlay._coalescer.schedule();
-  // Keep overlayRenderFrame in sync for legacy cancel paths
-  overlayRenderFrame = 1; // truthy sentinel
 }
 
 function renderLayoutOverlay() {
@@ -4347,23 +4132,8 @@ function syncOverlayToCanvas() {
 
 // Thin wrappers below preserve call-site compatibility.
 
-function renderMergeConnectors() {
-  return _renderMergeConnectors();
-}
-
 function scheduleRenderMergeConnectors() {
   _scheduleRenderMergeConnectors();
-  mergeConnectorFrame = 1; // truthy sentinel
-}
-
-function getGlobalMergeConnectorLayer() {
-  if (!el.pageStack) return null;
-  let layer = el.pageStack.querySelector(':scope > .merge-connector-global-layer');
-  if (layer) return layer;
-  layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  layer.classList.add('merge-connector-global-layer');
-  el.pageStack.prepend(layer);
-  return layer;
 }
 
 function syncGlobalMergeConnectorLayer(layer = null) {
@@ -4707,14 +4477,6 @@ function getMarkdownPageSection(pageIndex) {
   return { divider, top, bottom, height };
 }
 
-function scrollOutputToPage(pageIndex) {
-  const section = getMarkdownPageSection(pageIndex);
-  if (!section || !el.markdownContent) return;
-  isSyncingScroll = true;
-  el.markdownContent.scrollTop = Math.max(0, section.top - 12);
-  requestAnimationFrame(() => { isSyncingScroll = false; });
-}
-
 function scrollOutputToPagePosition(pageIndex, ratio = 0.5) {
   const section = getMarkdownPageSection(pageIndex);
   if (!section || !el.markdownContent) return;
@@ -4823,8 +4585,6 @@ function syncOutputFromPreviewScroll() {
       currentPage = pos.pageIndex + 1;
       updatePageInfo();
     }
-    syncedLinkId = linkId;
-    syncedPageIndex = pos?.pageIndex ?? null;
     return;
   }
 
@@ -4834,8 +4594,6 @@ function syncOutputFromPreviewScroll() {
     currentPage = pageIndex + 1;
     updatePageInfo();
   }
-  syncedPageIndex = pageIndex;
-  syncedLinkId = null;
 }
 
 function syncPreviewFromMarkdownScroll() {
@@ -4846,8 +4604,6 @@ function syncPreviewFromMarkdownScroll() {
       currentPage = pos.pageIndex + 1;
       updatePageInfo();
     }
-    syncedLinkId = linkId;
-    syncedPageIndex = pos?.pageIndex ?? null;
     return;
   }
 
@@ -4857,8 +4613,6 @@ function syncPreviewFromMarkdownScroll() {
     currentPage = pageIndex + 1;
     updatePageInfo();
   }
-  syncedPageIndex = pageIndex;
-  syncedLinkId = null;
 }
 
 function getClosestVisiblePageIndex() {
@@ -5109,24 +4863,6 @@ function copyMarkdown() {
 }
 
 // ===== DOWNLOAD =====
-async function downloadResults() {
-  const results = appState.get('results');
-  if (!results) {
-    showLoading('No results to download');
-    return;
-  }
-  
-  // Use exportUtils for full ZIP bundle
-  try {
-    const exportUtils = await getExportUtils();
-    await exportUtils.exportZipBundle(appState);
-    showLoading('Downloaded ZIP bundle');
-  } catch (err) {
-    console.error(`${UI_LOG_PREFIX} Download failed:`, err);
-    showLoading('Download failed');
-  }
-}
-
 function cancelProcessing() {
   if (isWarmupActive() && !appState.get('isProcessing')) {
     cancelPendingWarmup({ resetStatus: true });
@@ -5260,8 +4996,6 @@ async function resetWorkspaceForNewTask() {
   }
   pinnedLinkId = null;
   pinnedGroupId = '';
-  syncedPageIndex = null;
-  syncedLinkId = null;
   showEmptyViewer();
   refreshAssetRequirements({ allowWarmup: false });
   updateUI();
@@ -5276,14 +5010,6 @@ async function resetWorkspaceForNewTask() {
   updateRunSummary(null);
   updateTimingsDisplay(emptyTimingSet());
   updateSetupUploadState();
-}
-
-async function clearAll() {
-  await resetWorkspaceForNewTask();
-  setWorkspaceMode('setup');
-  setSetupTab('upload');
-  updateSetupUploadState();
-  showLoading('Cleared all files');
 }
 
 // ===== UI UPDATE =====
@@ -5433,42 +5159,6 @@ function subscribeToState() {
 }
 
 // ===== LOADING INDICATOR (LOFI) =====
-function showRecoverableError(err, { runId = '', retryFn = null } = {}) {
-  const container = document.getElementById('toastContainer');
-  const message = err?.message ?? String(err ?? 'Unknown error');
-  const id = runId ? ` [${runId}]` : '';
-
-  if (container) {
-    const t = document.createElement('div');
-    t.className = 'pointer-events-auto flex items-start gap-3 bg-[#1c2128] border border-red-400 border-l-4 rounded-xl px-4 py-3 shadow-2xl text-sm';
-    t.style.animation = 'slide-in-right 0.25s ease forwards';
-    t.setAttribute('role', 'alert');
-    t.innerHTML = `
-      <span class="text-base mt-0.5">❌</span>
-      <span class="flex-1" style="color:#8b949e">${escapeHtml(message)}${escapeHtml(id)}</span>
-      ${retryFn ? '<button class="run-retry-btn" style="color:#60a5fa;cursor:pointer;font-size:11px;white-space:nowrap">Retry</button>' : ''}
-      <button style="color:#484f58;cursor:pointer" onclick="this.closest('div').remove()">×</button>
-    `;
-    if (retryFn) {
-      t.querySelector('.run-retry-btn')?.addEventListener('click', () => {
-        t.remove();
-        retryFn();
-      });
-    }
-    container.appendChild(t);
-    setTimeout(() => t.remove(), 8000);
-  } else {
-    // Fallback to showLoading if toast container not present
-    showLoading(`Error: ${message}`, 4000);
-  }
-
-  // Restore startBtn state shortly after the run settles
-  setTimeout(() => {
-    if (el.startBtn && !appState.get('isProcessing')) {
-      el.startBtn.disabled = !canRunExtraction();
-    }
-  }, 500);
-}
 
 // Does NOT mutate native `disabled` on inputs — uses aria-disabled + pointer-events.
 const _processingInterceptor = (e) => {

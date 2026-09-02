@@ -1,7 +1,7 @@
 /**
  * ui/history/storage.js
  *
- * Extracted from ui/app.js. Signature unchanged.
+ * Persistent history storage — IndexedDB asset store with legacy-fallback.
  */
 
 const HISTORY_ASSET_DB = 'dokustruct_history_assets';

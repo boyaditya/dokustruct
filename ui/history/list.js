@@ -1,7 +1,7 @@
 /**
  * ui/history/list.js
  *
- * Extracted from ui/app.js. Signature unchanged.
+ * History list rendering with IntersectionObserver-based virtualization.
  * Virtualization applied when history item count > 100.
  */
 

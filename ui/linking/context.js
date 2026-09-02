@@ -2,7 +2,7 @@
  * ui/linking/context.js
  *
  * All linking submodules read/write through this single object so they can be
- * extracted from ui/app.js without requiring prop-drilling or global leakage.
+ * linked here without requiring prop-drilling or global leakage.
  * app.js initialises the context once via `initLinkingContext(el, getters)`.
  */
 

@@ -6,7 +6,7 @@
  * the viewport.
  *
  * Threshold gating:
- *   - History list: activate when item count > 50
+ *   - History list: activate when item count > 100
  *   - Markdown blocks: activate when block count > 100
  *   - JSON viewer lines: activate when line count > 100
  *

@@ -1,7 +1,7 @@
 /**
  * ui/linking/pin.js
  *
- * Extracted from ui/app.js. Single pinReleaseListener slot with
+ * Pinned-highlight lifecycle. Single pinReleaseListener slot with
  * local-closure capture and group-aware outside-click dismissal.
  */
 

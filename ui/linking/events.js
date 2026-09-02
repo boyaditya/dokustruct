@@ -1,7 +1,7 @@
 /**
  * ui/linking/events.js
  *
- * Extracted from ui/app.js. Includes keyboard parity (focusin/focusout)
+ * Viewer/markdown linking events. Includes keyboard parity (focusin/focusout)
  * so pinned highlights behave identically for mouse and keyboard users.
  */
 

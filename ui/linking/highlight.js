@@ -1,7 +1,7 @@
 /**
  * ui/linking/highlight.js
  *
- * setLinkedHighlight / clearLinkedHighlight extracted from ui/app.js.
+ * setLinkedHighlight / clearLinkedHighlight paint management.
  * Routes paint work through rafCoalescer and short-circuits when
  * the new highlight target is identical to the current one.
  */

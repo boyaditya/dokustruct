@@ -1,7 +1,7 @@
 /**
  * ui/history/reload.js
  *
- * Extracted from ui/app.js. Signature unchanged.
+ * Rebuilds UI state from a persisted history entry.
  * Disposer chain wired for deterministic resource cleanup.
  */
 

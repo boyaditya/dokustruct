@@ -2482,7 +2482,7 @@ async function runPipeline() {
 
     // ── Step 2: Warmup models + download assets ──
     if (el.progressTitle) el.progressTitle.textContent = 'Preparing models...';
-    if (el.progressMessage) el.progressMessage.textContent = 'Loading AI models and warming up runtime.';
+    if (el.progressMessage) el.progressMessage.textContent = 'Loading models and warming up runtime.';
     await refreshAssetRequirements({ allowWarmup: false });
     if (warmupTimer) { clearTimeout(warmupTimer); warmupTimer = null; }
     if (!pipelineAdapter.isPrepared(appState, currentFile)) {

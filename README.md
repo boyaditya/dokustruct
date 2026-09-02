@@ -25,7 +25,7 @@ This project is a **JavaScript port** of [RapidDoc](https://github.com/RapidAI/R
 
 ## Demo
 
-[Try the live demo →](https://rapiddoc-js.vercel.app)
+[Try the live demo →](https://dokustruct.vercel.app)
 
 *Models are downloaded to your browser's IndexedDB on first use (~150 MB total). Subsequent loads use cached models.*
 
@@ -122,6 +122,8 @@ On [OmniDocBench](https://github.com/RapidAI/OmniDocBench) v1.5, DokuStruct achi
 | Formula CDM ↑ | 89.35 | 89.12 |
 | Table TEDS ↑ | 80.59 | 80.21 |
 | Read Order Edit ↓ | 0.053 | 0.055 |
+
+*Measured on a stratified random sample of the OmniDocBench corpus (fixed seed) — not a full census. See [benchmark/README.md](./benchmark/README.md) for methodology.*
 
 The `benchmark/` directory contains the full comparative evaluation framework: stratified OmniDocBench sampling, timing/accuracy corpora, statistical analysis (geometric mean, bootstrap CI, Wilcoxon signed-rank, Holm-Bonferroni), and per-item content-parity scoring (NED, CER/WER, TEDS, IoU). See [benchmark/README.md](./benchmark/README.md).
 

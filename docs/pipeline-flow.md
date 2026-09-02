@@ -1,6 +1,6 @@
 # DokuStruct Pipeline Flow
 
-This is the canonical flow for the browser-native JavaScript pipeline. It is intended for agents that need to debug, extend, or validate the RapidDoc-JS engine.
+This is the canonical flow for the browser-native JavaScript pipeline. It is intended for agents that need to debug, extend, or validate the DokuStruct engine.
 
 ## 1. UI Flow
 

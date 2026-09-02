@@ -59,3 +59,6 @@ Desktop.ini
 
 # Agent/IDE local config
 .commandcode/
+
+# Python cache
+__pycache__/

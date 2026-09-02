@@ -1,14 +1,13 @@
-"""
+﻿"""
 benchmark/test_methodology_validation.py
 ========================================
-Methodology validation tests — memverifikasi bahwa evaluator benchmark
-mematuhi prosedur yang ditetapkan dalam BAB3 Metode Penelitian (SKRIPSI.md).
+Methodology validation tests â€” memverifikasi bahwa evaluator benchmark
+mematuhi prosedur metodologi yang ditetapkan (dokumen metodologi penelitian).
 
-Setiap test diberi anotasi @methodology_section yang memetakan ke subbab BAB3.
+Setiap test diberi anotasi @methodology_section yang memetakan ke subbab metodologi.
 
 Run:
-    .venv\\Scripts\\python.exe -m pytest benchmark/test_methodology_validation.py -v
-    rtk python -m pytest benchmark/test_methodology_validation.py -v
+    python -m pytest benchmark/test_methodology_validation.py -v
 """
 
 from __future__ import annotations
@@ -19,10 +18,10 @@ import statistics
 from pathlib import Path
 from typing import List, Dict, Tuple
 
-# Decorator that tags tests with the BAB3 section they validate.
-# Tidak memengaruhi eksekusi — hanya dokumentasi yang dapat dibaca mesin.
+# Decorator that tags tests with the methodology section they validate.
+# Tidak memengaruhi eksekusi â€” hanya dokumentasi yang dapat dibaca mesin.
 def methodology_section(section: str):
-    """Tag a test with the BAB3 methodology section it validates."""
+    """Tag a test with the methodology section it validates."""
     def decorator(func):
         func._methodology_section = section
         return func
@@ -30,7 +29,7 @@ def methodology_section(section: str):
 
 
 # =============================================================================
-# SECTION 3.7.1 — Kontrak Content List
+# SECTION 3.7.1 â€” Kontrak Content List
 # =============================================================================
 
 @methodology_section("3.7.1")
@@ -54,7 +53,7 @@ def test_content_list_contract_fields():
 
 
 # =============================================================================
-# SECTION 3.7.2 — Pemeriksaan Kelengkapan
+# SECTION 3.7.2 â€” Pemeriksaan Kelengkapan
 # =============================================================================
 
 @methodology_section("3.7.2")
@@ -84,7 +83,7 @@ def test_completeness_check_missing_output():
 
 
 # =============================================================================
-# SECTION 3.8 — Evaluasi Port-Fidelity
+# SECTION 3.8 â€” Evaluasi Port-Fidelity
 # =============================================================================
 
 @methodology_section("3.8.1")
@@ -110,7 +109,7 @@ def test_port_fidelity_coverage_components():
          {"type": "text", "text": "world", "page_idx": 0}]
     b = [{"type": "text", "text": "hello", "page_idx": 0}]
     res = align_content_lists(a, b)
-    # precision = 1/2 = 0.5; recall = 1/1 = 1.0; F1 = 2*0.5*1.0/(0.5+1.0) ≈ 0.6667
+    # precision = 1/2 = 0.5; recall = 1/1 = 1.0; F1 = 2*0.5*1.0/(0.5+1.0) â‰ˆ 0.6667
     assert math.isclose(res["coverage_f1"], 2/3, rel_tol=1e-4)
     assert res["coverage_recall"] == 1.0
     assert res["coverage_precision"] == 0.5
@@ -131,7 +130,7 @@ def test_port_fidelity_bidirectional_coverage():
 
 
 # =============================================================================
-# SECTION 3.8.3 — Alur Pembentukan Angka Port-Fidelity
+# SECTION 3.8.3 â€” Alur Pembentukan Angka Port-Fidelity
 # =============================================================================
 
 @methodology_section("3.8.3")
@@ -157,7 +156,7 @@ def test_port_fidelity_flow_per_page_aggregation():
 
 
 # =============================================================================
-# SECTION 3.9 — Evaluasi Akurasi terhadap Ground Truth
+# SECTION 3.9 â€” Evaluasi Akurasi terhadap Ground Truth
 # =============================================================================
 
 @methodology_section("3.9.2")
@@ -172,7 +171,7 @@ def test_accuracy_missing_modality_penalty():
     ]
     pred = [{"type": "text", "text": "caption", "page_idx": 0}]
     s = score_against_gt(pred, gt)
-    # Formula dan tabel ada di GT tapi tidak di prediksi → penalti
+    # Formula dan tabel ada di GT tapi tidak di prediksi â†’ penalti
     assert s["formula_edit"] == 1.0  # penalti maksimum
     assert s["table_teds"] == 0.0    # penalti minimum
     assert s["table_teds_struct"] == 0.0
@@ -212,12 +211,12 @@ def test_accuracy_all_metrics_present():
 
 
 # =============================================================================
-# SECTION 3.9.4 — Skor Komposit Proksi
+# SECTION 3.9.4 â€” Skor Komposit Proksi
 # =============================================================================
 
 @methodology_section("3.9.4")
 def test_composite_score_formula():
-    """Skor Komposit = ((1-TextEdit) + TEDS + (1-FormulaEdit)) / 3 × 100."""
+    """Skor Komposit = ((1-TextEdit) + TEDS + (1-FormulaEdit)) / 3 Ã— 100."""
     from benchmark.gt_scoring import score_against_gt
 
     gt = [
@@ -227,7 +226,7 @@ def test_composite_score_formula():
     ]
     pred = [dict(it) for it in gt]
     s = score_against_gt(pred, gt)
-    assert s["overall"] == 100.0  # perfect match → 100
+    assert s["overall"] == 100.0  # perfect match â†’ 100
 
     # Introduce error in text only
     pred_err = [dict(it) for it in gt]
@@ -253,7 +252,7 @@ def test_composite_score_partial_modalities():
 
 
 # =============================================================================
-# SECTION 3.10 — Evaluasi Waktu
+# SECTION 3.10 â€” Evaluasi Waktu
 # =============================================================================
 
 @methodology_section("3.10.2")
@@ -310,7 +309,7 @@ def test_timing_bootstrap_respects_n():
 
 
 # =============================================================================
-# SECTION 3.11 — Analisis Statistik
+# SECTION 3.11 â€” Analisis Statistik
 # =============================================================================
 
 @methodology_section("3.11")
@@ -318,7 +317,7 @@ def test_wilcoxon_paired_nature():
     """Wilcoxon signed-rank harus mempertahankan sifat berpasangan."""
     from benchmark.metrics import wilcoxon_signed_rank
 
-    # Data berpasangan yang sama persis → p=1.0, selisih nol
+    # Data berpasangan yang sama persis â†’ p=1.0, selisih nol
     res = wilcoxon_signed_rank([1, 2, 3, 4, 5], [1, 2, 3, 4, 5])
     assert res["p_value"] == 1.0
     assert res["effect_size_r"] == 0.0
@@ -334,7 +333,7 @@ def test_wilcoxon_asymmetric():
     a = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
     b = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
     res = wilcoxon_signed_rank(a, b)
-    # Semua selisih positif → p-value harus kecil
+    # Semua selisih positif â†’ p-value harus kecil
     assert res["p_value"] is not None and res["p_value"] < 0.05
     assert res["effect_size_r"] > 0.5  # efek besar
 
@@ -344,7 +343,7 @@ def test_holm_correction_controls_fwer():
     """Holm harus lebih konservatif daripada raw p-value."""
     from benchmark.metrics import holm_bonferroni
 
-    # 10 tes, 1 signifikan mentah → Holm mungkin menolaknya
+    # 10 tes, 1 signifikan mentah â†’ Holm mungkin menolaknya
     res = holm_bonferroni([0.001] + [0.5] * 9)
     assert res[0]["significant"] is True   # 0.001 < 0.05/10 = 0.005
     for i in range(1, 10):
@@ -364,7 +363,7 @@ def test_holm_null_handling():
 
 
 # =============================================================================
-# SECTION 3.12 — Pemeriksaan Hasil Evaluasi
+# SECTION 3.12 â€” Pemeriksaan Hasil Evaluasi
 # =============================================================================
 
 @methodology_section("3.12")
@@ -412,7 +411,7 @@ def test_verification_metric_range_validation():
 
 
 # =============================================================================
-# SECTION 3.13 — Batas Interpretasi
+# SECTION 3.13 â€” Batas Interpretasi
 # =============================================================================
 
 @methodology_section("3.13")
@@ -426,31 +425,31 @@ def test_interpretation_composite_not_official_overall():
     ]
     pred = [dict(it) for it in gt]
     s = score_against_gt(pred, gt)
-    # Skor komposit hanya dari teks + tabel (tanpa formula) → tetap dihitung
+    # Skor komposit hanya dari teks + tabel (tanpa formula) â†’ tetap dihitung
     assert s["overall"] is not None
-    assert s["formula_edit"] is None  # formula tidak tersedia → tidak dipenalti
+    assert s["formula_edit"] is None  # formula tidak tersedia â†’ tidak dipenalti
     # Overall hanya dari komponen yang tersedia: ((1-0)*100 + 1.0*100) / 2 = 100
     assert s["overall"] == 100.0
 
 
 @methodology_section("3.13")
 def test_interpretation_port_fidelity_not_accuracy():
-    """Port-fidelity tinggi ≠ akurasi tinggi."""
+    """Port-fidelity tinggi â‰  akurasi tinggi."""
     # Test ini bersifat dokumentatif: alignment port-fidelity menggunakan
     # referensi baseline (Python), bukan GT. Kedua nilai dihitung terpisah.
     from benchmark.alignment import align_content_lists
 
-    # Simulasi: kedua sistem salah dengan cara yang sama → port-fidelity tinggi
+    # Simulasi: kedua sistem salah dengan cara yang sama â†’ port-fidelity tinggi
     wrong_both = [{"type": "text", "text": "wrong text", "page_idx": 0}]
     res = align_content_lists(wrong_both, wrong_both)
     assert res["coverage_f1"] == 1.0
     assert res["mean_ned_norm"] == 0.0
-    # Port-fidelity sempurna meskipun konten salah — ini sesuai metodologi
+    # Port-fidelity sempurna meskipun konten salah â€” ini sesuai metodologi
 
 
 @methodology_section("3.13")
 def test_interpretation_deviation_not_always_regression():
-    """Perbedaan dari baseline ≠ regresi. Bisa jadi JS lebih dekat ke GT."""
+    """Perbedaan dari baseline â‰  regresi. Bisa jadi JS lebih dekat ke GT."""
     from benchmark.gt_scoring import score_against_gt
 
     gt = [{"type": "text", "text": "correct text", "page_idx": 0}]
@@ -460,13 +459,13 @@ def test_interpretation_deviation_not_always_regression():
     js_score = score_against_gt(js_pred, gt)
     py_score = score_against_gt(py_pred, gt)
 
-    # JS berbeda dari baseline tapi lebih dekat ke GT → deviasi bukan regresi
+    # JS berbeda dari baseline tapi lebih dekat ke GT â†’ deviasi bukan regresi
     assert js_score["text_edit"] < py_score["text_edit"]
     assert js_score["overall"] > py_score["overall"]
 
 
 # =============================================================================
-# SECTION 3.5 — Tahap Normalisasi (Tahap 4 metode)
+# SECTION 3.5 â€” Tahap Normalisasi (Tahap 4 metode)
 # =============================================================================
 
 @methodology_section("3.5 Tahap 4")
@@ -474,7 +473,7 @@ def test_normalization_unicode_nfc_idempotent():
     """Normalisasi NFC harus idempoten."""
     from benchmark.metrics import normalize_text
 
-    s = "café résumé naïve"
+    s = "cafÃ© rÃ©sumÃ© naÃ¯ve"
     n1 = normalize_text(s)
     n2 = normalize_text(n1)
     assert n1 == n2
@@ -485,7 +484,7 @@ def test_normalization_latex_macro_canonicalization():
     """Normalisasi LaTeX harus kanonikalisasi perintah sinonim."""
     from benchmark.metrics import normalize_latex
 
-    # \dfrac, \tfrac → \frac
+    # \dfrac, \tfrac â†’ \frac
     assert normalize_latex(r"\dfrac{a}{b}") == normalize_latex(r"\tfrac{a}{b}")
     assert normalize_latex(r"\dfrac{a}{b}") == normalize_latex(r"\frac{a}{b}")
 
@@ -525,12 +524,12 @@ def test_normalization_bbox_conversion():
 
 
 # =============================================================================
-# SECTION 3.6 — Alur Evaluasi Keseluruhan
+# SECTION 3.6 â€” Alur Evaluasi Keseluruhan
 # =============================================================================
 
 @methodology_section("3.6")
 def test_evaluation_pipeline_input_to_aggregation():
-    """Alur: Input → Eksekusi → content_list → Normalisasi → Alignment → Metrik → Agregasi."""
+    """Alur: Input â†’ Eksekusi â†’ content_list â†’ Normalisasi â†’ Alignment â†’ Metrik â†’ Agregasi."""
     from benchmark.omnidocbench import gt_page_to_content_list
     from benchmark.gt_scoring import score_against_gt
 
@@ -659,7 +658,7 @@ def test_alignment_large_text_sketching():
     a = {"type": "text", "text": "x " * 500}
     b = {"type": "text", "text": "x " * 500}
     cost = _alignment_cost(a, b)
-    assert 0.0 <= cost <= 1.0  # teks identik → cost ≈ 0
+    assert 0.0 <= cost <= 1.0  # teks identik â†’ cost â‰ˆ 0
 
 
 # ============================================================================
@@ -688,8 +687,8 @@ if __name__ == "__main__":
             traceback.print_exc()
 
     print(f"\n{'='*60}")
-    print(f"Methodology Coverage by BAB3 Section:")
+    print(f"Methodology Coverage by Section:")
     for sec in sorted(sections):
-        print(f"  {sec}: {len(sections[sec])} test(s) — {', '.join(sections[sec])}")
+        print(f"  {sec}: {len(sections[sec])} test(s) â€” {', '.join(sections[sec])}")
     print(f"\n{passed} passed, {failed} failed (of {len(tests)})")
     sys.exit(1 if failed else 0)

@@ -1,7 +1,7 @@
 """
 benchmark/metrics.py
 ====================
-Pure metric primitives for the skripsi benchmark, kept separate from I/O and
+Pure metric primitives for the comparative benchmark, kept separate from I/O and
 Excel formatting so they can be unit-tested and reused.
 
 Covers:

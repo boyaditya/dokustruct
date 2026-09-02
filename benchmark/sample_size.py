@@ -1,7 +1,7 @@
 """
 benchmark/sample_size.py
 ========================
-Sample-size calculator for the skripsi benchmark.
+Sample-size calculator for the comparative benchmark.
 
 Answers "how many documents is the minimum that is still statistically valid?"
 with defensible numbers instead of a magic constant. Two modes:

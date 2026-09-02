@@ -1,10 +1,10 @@
-"""
+﻿"""
 benchmark/test_metrics.py
 =========================
 Unit tests for the benchmark metric primitives and content-list alignment.
 
 Run:
-    rtk python -m pytest benchmark/test_metrics.py -q
+    python -m pytest benchmark/test_metrics.py -q
     .venv\\Scripts\\python.exe -m pytest benchmark/test_metrics.py -q
 """
 
@@ -253,7 +253,7 @@ def test_alignment_is_per_page():
     a = _doc([("text", "alpha")], page=0) + _doc([("text", "beta")], page=1)
     b = _doc([("text", "beta")], page=1) + _doc([("text", "alpha")], page=0)
     res = align_content_lists(a, b)
-    # Per-page alignment should match alpha↔alpha (p0) and beta↔beta (p1)
+    # Per-page alignment should match alphaâ†”alpha (p0) and betaâ†”beta (p1)
     assert res["n_matched"] == 2
     assert res["mean_ned_norm"] == 0.0
 
@@ -368,7 +368,7 @@ def test_gt_scoring_missing_modalities_are_none():
     gt = [{"type": "text", "text": "only text", "page_idx": 0}]
     pred = [{"type": "text", "text": "only text", "page_idx": 0}]
     s = score_against_gt(pred, gt)
-    assert s["table_teds"] is None   # no tables → not scored as 0
+    assert s["table_teds"] is None   # no tables â†’ not scored as 0
     assert s["formula_edit"] is None
     assert s["overall"] is not None  # text-only still has an overall
 
@@ -400,13 +400,13 @@ def test_paired_diff_ci_zero_difference():
     out = paired_diff_ci(a, b)
     assert out["n"] == 4
     assert out["mean_diff"] == 0.0
-    # identical pairs → CI collapses to 0 and does NOT exclude zero
+    # identical pairs â†’ CI collapses to 0 and does NOT exclude zero
     assert out["ci_low"] == 0.0 and out["ci_high"] == 0.0
     assert out["excludes_zero"] is False
 
 
 def test_paired_diff_ci_consistent_positive_difference():
-    # A is consistently 2.0 higher than B → CI should exclude zero
+    # A is consistently 2.0 higher than B â†’ CI should exclude zero
     a = [5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
     b = [3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
     out = paired_diff_ci(a, b)
@@ -429,7 +429,7 @@ def test_paired_diff_ci_skips_non_numeric_pairs():
     a = [1.0, None, 3.0, 4.0]
     b = [0.0, 2.0, None, 2.0]
     out = paired_diff_ci(a, b)
-    # only docs 0 and 3 are valid pairs → n == 2
+    # only docs 0 and 3 are valid pairs â†’ n == 2
     assert out["n"] == 2
 
 

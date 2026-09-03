@@ -9,6 +9,7 @@
 import { deleteMat } from '../../utils/resource_utils.js';
 import { AbortException } from '../../utils/exceptions.js';
 import { throwIfAborted } from '../../utils/abort_registry.js';
+import { intTrunc } from '../../utils/math_utils.js';
 
 // ─── Polygon geometry helpers ─────────────────────────────────────────────────
 

@@ -19,9 +19,9 @@ const BLOCK_GAP = 16;      // px — vertical gap threshold for splitting lines 
  * @returns {Promise<object>}
  */
 export async function getPage(page, {
-  quoteLoosebox = true,
-  superscriptHeightThreshold = 0.7,
-  lineDistanceThreshold = 0.1,
+  quoteLoosebox: _quoteLoosebox = true,
+  superscriptHeightThreshold: _superscriptHeightThreshold = 0.7,
+  lineDistanceThreshold: _lineDistanceThreshold = 0.1,
 } = {}) {
   if (!page) {
     return { size: [0, 0], bbox: [0, 0, 0, 0], width: 0, height: 0, rotation: 0, blocks: [] };

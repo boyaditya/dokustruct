@@ -24,6 +24,10 @@ import {
   setGlobalAbortSignal,
   clearGlobalAbortSignal,
 } from '../../rapid_doc/utils/abort_registry.js';
+import {
+  loadOpenCVScript,
+  waitForOpenCV,
+} from '../../rapid_doc/utils/opencv_loader.js';
 
 /** Pages per chunk — hard-reset on GPU buffer saturation (~138 pages). */
 const VRAM_CHUNK_SIZE = 8;
@@ -40,13 +44,7 @@ const IMAGE_EXTENSIONS = /\.(png|jpe?g|bmp|webp|tiff?)$/i;
 const PDF_IMAGE_DPI = 200;
 const PDF_POINTS_PER_INCH = 72;
 let pdfDocumentPromise = null;
-let exportUtilsPromise = null;
-let openCvScriptPromise = null;
 let ortRuntimeConfigPromise = null;
-
-function hasOpenCVRuntime() {
-  return Boolean(globalThis.cv?.Mat);
-}
 
 function throwIfAborted(signal) {
   if (signal?.aborted) {
@@ -56,63 +54,6 @@ function throwIfAborted(signal) {
 
 function isAbortError(error, signal = null) {
   return Boolean(signal?.aborted || error?.name === 'AbortError');
-}
-
-function loadOpenCVScript(signal) {
-  if (hasOpenCVRuntime()) return Promise.resolve();
-  if (openCvScriptPromise) return openCvScriptPromise;
-
-  openCvScriptPromise = new Promise((resolve, reject) => {
-    throwIfAborted(signal);
-    const existingScript = document.querySelector('script[data-dokustruct-opencv], script[src="/opencv/opencv.js"]');
-    if (existingScript) {
-      existingScript.addEventListener('load', () => resolve(), { once: true });
-      existingScript.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
-      signal?.addEventListener('abort', () => reject(new DOMException('Operation aborted', 'AbortError')), { once: true });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = '/opencv/opencv.js';
-    script.async = true;
-    script.dataset.dokustructOpencv = 'true';
-    script.addEventListener('load', () => resolve(), { once: true });
-    script.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
-    signal?.addEventListener('abort', () => reject(new DOMException('Operation aborted', 'AbortError')), { once: true });
-    document.head.appendChild(script);
-  }).catch((error) => {
-    if (!hasOpenCVRuntime()) openCvScriptPromise = null;
-    throw error;
-  });
-
-  return openCvScriptPromise;
-}
-
-function waitForOpenCV(signal, timeoutMs = 12000) {
-  return new Promise((resolve, reject) => {
-    if (hasOpenCVRuntime()) {
-      resolve(true);
-      return;
-    }
-
-    const checkInterval = setInterval(() => {
-      if (hasOpenCVRuntime()) {
-        clearInterval(checkInterval);
-        resolve(true);
-      }
-    }, 100);
-
-    const timeout = setTimeout(() => {
-      clearInterval(checkInterval);
-      resolve(hasOpenCVRuntime());
-    }, timeoutMs);
-
-    signal?.addEventListener('abort', () => {
-      clearInterval(checkInterval);
-      clearTimeout(timeout);
-      reject(new DOMException('Operation aborted', 'AbortError'));
-    }, { once: true });
-  });
 }
 
 async function configureDocumentRuntime() {
@@ -132,13 +73,6 @@ async function getPDFDocument() {
     pdfDocumentPromise = import('pdf-lib').then((module) => module.PDFDocument);
   }
   return pdfDocumentPromise;
-}
-
-async function getExportUtils() {
-  if (!exportUtilsPromise) {
-    exportUtilsPromise = import('./exportUtils.js').then((module) => module.exportUtils);
-  }
-  return exportUtilsPromise;
 }
 
 function isImageFile(file) {

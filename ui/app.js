@@ -1767,7 +1767,6 @@ function renderAssetGate({ error = null } = {}) {
   const missingCount = Math.max(0, totalCount - cachedCount);
   const downloading = Boolean(assetDownloadController);
   const warmupStatus = appState.get('warmupStatus') || 'idle';
-  const runtimeStatus = appState.get('runtimeStatus') || 'idle';
   const warmupError = appState.get('warmupError');
   const engineReady = warmupStatus === 'ready';
   const engineFailed = warmupStatus === 'error';
@@ -2663,7 +2662,7 @@ function displayResults(results, opts = {}) {
   }
 }
 
-function displayMarkdown(markdown, pageCount = 1, contentList = null) {
+function displayMarkdown(markdown, _pageCount = 1, _contentList = null) {
   if (!el.markdownContent) return;
   
   const emptyMd = el.markdownContent.querySelector('.empty-markdown');
@@ -3718,13 +3717,6 @@ function createMarkdownPageDivider(pageIndex) {
  */
 function extractBlockLinkText(block) {
   return _extractBlockLinkText(block);
-}
-
-function commonPrefixLength(a, b) {
-  const max = Math.min(a.length, b.length);
-  let index = 0;
-  while (index < max && a[index] === b[index]) index += 1;
-  return index;
 }
 
 function handleBlockAction(event) {

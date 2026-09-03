@@ -23,6 +23,10 @@ import { MakeMode } from './rapid_doc/utils/enum_class.js';
 import { buildXlsxBlob } from './ui/utils/xlsxWriter.js';
 import { ASSET_MANIFEST } from './rapid_doc/utils/model_url_map.js';
 import { clearAssetMemoryCache } from './rapid_doc/utils/download_file.js';
+import {
+  loadOpenCVScript,
+  waitForOpenCV,
+} from './rapid_doc/utils/opencv_loader.js';
 import JSZip from 'jszip';
 
 const SEARCH_PARAMS = new URLSearchParams(location.search);
@@ -60,42 +64,9 @@ const BENCHMARK_RESET_INTERVAL = 25;
 const BENCHMARK_MAX_RETRIES = 1;
 
 // ---------------------------------------------------------------------------
-// OpenCV loader (same pattern as pipelineAdapter.js)
+// OpenCV loader — shared via rapid_doc/utils/opencv_loader.js (single source
+// of truth; was duplicated here and in ui/utils/pipelineAdapter.js).
 // ---------------------------------------------------------------------------
-
-function hasOpenCVRuntime() {
-  return Boolean(globalThis.cv?.Mat);
-}
-
-function loadOpenCVScript() {
-  if (hasOpenCVRuntime()) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-dokustruct-opencv], script[src="/opencv/opencv.js"]');
-    if (existing) {
-      if (hasOpenCVRuntime()) { resolve(); return; }
-      existing.addEventListener('load', resolve, { once: true });
-      existing.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = '/opencv/opencv.js';
-    script.async = true;
-    script.dataset.dokustructOpencv = 'true';
-    script.addEventListener('load', resolve, { once: true });
-    script.addEventListener('error', () => reject(new Error('Failed to load /opencv/opencv.js')), { once: true });
-    document.head.appendChild(script);
-  });
-}
-
-function waitForOpenCV(timeoutMs = 15000) {
-  return new Promise((resolve) => {
-    if (hasOpenCVRuntime()) { resolve(true); return; }
-    const interval = setInterval(() => {
-      if (hasOpenCVRuntime()) { clearInterval(interval); clearTimeout(timer); resolve(true); }
-    }, 100);
-    const timer = setTimeout(() => { clearInterval(interval); resolve(hasOpenCVRuntime()); }, timeoutMs);
-  });
-}
 
 let _runtimeReady = false;
 let _lastEp = null;
@@ -110,7 +81,7 @@ async function ensureRuntime(ep) {
   _runtimeReady = false;
   log('Loading OpenCV…', 'info');
   await loadOpenCVScript();
-  const ok = await waitForOpenCV();
+  const ok = await waitForOpenCV(undefined, 15000);
   if (!ok) throw new Error('OpenCV runtime not available. Check /opencv/opencv.js.');
   log('OpenCV ready.', 'ok');
   await configureOrtRuntime({ numThreads: 4, useWebGpu: ep === 'webgpu' });

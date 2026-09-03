@@ -3,11 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 describe('docAnalyze smoke — public API', () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  // Static import graph pulls onnxruntime-web; allow extra time in CI.
   it('exports docAnalyze and engineReset from rapid_doc/index.js', async () => {
     const mod = await import('../../rapid_doc/index.js');
     expect(typeof mod.docAnalyze).toBe('function');
     expect(typeof mod.engineReset).toBe('function');
-  });
+  }, 20000);
 
   it('docAnalyze returns an array for empty input (no crash)', async () => {
     const pipeline = await import('../../rapid_doc/backend/pipeline/pipeline_analyze.js');

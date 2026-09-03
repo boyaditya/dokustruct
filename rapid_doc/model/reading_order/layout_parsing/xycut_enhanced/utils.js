@@ -332,7 +332,7 @@ function euclideanInsert(block, sortedBlocks) {
 
 function weightedDistanceInsert(block, sortedBlocks, region) {
   const toleranceLen = XYCUT_SETTINGS.edge_distance_compare_tolerance_len;
-  const [x1, y1, x2, y2] = block.bbox;
+  const [x1, y1, x2] = block.bbox;
   let minWeighted = Infinity, minEdge = Infinity, minUpEdge = Infinity;
   let nearestIdx = 0;
   let sortedDistance, blockDistance;

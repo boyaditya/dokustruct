@@ -609,7 +609,7 @@ function fallbackBenchmarkToWasm(config, file, runLabel, err) {
     shared_webgpu_device_available: false,
   };
   benchmarkRuntimeFallbacks.push(fallback);
-  log('  ⚠ WebGPU reset cannot reclaim ORT-owned device; falling back to WASM for remaining runs.', 'warn');
+  log('  WebGPU reset cannot reclaim ORT-owned device; falling back to WASM for remaining runs.', 'warn');
   return true;
 }
 
@@ -820,7 +820,7 @@ async function runBenchmark() {
     const mism = Object.entries(mh.files || {})
       .filter(([, v]) => v.matches_manifest === false).map(([k]) => k);
     if (mism.length) {
-      log(`⚠ model hash mismatch vs manifest: ${mism.join(', ')}`, 'warn');
+      log(`model hash mismatch vs manifest: ${mism.join(', ')}`, 'warn');
     } else {
       log('Model hashes captured (match manifest).', 'ok');
     }
@@ -1179,7 +1179,7 @@ function buildExportPayload() {
     };
 
     if (!meanTiming.content_stability.skipped && !meanTiming.content_stability.identical) {
-      log(`  ⚠ ${stem}: content differs across runs ` +
+      log(`  ${stem}: content differs across runs ` +
           `(distinct_outputs=${meanTiming.content_stability.distinct_outputs})`, 'warn');
     }
 

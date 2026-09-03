@@ -703,6 +703,21 @@ export class PipelineAdapter {
     this._preparedKey = null;
     this._prepareKey = null;
     this._preparePromise = null;
+    // Optional UI notification hook: (msg: string, type: 'info'|'success'|'error'|'warning') => void.
+    // Set by the app shell (e.g. to showLoading). Kept as a hook — never import
+    // UI code here — so the engine stays UI-agnostic.
+    this.onNotify = null;
+  }
+
+  /**
+   * Surface a user-facing message via the onNotify hook (no-op when unset).
+   * @param {string} msg
+   * @param {'info'|'success'|'error'|'warning'} [type]
+   */
+  _notify(msg, type = 'info') {
+    try {
+      this.onNotify?.(msg, type);
+    } catch { /* notification must never break the pipeline */ }
   }
 
   /**
@@ -751,7 +766,7 @@ export class PipelineAdapter {
     }
 
     if (!file) {
-      this._toast('No file selected.', 'error');
+      this._notify('No file selected.', 'error');
       return;
     }
 
@@ -797,7 +812,7 @@ export class PipelineAdapter {
       req.onerror = () => reject(req.error);
     });
     if (!fb) {
-      this._toast('Resume failed: file data not found.', 'error');
+      this._notify('Resume failed: file data not found.', 'error');
       clearResumeState();
       return false;
     }
@@ -837,7 +852,7 @@ export class PipelineAdapter {
    */
   async _runSingle(state, file, signal) {
     if (isImageFile(file)) {
-      this._toast('Running Full Analysis on image input.', 'info');
+      this._notify('Running Full Analysis on image input.', 'info');
     }
     if (state.get('pipelineMode') === 'ocr_only') {
       return this._runOcrOnly(state, file, signal);
@@ -1013,7 +1028,7 @@ export class PipelineAdapter {
       state.updateMemory();
 
       state.finishProcessing(results);
-      this._toast(`OCR complete — ${totalPages} page(s) in ${(total / 1000).toFixed(1)}s`, 'success');
+      this._notify(`OCR complete — ${totalPages} page(s) in ${(total / 1000).toFixed(1)}s`, 'success');
 
       return {
         preprocessing:  tPre1 - tPre0,
@@ -1046,7 +1061,7 @@ export class PipelineAdapter {
       }
       console.error('[pipelineAdapter/OCR] Run failed:', err);
       state.failProcessing(err);
-      this._toast(`OCR failed: ${err.message ?? err}`, 'error');
+      this._notify(`OCR failed: ${err.message ?? err}`, 'error');
       return null;
     }
   }
@@ -1757,9 +1772,9 @@ export class PipelineAdapter {
       //.
       const skipCount = results?._stageSkipWarnings?.length ?? 0;
       if (skipCount > 0) {
-        this._toast(`Some content could not be extracted (${skipCount} issue(s) — see console).`, 'warning');
+        this._notify(`Some content could not be extracted (${skipCount} issue(s) — see console).`, 'warning');
       } else {
-        this._toast('Document processed successfully.', 'success');
+        this._notify('Document processed successfully.', 'success');
       }
 
       return {
@@ -1788,7 +1803,7 @@ export class PipelineAdapter {
       const message = formatPipelineError(err);
       console.error('[pipelineAdapter] Run failed:', message, err);
       state.failProcessing(message);
-      this._toast(`Processing failed: ${message}`, 'error');
+      this._notify(`Processing failed: ${message}`, 'error');
       // Heuristic: any GPU buffer / WebGPU lost-device error indicates the
       // pool is in a bad state. Force a full engine + GPU teardown so the
       // next run starts from a clean device.
@@ -2330,30 +2345,6 @@ export class PipelineAdapter {
     };
   }
 
-  // ── Toast helper ──────────────────────────────────────────────────────────
-
-  /**
-   * @param {string} msg
-   * @param {'success'|'error'|'warning'|'info'} [type]
-   */
-  _toast(msg, type = 'info') {
-    const container = document.getElementById('toastContainer');
-    if (!container) return;
-    const icons = { info: 'ℹ️', success: '✅', error: '❌', warn: '⚠️', warning: '⚠️' };
-    const borders = { info: 'border-blue-400', success: 'border-green-400', error: 'border-red-400', warn: 'border-amber-400', warning: 'border-amber-400' };
-    const t = document.createElement('div');
-    t.className = `pointer-events-auto flex items-start gap-3 bg-[#1c2128] border ${borders[type] || borders.info} border-l-4 rounded-xl px-4 py-3 shadow-2xl text-sm`;
-    t.style.animation = 'slide-in-right 0.25s ease forwards';
-    t.setAttribute('role', type === 'error' ? 'alert' : 'status');
-    t.innerHTML = `
-      <span class="text-base mt-0.5">${icons[type] || icons.info}</span>
-      <span class="flex-1" style="color:#8b949e">${msg}</span>
-      <button style="color:#484f58;cursor:pointer" onclick="this.closest('div').remove()">×</button>
-    `;
-    container.appendChild(t);
-    const duration = type === 'error' ? 6000 : 3500;
-    setTimeout(() => t.remove(), duration);
-  }
 }
 
 // ---------------------------------------------------------------------------

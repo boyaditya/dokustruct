@@ -986,6 +986,9 @@ async function init() {
   });
 
   setupEventListeners();
+  // Engine notifications surface through the loading indicator. The engine
+  // stays UI-agnostic via the onNotify hook — no toast system, no emoji.
+  pipelineAdapter.onNotify = (msg, type) => showLoading(msg, type === 'error' ? 3000 : 2000);
   setupOverlayResizeObservers();
   switchViewerTab(prefs.activeOutputTab || 'rendered');
 
@@ -2580,7 +2583,7 @@ function _injectProgressWarning() {
   overlay.querySelector('.progress-warning')?.remove();
   const warning = document.createElement('span');
   warning.className = 'progress-warning';
-  warning.textContent = '⚠ Keep this tab visible — background tabs may slow processing';
+  warning.textContent = 'Keep this tab visible — background tabs may slow processing';
   warning.title = 'Chrome throttles background-tab CPU. Keep this browser tab active for full speed.';
   const bar = overlay.querySelector('.progress-bar');
   if (bar) {

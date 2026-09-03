@@ -9,7 +9,6 @@
 import { deleteMat } from '../../utils/resource_utils.js';
 import { AbortException } from '../../utils/exceptions.js';
 import { throwIfAborted } from '../../utils/abort_registry.js';
-import { intTrunc } from '../../utils/math_utils.js';
 
 // ─── Polygon geometry helpers ─────────────────────────────────────────────────
 
@@ -113,7 +112,7 @@ export function unclipPolygon(pts, unclipRatio) {
 
   try {
     mask = new cv.Mat(h, w, cv.CV_8UC1, new cv.Scalar(0));
-    ptsMat = cv.matFromArray(shiftedPts.length, 1, cv.CV_32SC2, shiftedPts.flat().map(intTrunc));
+    ptsMat = cv.matFromArray(shiftedPts.length, 1, cv.CV_32SC2, shiftedPts.flat().map(Math.round));
     ptsVec = new cv.MatVector();
     ptsVec.push_back(ptsMat);
     cv.fillPoly(mask, ptsVec, new cv.Scalar(255));

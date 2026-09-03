@@ -4,49 +4,56 @@
 
 ## 1) Execution providers are configured, not observed
 
-- **Layout** picks WebGPU/WASM dynamically; **OCR/orientation** follow config; **formula/table** are hard-coded to WASM (`Loop` autoregressive) and ignore the WebGPU toggle. Selecting “WebGPU” in the UI therefore affects only 3 of 5 model groups.
-- No `getProviders()` or logging of the actual provider exists — docs should state **configured provider**, not “running on WebGPU”.
+- **Layout** dynamically picks WebGPU when available, otherwise WASM; **OCR/orientation** follow the UI toggle; **formula** (PP-FormulaNet Plus, `Loop`) and **table** (SLANet) are intentionally **WASM-only** and ignore the WebGPU toggle
+- No `session.getProviders()` exists — state **configured provider** for 3/5 groups, not “running on WebGPU”. `verifyProviders` only warns.
 
-## 2) Effective config is not persisted
+## 2) Effective config is rebuilt per run
 
-- Config objects are rebuilt per run and not written to `middle.json`/`content_list` (`_backend`/`_version_name` only). Without an explicit dump, the exact parameters of an evaluation run are `UNKNOWN` unless recorded externally. Recommend persisting `run_config` alongside outputs (see `benchmark/` provenance).
+- Engine `middle.json`/`content_list` store only `_backend`/`_version_name`, not full `run_config`. Without an explicit dump the exact parameters are unknown.
+- **Benchmark** persists `run_config` + `metadata` + `content_stability` in `_timing.json` and flags mismatches; **UI history** now stores `runConfig` for the session, but exported markdown/`content_list` still need external provenance.
 
 ## 3) ONNX graphs are patched offline
 
-- `patch_ppdoclayout.py` removes `ceil_mode=1` from pooling nodes; `fix_slanet_plus_shape.py` rewrites shape metadata. If the Python baseline uses unpatched ONNX, the two systems run **non-identical graphs** — fidelity remains high but not bit-identical.
+- `patch_ppdoclayout.py` removes `ceil_mode=1` from pooling nodes; `fix_slanet_plus_shape.py` rewrites shape metadata. `model_url_map.js` `sha256` tracks **patched bytes** (24 assets). If the Python baseline uses unpatched ONNX, graphs are intentionally non-bit-identical — fidelity stays high (ADP-26).
 
 ## 4) Three chunking levels — easy to conflate
 
-- **Adapter chunk** (8 pages, `pipelineAdapter`), **engine window** (4 or 2 pages, `batch_analyze`), **model batch** (inside each stage). The adapter chunk has no Python equivalent and is browser-specific for OOM avoidance.
+- **L1 adapter chunk** (8 pages, `pipelineAdapter`, browser-only, `engineReset` between chunks, no Python equivalent, OOM guard)
+- **L2 engine window** (`PDF_PAGES_BATCH` 4 WASM / 2 WebGPU, `batch_analyze`/`pipeline_analyze`)
+- **L3 stage batch** per model (`layout 4/1`, `det 4/1`, `rec 4–6`, `formula 1–2`)
 
 ## 5) Three coordinate spaces
 
-- **Rendered image pixels** (model output), **PDF points** (Middle JSON), **per-mille normalized** (`content_list`). Mixing them is a common doc bug — always note which space a box is in.
+- **Rendered pixels** (model output, `pdf_image_tools`/`toMatBgr`), **PDF points** (Middle JSON `pdf_info`/`page_size`), **per-mille 0–1000** (`content_list`, `unionMake` `Math.floor(x*1000/W)`). Always annotate which space a box is in.
 
 ## 6) Pipeline order is preserved, execution is sequential
 
-- 9 stages in Python order (notably table before OCR text). Inter-stage concurrency is limited to two narrow async spots; `yieldToBrowser()` is cooperative yielding, not parallelism.
+- 9 stages in Python order (notably table before OCR rec). Inter-stage concurrency is only two narrow async spots; `yieldToBrowser()` is cooperative yielding (`scheduler.yield` → `MessageChannel` → `setTimeout`), **not parallelism**.
 
-## 7) Two caches, different lifetimes
+## 7) Two caches + LRU, different lifetimes
 
-- **Asset cache** (bytes, IndexedDB persistent) vs **model-session cache** (`ModelSingleton`, in-memory). `engineReset()` clears the latter, not the former; `rapiddoc_model_cache` (≈150 MB) survives across sessions.
+- **IndexedDB** `rapiddoc_model_cache` (asset bytes, **core ~285 MB**, survives `engineReset`)
+- **In-memory** `ModelSingleton`/`AtomModelSingleton` sessions + **LRU 12-entry** `memoryCache` (~500 MB cap, `clearAssetMemoryCache` revokes object URLs) — both cleared by `engineReset()`, which also flushes WebGPU `releaseGpuDevice()` (only way to return pooled buffers).
 
-## 8) Checksum verification is not on the hot path
+## 8) Checksums are on the hot path
 
-- SHA-256 is checked in `DownloadFile.run` but not in `downloadAssetGroup` (the UI path). Manifest `sha256` values are correct (verified manually, 20/20 match), but the UI path does not enforce them.
+- **SHA-256 via SubtleCrypto** (24/24 assets in manifest) is verified **before** IndexedDB write on **both** `DownloadFile.run` and the UI `downloadAssetGroup` hot path (`downloadFromSources {verifySha256}` → `saveToCache`). Corrupt buffers never poison cache. Test-mode can disable via flag.
 
 ## 9) Resource lifecycle is explicit
 
-- `cv.Mat.delete()` / `tensor.dispose()` / `session.release()` are required; WebGPU `deviceLost` needs handling, and a global GPU mutex (`acquireGlobalGpu()`) serializes `session.run()`.
+- `cv.Mat.delete()` / `tensor.dispose()` / `session.release()` required; `device.lost` sets `deviceLost=true` and skips `release()` to avoid “invalid session” noise; global GPU mutex `acquireGlobalGpu()` serializes `session.run()` (ORT WebGPU not thread-safe).
 
-## 10) Minor code divergences noted in June
+## 10) June nits — now resolved
 
-- Duplicate `ProgressTracker.complete()`, default OCR language differing between `index.html` (`en`) and `appState` (`ch`), 5 configs without UI controls, unused `playwright` dep. Treat undocumented defaults as `UNKNOWN` until confirmed — some may have been fixed since audit.
+- Duplicate `ProgressTracker.complete()` → single `complete(stage)` (June duplicate gone)
+- OCR default now consistently `ch` (`appState`/`app.js`); `<html lang="en">` is page language, not OCR
+- `playwright` is used by `benchmark/js_supervised_runner.mjs` (`npx playwright install chromium` required)
+- 5 advanced table/checkbox flags (`tableForceOcr`, `tableUseWordBox`, `tableFormulaEnable`, `skipTextInImage`, `tableUseImg2table`, `checkboxEnable`) remain code-only by design — treat as code defaults.
 
 ---
 
 ### How to use
 
-- **For contributors:** points 1, 4, 5, 6, 7, 9 explain the most common pitfalls when touching `rapid_doc/` or `ui/`.
-- **For evaluators:** points 2 and 8 explain why to persist `run_config`/`metadata` and not to claim “identical graphs/providers” without an explicit check.
-- **For docs:** this file complements `docs/porting-decisions.md` and `docs/pipeline-flow.md` — it adds runtime and lifecycle nuance.
+- **For contributors:** 1, 4, 5, 6, 7, 9 are the most common pitfalls when touching `rapid_doc/` or `ui/`.
+- **For evaluators:** 2 and 8 explain why to persist `run_config`/`metadata` and not to claim “identical graphs/providers”.
+- **For docs:** complements `docs/porting-decisions.md` and `README.md` Runtime Insights.

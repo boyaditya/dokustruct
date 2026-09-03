@@ -117,14 +117,14 @@ The JS port maintains **behavioral parity** with the Python reference. Each modu
 
 ### Runtime Insights
 
-- **Providers are configured, not observed** — layout dynamically picks WebGPU/WASM, OCR/orientation follow the config, formula/table are fixed to WASM (autoregressive `Loop`) and ignore the WebGPU toggle. State “configured provider”, not “running on WebGPU”.
-- **Three coordinate spaces** — model output in rendered pixels, Middle JSON in PDF points, `content_list` in per-mille normalized. Always annotate which space a box is in.
-- **Three chunking levels** — adapter chunk (8 pages, OOM guard, no Python equivalent) → engine window (4 pages, 2 under WebGPU) → model batch per stage. Execution across stages is sequential with `yieldToBrowser()` cooperative yielding.
-- **Two caches** — asset bytes in IndexedDB persistent (`rapiddoc_model_cache` ~150 MB) vs. model sessions in `ModelSingleton` memory. `engineReset()` clears the latter only.
-- **Offline graph patches** — pooling `ceil_mode` removal and shape fixes mean browser and Python graphs are not bit-identical without explicit confirmation.
-- **Explicit lifecycle** — `cv.Mat.delete()` / `tensor.dispose()` / `session.release()` required; WebGPU needs a global mutex (`acquireGlobalGpu()`) and `deviceLost` handling. SHA-256 in the manifest is verified offline, not on the UI hot path.
+- **Providers are configured, not observed** — layout dynamically picks WebGPU/WASM, OCR/orientation follow the UI toggle, formula (PP-FormulaNet Plus, `Loop`) and table (SLANet) are intentionally WASM-only and ignore the WebGPU toggle. “WebGPU selected” means configured for 3/5 groups, not observed per-session.
+- **Three coordinate spaces** — rendered pixels (model) → PDF points (Middle JSON) → per-mille 0–1000 (`content_list`). Always annotate which space a box is in.
+- **Three chunking levels** — L1 adapter chunk (8 pages, browser-only, OOM guard, `engineReset` between chunks) → L2 engine window (4 WASM / 2 WebGPU) → L3 stage batch per model. Sequential with `yieldToBrowser()` (`scheduler.yield` → `MessageChannel`), not parallel.
+- **Two caches + LRU** — IndexedDB `rapiddoc_model_cache` (core ~285 MB, persistent) vs. in-memory `ModelSingleton` sessions + LRU 12-entry `memoryCache` (~500 MB cap). `engineReset()` clears the latter and flushes WebGPU `releaseGpuDevice()` — only way to return pooled buffers.
+- **Graphs patched offline** — `ceil_mode` removal + shape fixes (ADP-26); `sha256` tracks patched bytes (24 assets, verified via SubtleCrypto **before** cache on both UI and `DownloadFile` hot paths).
+- **Explicit lifecycle** — `cv.Mat.delete()` / `tensor.dispose()` / `session.release()` required; `deviceLost` skips `release()`, global mutex `acquireGlobalGpu()` serializes `session.run()`.
 
-See `docs/porting-decisions.md` (PRESERVE/ADAPT/INTRODUCE) and `docs/pipeline-flow.md` for full traces.
+See `docs/porting-decisions.md` and `docs/technical-insights.md` for full traces.
 
 ### Usage as Library
 

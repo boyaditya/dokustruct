@@ -2205,7 +2205,7 @@ function createDocumentPage(pageIndex) {
   const divider = document.createElement('div');
   divider.className = 'page-divider preview-page-divider';
   divider.dataset.pageIndex = String(pageIndex);
-  divider.innerHTML = `<span>PAGE ${pageIndex + 1}</span>`;
+  divider.innerHTML = `<span>Page ${pageIndex + 1}</span>`;
   el.pageStack.appendChild(divider);
 
   const record = { pageIndex, pageEl, canvas, overlay, sourceSize: null };
@@ -3709,7 +3709,7 @@ function createMarkdownPageDivider(pageIndex) {
   const divider = document.createElement('div');
   divider.className = 'page-divider markdown-page-divider';
   divider.dataset.pageIndex = String(pageIndex);
-  divider.innerHTML = `<span>PAGE ${pageIndex + 1}</span>`;
+  divider.innerHTML = `<span>Page ${pageIndex + 1}</span>`;
   return divider;
 }
 

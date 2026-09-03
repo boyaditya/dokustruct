@@ -345,7 +345,9 @@ export function shrinkSupplementRegionBbox(
   let inerBlockIdxes = [];
   for (let attempt = 0; attempt < 3; attempt++) {
     const dstIndex = indexConversionMap[srcIndex];
-    const tmpRegionBbox = [...supplementRegionBbox];
+    // 'let' (not 'const'): reassigned by the recursive shrink call below,
+    // mirroring Python's plain re-binding of tmp_region_bbox.
+    let tmpRegionBbox = [...supplementRegionBbox];
     tmpRegionBbox[dstIndex] = refRegionBbox[srcIndex];
 
     inerBlockIdxes = [];

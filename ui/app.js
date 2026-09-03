@@ -1448,6 +1448,10 @@ function setWorkspaceMode(mode) {
   updateSetupTabs();
 }
 
+function setSetupTab() {
+  updateSetupTabs();
+}
+
 function updateSetupTabs() {
   el.setupUploadPanel?.classList.remove('hidden');
 }

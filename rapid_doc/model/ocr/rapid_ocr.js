@@ -76,7 +76,7 @@ export class RapidOcrModel {
     inst.recBatchNum = params.recBatchNum ?? cfg['Rec.rec_batch_num'] ?? cfg.rec_batch_num ?? REC_BATCH_NUM;
 
     const epList = resolveExecutionProviders(params, cfg);
-    const _useWebGpu = epList.includes('webgpu');
+    const useWebGpu = epList.includes('webgpu');
 
     const sessOpts = buildSessionOptions(epList, useWebGpu);
     await configureOrtWasmRuntime({ numThreads: cfg.numThreads ?? 4, useWebGpu });
@@ -173,7 +173,7 @@ export class RapidOcrModel {
   }
 
   /** @private */
-  async _loadRecModel(params, cfg, sessOpts, useWebGpu) {
+  async _loadRecModel(params, cfg, sessOpts, _useWebGpu) {
     const recUrl = params.recModelUrl
       ?? (params.lang === 'en' ? DEFAULT_REC_MODEL_URL_EN : DEFAULT_REC_MODEL_URL_CH);
     logger.info(`Loading Rec model: ${recUrl}`);
@@ -236,7 +236,7 @@ export class RapidOcrModel {
    * @param {object} [opts]
    * @returns {Promise<Array|null>}
    */
-  async ocr(img, _opts = {}) {
+  async ocr(img, opts = {}) {
     // Porting fix: seal branch — route to _ocrSeal when is_seal=true
     if (opts.is_seal === true) {
       const matImg = img instanceof cv.Mat ? img : checkImg(img);
@@ -254,7 +254,7 @@ export class RapidOcrModel {
       }
     }
 
-    const { det = true, rec = true, mfdRes = null, _returnWordBox = false } = opts;
+    const { det = true, rec = true, mfdRes = null } = opts;
 
     if (Array.isArray(img)) {
       if (!det && rec) return this._runRecOnly(img, opts);
@@ -381,7 +381,7 @@ export class RapidOcrModel {
    * @param {object} [opts]
    * @returns {Promise<Array>}
    */
-  async _ocrSeal(image, opts = {}) {
+  async _ocrSeal(image, _opts = {}) {
     if (!this._sealDetector) {
       throw new Error(
         '[RapidOcrModel._ocrSeal] Seal detector not initialised. ' +

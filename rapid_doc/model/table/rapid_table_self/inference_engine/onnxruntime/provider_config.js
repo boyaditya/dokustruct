@@ -1,8 +1,6 @@
 // Copyright (c) Opendatalab. All rights reserved.
 // PORTING NOTE: ProviderConfig — same as formula version (browser EP detection)
 
-import { configureOrtWasmRuntime } from '../../../../../utils/ort_runtime.js';
-
 export class ProviderConfig {
   static async getAvailableProviders() {
     // Table models (UNET, SLANet-Plus, table classifiers) run measurably
@@ -14,7 +12,11 @@ export class ProviderConfig {
 
   static async buildSessionOptions(extraOpts = {}) {
     const providers = await ProviderConfig.getAvailableProviders();
-    configureOrtWasmRuntime({ numThreads: 4, useWebGpu: false });
+    // Table is always WASM - don't reconfigure global ORT runtime here.
+    // The global configureOrtRuntime (called once per pipeline) already
+    // handles wasmPaths/numThreads. Re-configuring with useWebGpu:false
+    // would clobber the shared WebGPU device for layout/ocr when table
+    // is toggled, causing "WebGPU device lost" or provider mismatch.
     return { executionProviders: providers, logSeverityLevel: 4, graphOptimizationLevel: 'all', ...extraOpts };
   }
 }

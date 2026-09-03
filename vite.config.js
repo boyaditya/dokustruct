@@ -38,11 +38,18 @@ export default defineConfig({
     port: 5173,
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
       'Cross-Origin-Resource-Policy': 'cross-origin'
     }
   },
   
+  preview: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    }
+  },
   resolve: {
     conditions: ['module', 'browser', 'development|production', 'onnxruntime-web-use-extern-wasm'],
     alias: {

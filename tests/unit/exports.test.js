@@ -23,11 +23,7 @@ describe('Public API Export Integrity', () => {
         path.join(RAPID_DOC_DIR, 'index.js')
       );
     } catch (err) {
-      if (err.message && err.message.includes('Cannot find module')) {
-        console.warn('Skipping test: onnxruntime module not installed. Run npm install first.');
-        return;
-      }
-      throw err;
+      throw new Error(`Failed to import rapid_doc/index.js: ${err.message}`);
     }
 
     const exportNames = Object.keys(indexModule);
@@ -53,11 +49,7 @@ describe('Public API Export Integrity', () => {
         path.join(RAPID_DOC_DIR, 'index.js')
       );
     } catch (err) {
-      if (err.message && err.message.includes('Cannot find module')) {
-        console.warn('Skipping test: onnxruntime module not installed.');
-        return;
-      }
-      throw err;
+      throw new Error(`Failed to import rapid_doc/index.js: ${err.message}`);
     }
 
     expect(indexModule.docAnalyze).toBeDefined();
@@ -70,6 +62,8 @@ describe('Public API Export Integrity', () => {
     expect(indexModule.BlockType).toBeDefined();
     expect(indexModule.AbortException).toBeDefined();
     expect(indexModule.AtomModelSingleton).toBeDefined();
+    expect(indexModule.engineReset).toBeDefined();
+    expect(indexModule.MemoryDataWriter).toBeDefined();
   });
 
   it('exported functions are of type function or object', async () => {
@@ -79,11 +73,7 @@ describe('Public API Export Integrity', () => {
         path.join(RAPID_DOC_DIR, 'index.js')
       );
     } catch (err) {
-      if (err.message && err.message.includes('Cannot find module')) {
-        console.warn('Skipping test: onnxruntime module not installed.');
-        return;
-      }
-      throw err;
+      throw new Error(`Failed to import rapid_doc/index.js: ${err.message}`);
     }
 
     for (const [name, value] of Object.entries(indexModule)) {

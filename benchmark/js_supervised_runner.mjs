@@ -17,7 +17,7 @@ const SERVER_WAIT_MS = 45 * 1000;
 function usage() {
   return `
 Usage:
-  npm run bench:js:supervised -- --input benchmark/sample_final/timing_images --out benchmark/js_timing --ep webgpu --repeat 10 --warmup 2 --mode final --pdf-pages-batch 8 --chunk-size 8
+  npm run bench:js:supervised -- --input benchmark/sample/timing_images --out benchmark/js_timing --ep webgpu --repeat 10 --warmup 2 --mode final --pdf-pages-batch 8 --chunk-size 8
 
 Options:
   --input <path>              Input file or directory. Required.

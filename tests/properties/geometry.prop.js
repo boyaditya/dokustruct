@@ -63,32 +63,33 @@ const validBboxPair = fc.tuple(validIntBbox, validIntBbox);
 // --- Property 4: Bounding Box Normalization Precision ---
 
 describe('Property: Bounding Box Normalization Precision', () => {
-  it('normalizeToIntBbox produces integer coordinates within 1 pixel of correct rounding', () => {
+  it('normalizeToIntBbox produces integer coordinates with exact intTrunc/ceil parity', async () => {
+    const { intTrunc } = await import('../../rapid_doc/utils/math_utils.js');
     fc.assert(
       fc.property(validFloatBbox, (bbox) => {
         const result = normalizeToIntBbox(bbox);
-
-        // normalizeToIntBbox may return null for degenerate boxes after floor/ceil
         if (result === null) return true;
-
         const [x0, y0, x1, y1] = bbox;
         const [rx0, ry0, rx1, ry1] = result;
-
-        // All output values must be integers
         expect(Number.isInteger(rx0)).toBe(true);
         expect(Number.isInteger(ry0)).toBe(true);
         expect(Number.isInteger(rx1)).toBe(true);
         expect(Number.isInteger(ry1)).toBe(true);
-
-        // Each value should be within 1 pixel of the mathematically correct rounding
-        // normalizeToIntBbox uses floor for min and ceil for max
-        expect(Math.abs(rx0 - Math.floor(x0))).toBeLessThanOrEqual(1);
-        expect(Math.abs(ry0 - Math.floor(y0))).toBeLessThanOrEqual(1);
-        expect(Math.abs(rx1 - Math.ceil(x1))).toBeLessThanOrEqual(1);
-        expect(Math.abs(ry1 - Math.ceil(y1))).toBeLessThanOrEqual(1);
+        // Exact parity: floor→intTrunc for min, ceil for max (matches Python int() / math.ceil)
+        expect(rx0).toBe(intTrunc(Math.floor(x0)));
+        expect(ry0).toBe(intTrunc(Math.floor(y0)));
+        expect(rx1).toBe(Math.ceil(x1));
+        expect(ry1).toBe(Math.ceil(y1));
       }),
       { numRuns: 200 },
     );
+  });
+
+  it('calculateIou matches known overlap oracle', () => {
+    // 10x10 boxes overlapping 5x5 → intersection 25, union 175 → IoU 0.142857...
+    expect(calculateIou([0, 0, 10, 10], [5, 5, 15, 15])).toBeCloseTo(25 / 175, 5);
+    expect(calculateIou([0, 0, 10, 10], [0, 0, 10, 10])).toBeCloseTo(1, 5);
+    expect(calculateIou([0, 0, 10, 10], [20, 20, 30, 30])).toBeCloseTo(0, 5);
   });
 
   it('normalizeToIntBbox preserves bbox ordering (x0 < x1, y0 < y1) when result is non-null', () => {

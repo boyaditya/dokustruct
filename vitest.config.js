@@ -12,12 +12,16 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    environmentMatchGlobs: [['tests/unit/ui/**', 'jsdom']],
     include: ['tests/**/*.{test,spec,prop}.js'],
+    setupFiles: ['tests/setup.js'],
     timeout: 30000,
-    // Run test files sequentially: onnxruntime-web wasm init is not
-    // parallel-safe on Windows CI and can exceed per-test timeouts
     fileParallelism: false,
-    // Separate vitest config from vite.config.js to avoid interference
-    // with browser-specific Vite build settings (COOP/COEP headers, optimizeDeps, etc.)
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      include: ['rapid_doc/**/*.js', 'ui/**/*.js'],
+      exclude: ['**/*.yaml', 'rapid_doc/**/index.js'],
+    },
   },
 });

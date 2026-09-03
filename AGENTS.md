@@ -1,14 +1,14 @@
-# AGENTS.md — DokuStruct (RapidDoc-JS Porting Overview)
+# AGENTS.md — DokuStruct (RapidDoc-JS) Porting Overview
 
-Proyek ini adalah **port JavaScript** dari [RapidDoc Python](https://github.com/RapidAI/RapidDoc) ke lingkungan browser. Rantai sumber: `MinerU (OpenDataLab) → RapidDoc (RapidAI, Python) → DokuStruct (ini, browser)`.
+Proyek ini adalah **port JavaScript** dari [RapidDoc Python](https://github.com/RapidAI/RapidDoc) ke lingkungan browser — artefak thesis project. Rantai sumber: `MinerU (OpenDataLab) 2.6.4 → RapidDoc (RapidAI, Python) 0.9.4 → DokuStruct (ini, browser) 0.1.0`. Branding repo = **DokuStruct** (alias **RapidDoc-JS** di commit history).
 
 ---
 
 ## Ringkasan Porting
 
-Seluruh `rapid_doc/` di porting file-per-file dari `python/rapid_doc/`. Kode Python yang menjadi referensi masih disertakan dalam repository sebagai `python/rapid_doc/` — bukan sebagai dependency, melainkan sebagai kanon untuk menjaga paritas perilaku. Hanya `python/rapid_doc/` yang disertakan (lisensi upstream ada di root `LICENSE`); sisanya (demo assets, docker, tests, chunker) tidak dibawa dari upstream.
+Seluruh `rapid_doc/` di porting file-per-file dari `python/rapid_doc/`. Kode Python yang menjadi referensi masih disertakan dalam repository sebagai `python/rapid_doc/` — bukan sebagai dependency, melainkan sebagai kanon untuk menjaga paritas perilaku. `python/` adalah **subset reproduksibel minimal** (272 files: `rapid_doc/` 267 + `demo/demo_batch.py` & `demo_run.py` 55 KB + `pyproject.toml` + `LICENSE`); demo images/docker/tests/chunker tidak dibawa.
 
-Setiap file `.js` memiliki `PORTING NOTE` di header yang mendokumentasikan asal file `.py` dan keputusan adaptasi yang diambil.
+Setiap file `.js` memiliki `PORTING NOTE` di header yang mendokumentasikan asal file `.py` dan keputusan adaptasi (PRESERVE / ADAPT / INTRODUCE — 14/30/5, lihat `docs/porting-decisions.md`). Satu file bisa multi-kategori.
 
 ### Konvensi Penamaan
 
@@ -100,28 +100,31 @@ Ekstra JS:
 
 ## Relations dengan Python Reference
 
-| Aspek | Python | JS |
+| Aspek | Python (baseline) | JS (DokuStruct) |
 |---|---|---|
 | Runtime | CPython + ORT | ORT Web (WASM/WebGPU) |
 | PDF parsing | pypdfium2 | pdf-lib + PDF.js |
 | Image | PIL + OpenCV | OffscreenCanvas + OpenCV.js |
 | File I/O | Filesystem | File API + IndexedDB cache |
-| GPU | DirectML / CUDA | WebGPU |
+| GPU EP | DirectML (layout/OCR) / CPU (formula/table) | WebGPU (layout/OCR) / WASM (formula/table) |
 | Config | YAML files | JS objects + global injection |
 | CLI | Full filesystem CLI | No-op stubs |
-| Versi | `0.9.4` | `0.1.0` |
+| Versi | `0.9.4` | `0.1.0` (port of 0.9.4) |
 | MinerU base | `2.6.4` | `2.6.4` |
+| OmniDocBench | **v1.6** (1651 hal) | **v1.6** — eval N=350/50, seed 42 |
+| Tested env | Win10 / i5-4690 + RX 580 | Chrome 148, ORT Web 1.24.3 vs DirectML 1.24.4, OpenCV.js 4.10.0 |
 
 ---
 
 ## Benchmarking & Validasi
 
-- **OmniDocBench** (1651 halaman annotasi) sebagai ground truth.
-- Evaluasi membandingkan JS (WebGPU vs WASM) vs Python (DirectML vs CPU) pada:
-  - Kecepatan processing
-  - Paritas konten (NED, CER/WER, TEDS, IoU)
-  - Cold-start latency (download model, JIT, shader compilation)
-- `benchmark/` berisi framework evaluasi lengkap dengan 4-sheet Excel output dan metodologi statistik (geometric mean, bootstrap CI, Wilcoxon, Holm-Bonferroni).
+- **OmniDocBench v1.6** (1651 hal) sebagai ground truth.
+- **3 dimensi terpisah**:
+  - **Port-fidelity** (JS vs Py direct): Coverage F1 **0.9528**, TEDS-Struct **0.9504**, IoU **0.9021**, Kendall τ **0.9428** (N=350)
+  - **Accuracy vs annotations**: Proxy composite **71.6933 (JS) vs 74.2855 (Py)** Δ -2.59 CI [-3.94;-1.28] p 8e-06 (Holm) — Formula & TEDS ns — **proxy = normalized LaTeX edit, bukan CDM, ≠ official Overall**
+  - **Time**: **7.5785 s (JS) vs 3.8105 s (Py)** mean, georatio **1.804 CI [1.645;1.998]** (N=50, 3 warm-up +10 runs) — formula bottleneck R2.44, CV 1.02% vs 2.27% stabil
+- `benchmark/` berisi framework evaluasi lengkap dengan 4-sheet Excel output dan metodologi statistik (geometric mean, bootstrap 5000 seed 42, Wilcoxon paired + rank-biserial, Holm-Bonferroni per family).
+- Workbook + `sample_manifest.json` (seed 42, stratified source×language min 3) diarsip di `docs/evidence/`.
 
 ---
 
@@ -129,9 +132,10 @@ Ekstra JS:
 
 Saat bekerja di codebase ini:
 
-1. **Cari `PORTING NOTE`** — setiap file `.js` di `rapid_doc/` mungkin memiliki catatan porting di header, JSDoc, atau inline.
-2. **Python reference ada di `python/rapid_doc/`** — jika ragu dengan logika JS, cek file `.py` yang bersesuaian.
-3. **Jangan ubah Python reference** — itu adalah kanon; perubahan hanya di JS.
-4. **Koordinat bounding box** — selalu gunakan `bankerRound`/`intTrunc`, jangan `Math.round()`.
-5. **GPU state** — `ModelSingleton` dan ort_runtime.js mengelola shared WebGPU device; perhatikan `deviceLost` flag dan GPU mutex.
-6. **File ini adalah ringkasan porting** — untuk detail teknis implementasi, lihat kode sumber dan `PORTING NOTE` masing-masing file.
+1. **Cari `PORTING NOTE`** — setiap file `.js` di `rapid_doc/` mungkin memiliki catatan porting di header, JSDoc, atau inline (PRESERVE/ADAPT/INTRODUCE, lihat `docs/porting-decisions.md`).
+2. **Python reference ada di `python/rapid_doc/`** — jika ragu dengan logika JS, cek file `.py` yang bersesuaian. **Jangan ubah** — itu kanon v0.9.4; perubahan hanya di JS (patch graf JS-only ADP-26).
+3. **Branding = DokuStruct**, repo = DokuStruct / RapidDoc-JS alias — jangan rename `rapiddoc_model_cache` (IndexedDB 150 MB) dan key legacy `rapiddoc_resume`/`RapidDocResume` (fallback migrasi).
+4. **Koordinat bounding box** — selalu gunakan `bankerRound`/`intTrunc`, jangan `Math.round()` (ADP-28/29: banker's rounding, Math.trunc untuk `int()`).
+5. **GPU state** — `ModelSingleton` dan ort_runtime.js mengelola shared WebGPU device; perhatikan `deviceLost` flag dan GPU mutex (INT-04).
+6. **Benchmark** — OmniDocBench **v1.6**, N=350/50 seed 42, proxy composite ≠ official Overall; lihat `README.md` Benchmark & `benchmark/README.md`.
+7. **File ini adalah ringkasan porting** — untuk detail teknis implementasi, lihat kode sumber dan `PORTING NOTE` masing-masing file.

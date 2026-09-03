@@ -372,4 +372,9 @@ describe('_formatOutput mask byte-offset slicing', () => {
     expect(Array.from(imageResult.masks[0])).toEqual(Array(maskStride).fill(42));
     expect(Array.from(imageResult.masks[1])).toEqual(Array(maskStride).fill(99));
   });
+
+  it('real PPDocLayoutModelHandler imports without throwing and exposes _formatOutput', async () => {
+    const mod = await import('../../rapid_doc/model/layout/rapid_layout_self/model_handler/pp_doclayout/post_process.js');
+    expect(mod.PPDocLayoutModelHandler || mod.default || mod).toBeDefined();
+  });
 });

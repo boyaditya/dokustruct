@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "DokuStruct — browser-native document intelligence engine (RapidDoc JS port)",
+  "description": "DokuStruct (RapidDoc-JS 0.1.0) — browser-local Document Image Parsing, port of RapidDoc Python 0.9.4 (MinerU 2.6.4 base), OmniDocBench v1.6 — thesis artifact ",
   "scripts": {
     "dev": "vite --open false",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest --run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
     "bench:js:supervised": "node benchmark/js_supervised_runner.mjs",
     "lint": "eslint rapid_doc/ ui/"
   },
@@ -25,8 +27,11 @@
     "pdfjs-dist": "^4.5.136"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9.39.4",
+    "fake-indexeddb": "^6.2.5",
     "fast-check": "^4.8.0",
+    "jsdom": "^30.0.1",
     "playwright": "^1.60.0",
     "vite": "^7.3.1",
     "vitest": "^4.1.6"

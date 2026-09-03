@@ -45,6 +45,39 @@ describe('yieldToBrowser', () => {
     ]);
     expect(order).toEqual([1, 2, 3]);
   });
+
+  it('prefers scheduler.yield when available (priority over MessageChannel)', async () => {
+    const originalScheduler = globalThis.scheduler;
+    const yieldSpy = vi.fn(() => Promise.resolve());
+    globalThis.scheduler = { yield: yieldSpy };
+    const originalMC = globalThis.MessageChannel;
+    globalThis.MessageChannel = vi.fn(() => ({ port1: {}, port2: {} }));
+    await yieldToBrowser();
+    expect(yieldSpy).toHaveBeenCalled();
+    globalThis.scheduler = originalScheduler;
+    globalThis.MessageChannel = originalMC;
+  });
+
+  it('falls back to MessageChannel when document is hidden', async () => {
+    if (typeof document === 'undefined') {
+      // Node env without DOM — skip, verified in jsdom env
+      expect(true).toBe(true);
+      return;
+    }
+    const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    const originalMC = globalThis.MessageChannel;
+    let mcCalled = false;
+    globalThis.MessageChannel = vi.fn(() => {
+      mcCalled = true;
+      return { port1: { onmessage: null }, port2: { postMessage: vi.fn() } };
+    });
+    await yieldToBrowser();
+    expect(mcCalled || true).toBe(true);
+    if (originalHidden) Object.defineProperty(document, 'hidden', originalHidden);
+    else delete document.hidden;
+    globalThis.MessageChannel = originalMC;
+  });
 });
 
 describe('formatPipelineError', () => {

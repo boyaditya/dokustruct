@@ -6,8 +6,8 @@ processed directly into Excel (`results.xlsx`) plus a per-item diff dump for
 auditing — for both JS and Python.
 
 > **New to running an experiment?** Start with the workflow below. This document
-> is the general metric & workflow reference; methodology rationale is embedded
-> in the `Catatan Metodologi` section at the bottom.
+> is the general metric & workflow reference; methodology rationale is in the
+> `Methodology Notes` section below.
 
 ## Metrics
 
@@ -70,17 +70,31 @@ Recommended order: run the JS side first (put results in `js_results/`), then
 run the Python batch — evaluation triggers automatically at the end. No extra
 manual steps needed.
 
+## Prerequisites
+
+```bash
+# Node 22+, Python 3.10–3.13
+pip install -e ./python                    # rapid-doc + runtime deps (from python/pyproject.toml)
+pip install -r benchmark/requirements.txt  # openpyxl, scipy, numpy (Excel + stats)
+npx playwright install chromium             # for js_supervised_runner.mjs
+# Model download on first run: core ~285 MB, +Formula S ~520 MB (cached in IndexedDB)
+# See main README "Reproducibility" + "Dataset — Fetching OmniDocBench" for full setup
+```
+
+> Completed evaluation workbooks archived in `docs/evidence/`.
+
 ## Commands
 
 ```bash
 # Python batch — 10 runs + 2 warm-ups (accelerated/DirectML), auto-evaluate
-python -m demo.demo_batch --repeat 10 --warmup 2 --formula --table
+# (prefix PYTHONPATH=python if you installed via pip install -e ./python, else if demo is on PYTHONPATH)
+PYTHONPATH=python python -m demo.demo_batch --repeat 10 --warmup 2 --formula --table
 
 # CPU-only deployment config (all models CPU), paired with JS WASM
-python -m demo.demo_batch --repeat 10 --ep-mode cpu --formula --table
+PYTHONPATH=python python -m demo.demo_batch --repeat 10 --ep-mode cpu --formula --table
 
 # Without auto-evaluation
-python -m demo.demo_batch --repeat 10 --no-evaluate
+PYTHONPATH=python python -m demo.demo_batch --repeat 10 --no-evaluate
 
 # Manual evaluation
 python -m benchmark.evaluate --js-dir benchmark/js_results --py-dir benchmark/py_results
@@ -93,10 +107,9 @@ python -m benchmark.test_metrics
 from `--js-dir` into `<stem>_timing.json` + `<stem>_content_list.json`, so you
 can simply drop the combined JS export as-is.
 
-> Note: the Python batch entry point (`demo.demo_batch`) lives in the upstream
-> RapidDoc repository — this repo ships only the `python/rapid_doc/` reference
-> package and the benchmark framework. Point `demo_batch` at a RapidDoc
-> checkout, or re-implement its loop against `python/rapid_doc/`.
+> Python batch runners are shipped in this repo as `python/demo/demo_batch.py` + `demo_run.py`
+> (minimal subset — ~55 KB, no `demo/images` payload). Install via `pip install -e ./python`
+> then run with `PYTHONPATH=python python -m demo.demo_batch ...`. See main [README](../README.md#reproducibility--python-reference) for the full setup.
 
 ## Output
 
@@ -130,11 +143,12 @@ annotations. This closes the "Python is a baseline, not truth" gap — accuracy
 is now measured absolutely.
 
 ```bash
-# 1. Download the dataset (images + OmniDocBench.json) from HuggingFace/OpenDataLab,
-#    place images into your input folder of choice.
+# 1. Fetch the dataset (see main README "Dataset — Fetching OmniDocBench" for
+#    HuggingFace / OpenDataLab CLI commands; ~1.6 GB to ./omnidocbench/)
+#    After fetch you have ./omnidocbench/OmniDocBench.json + ./omnidocbench/images/*.jpg
 
 # 2. Convert GT JSON → per-page content_list (+ attribute index for stratification)
-python -m benchmark.omnidocbench --gt-json path/to/OmniDocBench.json \
+python -m benchmark.omnidocbench --gt-json ./omnidocbench/OmniDocBench.json \
     --out-dir benchmark/omnidocbench_gt
 
 # 3. Run both systems on the same images (JS via benchmark.html, Python via demo_batch)
@@ -147,22 +161,21 @@ python -m benchmark.evaluate \
     --gt-dir benchmark/omnidocbench_gt --output benchmark/results.xlsx
 ```
 
-GT metrics (sheet `results_gt_accuracy.xlsx`): **Overall** (OmniDocBench scale
-`((1−TextEdit)×100 + TableTEDS + FormulaScore)/3`), Text Edit, Text CER,
-Formula Edit, Table TEDS, Reading Order Edit, Coverage F1, BBox IoU — broken
-down **per document type** and **per language**, plus JS vs Python head-to-head.
+GT metrics (sheet `results_gt_accuracy.xlsx`): **Proxy composite** (proxy for OmniDocBench Overall — **mean of available components per page**, not official Overall `((1−TextEdit)×100+TEDS+CDM)/3`; Formula = normalized LaTeX edit distance, not CDM), Text Edit, Text CER, Formula Edit, Table TEDS / TEDS-Struct, Reading Order Edit, Coverage F1, BBox IoU — broken down **per document type** and **per language**, plus JS vs Python head-to-head.
 
-### Stratified sampling (no need for 1651 pages × 10 runs)
+### Stratified sampling — 350 accuracy / 50 timing (no need for 1651 pages × 10 runs)
 
 Running all 1651 pages × 10 runs × 2 systems is not feasible on a single
 machine, and **not required**. Accuracy is deterministic per system (proven by
 `content_stability`), so 1 run suffices; only **timing** needs repeats. The
 dataset is therefore split into two corpora via `benchmark/sampler.py`:
 
-| Corpus | Size (suggested) | Runs/system | Purpose |
-|---|---|---|---|
-| **Accuracy** | ~150–250 pages | 1 | quality metrics vs GT, stratified by type+language |
-| **Timing** | ~20–40 pages (subset of accuracy) | ≥10 + warmup | timing metrics, needs repeats |
+| Corpus | Evaluated (v1.6) | General suggested | Runs/system | Purpose |
+|---|---|---|---|---|
+| **Accuracy** | **350 pages** (seed 42, `data_source×language`, min 3/stratum) | 150–250 pages | 1 | quality metrics vs GT, stratified by type+language |
+| **Timing** | **50 pages** (subset of 350, 3 warm-up +10 runs) | 20–40 pages | ≥10 + warmup | timing metrics, needs repeats |
+
+*Environment example: i5-4690 / RX 580 8GB / Win10 / Chrome 148 / ORT Web 1.24.3 vs DirectML 1.24.4 / OpenCV.js 4.10.0, WASM for formula+table, WebGPU for layout/OCR.*
 
 Sampling: **proportional stratified** (per `data_source` × `language`), with a
 **minimum per stratum** so rare types (e.g. handwritten, exam) are not lost,
@@ -172,21 +185,23 @@ reporting.
 
 ```bash
 # 1. Convert GT first (produces omnidocbench_index.json for stratification)
-python -m benchmark.omnidocbench --gt-json path/to/OmniDocBench.json \
+python -m benchmark.omnidocbench --gt-json ./omnidocbench/OmniDocBench.json \
     --out-dir benchmark/omnidocbench_gt
 
 # 2. Sample + copy images to a ready-to-process folder
+#    Full (N=350/50): --accuracy-n 350 --timing-n 50
+#    Smaller example:  --accuracy-n 200 --timing-n 30
 python -m benchmark.sampler \
     --index benchmark/omnidocbench_gt/omnidocbench_index.json \
-    --images path/to/omnidocbench/images \
+    --images ./omnidocbench/images \
     --out-dir benchmark/sample \
-    --accuracy-n 200 --timing-n 30 --min-per-stratum 3 --seed 42
-# → benchmark/sample/accuracy_images/  (200 images, 1 run)
-# → benchmark/sample/timing_images/    (30 images, 10 runs)
-# → benchmark/sample/sample_manifest.json
+    --accuracy-n 350 --timing-n 50 --min-per-stratum 3 --seed 42
+# → benchmark/sample/accuracy_images/  (350 images, 1 run)
+# → benchmark/sample/timing_images/    (50 images, 10 runs)
+# → benchmark/sample/sample_manifest.json  (lock & archive in docs/evidence/)
 
 # 3a. ACCURACY — both systems, 1 run (formula+table ON), score vs GT
-python -m demo.demo_batch --pdfs benchmark/sample/accuracy_images \
+PYTHONPATH=python python -m demo.demo_batch --pdfs benchmark/sample/accuracy_images \
     --benchmark-dir benchmark/py_accuracy --repeat 1 --no-warmup --formula --table --no-evaluate
 #    (JS: drop accuracy_images into benchmark.html, repeat=1, export to benchmark/js_accuracy)
 python -m benchmark.evaluate --js-dir benchmark/js_accuracy \
@@ -196,7 +211,7 @@ python -m benchmark.evaluate --js-dir benchmark/js_accuracy \
     --output benchmark/results_accuracy.xlsx
 
 # 3b. TIMING — both systems, 10 runs + warmup, on a small subset
-python -m demo.demo_batch --pdfs benchmark/sample/timing_images \
+PYTHONPATH=python python -m demo.demo_batch --pdfs benchmark/sample/timing_images \
     --benchmark-dir benchmark/py_timing --repeat 10 --warmup 2 \
     --benchmark-mode final --formula --table --no-evaluate
 #    (JS: open benchmark.html?benchmarkMode=final, drop timing_images,
@@ -256,10 +271,10 @@ Pilot mode reads each metric's std from the pilot results, then reports the
 from measured variance, not picked arbitrarily.
 
 > **Documented deviation**: the official OmniDocBench formula metric is **CDM**
-> (requires TeX Live + ImageMagick + Ghostscript to render LaTeX). Because it is
+> (TeX Live + ImageMagick + Ghostscript) and Overall is `((1−TextEdit)×100+TEDS+CDM)/3`. Because CDM is
 > heavyweight and not relevant for a browser port, formulas are scored with
-> **normalized-LaTeX edit distance** as a proxy. State this in your methodology
-> so full parity with the official leaderboard is not claimed.
+> **normalized-LaTeX edit distance** as a proxy and the composite is **Skor Komposit Proksi** (mean of
+> available components per page). State this so full parity with the official leaderboard is not claimed. v1.6, not v1.5.
 
 ## Methodology Notes
 

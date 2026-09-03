@@ -1286,15 +1286,15 @@ async function buildJsExcel(exportData) {
   const GRP_JS = '70AD47';
   const h = (v) => ({ v, bold: true, fill: HDR });
 
-  // Sheet 1: Per Dokumen (mean timings)
+  // Sheet 1: Per Document (mean timings)
   const perDoc = [];
   perDoc.push([
-    h('Dokumen'), h('Halaman'), h('Inferensi (s)'), h('Inf/Halaman (s)'),
+    h('Document'), h('Pages'), h('Inference (s)'), h('Inf/Page (s)'),
     h('Model Init (s)'), h('PDF Load (s)'), h('Orient. (s)'), h('Layout (s)'),
-    h('Region (s)'), h('OCR Det (s)'), h('OCR Rec (s)'), h('Formula (s)'), h('Tabel (s)'),
+    h('Region (s)'), h('OCR Det (s)'), h('OCR Rec (s)'), h('Formula (s)'), h('Table (s)'),
     h('Postprocess (s)'), h('Other (s)'), h('Total (s)'), h('Cold Start (s)'),
     h('N Run'), h('Std'), h('CV'), h('Median'), h('Min'), h('Max'),
-    h('Konten Stabil'),
+    h('Content Stable'),
   ]);
   for (const [stem, payload] of Object.entries(exportData.files)) {
     const t = payload.timing;
@@ -1313,15 +1313,15 @@ async function buildJsExcel(exportData) {
       t.postprocess_s, t.other_s ?? 0, t.total_s, cold,
       t.stats?.n || 1, std, infer > 0 ? round4(std / infer) : 0,
       t.stats?.median_inference_s, t.stats?.min_inference_s, t.stats?.max_inference_s,
-      t.content_stability?.skipped ? 'N/A' : (t.content_stability?.identical ? 'ya' : 'TIDAK'),
+      t.content_stability?.skipped ? 'N/A' : (t.content_stability?.identical ? 'yes' : 'NO'),
     ]);
   }
 
   // Sheet 2: Per Run (variance analysis)
   const perRun = [];
-  perRun.push([h('Dokumen'), h('Run'), h('Total (s)'), h('Inferensi (s)'),
+  perRun.push([h('Document'), h('Run'), h('Total (s)'), h('Inference (s)'),
     h('Model Init (s)'), h('PDF Load (s)'), h('Orient. (s)'), h('Layout (s)'),
-    h('Region (s)'), h('OCR Det (s)'), h('OCR Rec (s)'), h('Formula (s)'), h('Tabel (s)'),
+    h('Region (s)'), h('OCR Det (s)'), h('OCR Rec (s)'), h('Formula (s)'), h('Table (s)'),
     h('Postprocess (s)'), h('Other (s)')]);
   for (const [stem, payload] of Object.entries(exportData.files)) {
     for (const r of payload.timing.runs || []) {

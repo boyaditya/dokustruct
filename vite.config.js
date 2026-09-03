@@ -9,8 +9,8 @@ export default defineConfig({
   publicDir: path.resolve(__dirname, 'public'),
   cacheDir: 'node_modules/.vite_dokustruct',
   
-  // SOLUSI 1: Membatasi entry point hanya ke index.html
-  // Agar Vite tidak menscan file HTML legacy/rusak di folder lain
+  // SOLUTION 1: Limit entry points to index.html
+  // Prevent Vite from scanning legacy/broken HTML files in other folders
   build: {
     target: 'es2022',
     rollupOptions: {
@@ -21,7 +21,7 @@ export default defineConfig({
     },
   },
 
-  // SOLUSI 2: Update target esbuild untuk mendukung Top-level await (pdfjs-dist)
+  // SOLUTION 2: Update esbuild target to support Top-level await (pdfjs-dist)
   optimizeDeps: {
     esbuildOptions: {
       target: 'es2022',

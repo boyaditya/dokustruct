@@ -18,6 +18,7 @@ models/
 
 # Benchmark run artifacts (generated results, not source)
 benchmark/*.xlsx
+!benchmark/examples/*.xlsx
 benchmark/try/
 benchmark/diffs/
 benchmark/sample/
@@ -59,3 +60,7 @@ Desktop.ini
 
 # Python cache
 __pycache__/
+
+# Vitest coverage
+coverage/
+

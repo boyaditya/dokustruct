@@ -1,27 +1,27 @@
 ﻿"""
 benchmark/evaluate.py
 =====================
-Evaluasi komparatif Sistem A (JS/browser) vs Sistem B (Python).
+Comparative evaluation System A (JS/browser) vs System B (Python).
 
-Metrik per dokumen (mean atas N run):
-  WAKTU
-    - total_inference_s (layout+ocr+formula+table) dan rasio T_A / T_B
-    - inference per halaman (s/halaman)
-    - cold-start / model_init sebagai metrik headline terpisah (bukan dibuang)
-  KESEPADANAN OUTPUT (alignment per-halaman, content-aware)
+Metrics per document (mean over N runs):
+  TIMING
+    - total_inference_s (layout+ocr+formula+table) and T_A / T_B ratio
+    - inference per page (s/page)
+    - cold-start / model_init as separate headline metric (not discarded)
+  OUTPUT PARITY (per-page, content-aware alignment)
     - Type Sequence Difference
-    - Coverage precision / recall / F1 (menangkap item hilang / berlebih)
-    - Mean NED raw & ternormalisasi (NFC + whitespace collapse)
-    - CER / WER (referensi = Python)
-    - TEDS untuk tabel
+    - Coverage precision / recall / F1 (captures missing / extra items)
+    - Mean NED raw & normalized (NFC + whitespace collapse)
+    - CER / WER (reference = Python)
+    - TEDS for tables
     - Mean bbox IoU
-    - Korelasi urutan baca (Kendall tau, Spearman rho)
-  STATISTIK AGREGAT
-    - geometric mean untuk rasio (menghindari bias mean-of-ratios)
-    - uji Wilcoxon signed-rank (JS vs Python) + effect size
+    - Reading order correlation (Kendall tau, Spearman rho)
+  AGGREGATE STATISTICS
+    - geometric mean for ratios (avoiding mean-of-ratios bias)
+    - Wilcoxon signed-rank test (JS vs Python) + effect size
 
-Selain Excel, tiap dokumen menghasilkan dump diff per-item (string output)
-untuk audit di benchmark/diffs/<stem>_diff.json.
+In addition to Excel, each document produces a per-item diff dump (string output)
+for auditing at benchmark/diffs/<stem>_diff.json.
 
 Pemakaian:
   python -m benchmark.evaluate \
@@ -369,7 +369,7 @@ def evaluate_document(stem: str, js_dir: Path, py_dir: Path,
     mismatch = _config_mismatch(js_cfg, py_cfg)
     # Model hashes: both sides hash their own files; we cannot compare the bytes
     # directly (JS serves the patched browser ONNX, Python may use a different
-    # build) but we CAN record both so the thesis documents exactly which
+    # build) but we CAN record both so the evaluator records exactly which
     # artifacts ran. A within-system manifest mismatch is the real red flag.
     js_hashes, py_hashes = _model_hashes(js_timing), _model_hashes(py_timing)
     if mismatch:
@@ -563,7 +563,7 @@ def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> Non
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.chart import BarChart, Reference
 
-    ws = wb.create_sheet("Ringkasan", 0)
+    ws = wb.create_sheet("Summary", 0)
     ws.sheet_view.showGridLines = False
     BLUE = "1F4E79"
     HDR_FILL = PatternFill("solid", fgColor=BLUE)
@@ -608,29 +608,29 @@ def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> Non
     timing_context = (
         "run tunggal/non-final, bukan dasar klaim performa."
         if is_pilot else
-        "dari corpus akurasi repeat=1, bukan dasar klaim performa."
+        "from accuracy corpus repeat=1, not basis for performance claim."
     )
     safe_claim = (
-        "tidak ditemukan perbedaan akurasi signifikan pada sampel pilot."
+        "no significant accuracy difference found in pilot sample."
         if is_pilot else
-        "tidak ditemukan perbedaan akurasi signifikan pada sampel final."
+        "no significant accuracy difference found in final sample."
     )
 
-    ws.cell(row=row, column=1, value=f"Ringkasan {run_label} Sistem A dan Sistem B").font = TITLE
+    ws.cell(row=row, column=1, value=f"Summary {run_label} System A and System B").font = TITLE
     row += 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
     ws.cell(row=row, column=1, value=(
-        f"Mode laporan: {report_mode}. Sistem A = JavaScript/peramban; Sistem B = "
-        f"Python baseline pembanding. Jumlah dokumen manifest/evaluasi: {n_docs}; "
-        f"dokumen lengkap: {complete_docs}. Timing pada workbook ini hanya diagnostik "
+        f"Report mode: {report_mode}. System A = JavaScript/browser; System B = "
+        f"Python baseline. Manifest/evaluated documents: {n_docs}; "
+        f"complete documents: {complete_docs}. Timing in this workbook is diagnostic only "
         f"{timing_context}"
     )).font = NOTE
     ws.row_dimensions[row].height = 36
     row += 2
 
-    ws.cell(row=row, column=1, value="Tabel 4.1  Kesepadanan Output terhadap Baseline Python").font = CAP
+    ws.cell(row=row, column=1, value="Table 4.1  Output Parity vs Python Baseline").font = CAP
     row += 1
-    for c, h in enumerate(["Aspek", "Nilai", "Skor 0-100", "Interpretasi"], start=1):
+    for c, h in enumerate(["Aspect", "Value", "Score 0-100", "Interpretation"], start=1):
         cell = ws.cell(row=row, column=c, value=h)
         cell.font = HDR
         cell.fill = HDR_FILL
@@ -640,19 +640,19 @@ def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> Non
     data_start = row
     quality = [
         ("Cakupan item (F1)", mean("coverage_f1"), score01(mean("coverage_f1")),
-         "Proporsi item yang sama-sama terdeteksi oleh kedua sistem."),
+         "Proportion of items detected by both systems."),
         ("Kemiripan teks (1 - NED norm)", text_sim, score01(text_sim),
          "Skor teks berbasis NED ternormalisasi; CER/WER tetap dilaporkan sebagai error metric."),
-        ("Konsistensi tipe item", mean("type_consistency"), score01(mean("type_consistency")),
-         "Proporsi pasangan item dengan tipe yang sama."),
-        ("Kemiripan formula (1 - Formula NED)", formula_sim, score01(formula_sim),
-         "Berlaku hanya pada dokumen dengan formula yang terdeteksi."),
-        ("Isi tabel (TEDS)", mean("mean_teds"), score01(mean("mean_teds")),
-         "Berlaku hanya pada dokumen dengan pasangan tabel."),
-        ("Struktur tabel (TEDS-Struct)", mean("mean_teds_struct"), score01(mean("mean_teds_struct")),
-         "Berlaku hanya pada dokumen dengan pasangan tabel."),
-        ("Kesesuaian posisi (BBox IoU)", mean("mean_bbox_iou"), score01(mean("mean_bbox_iou")),
-         "Kemiripan posisi elemen pada halaman."),
+        ("Item type consistency", mean("type_consistency"), score01(mean("type_consistency")),
+         "Proportion of paired items with the same type."),
+        ("Formula similarity (1 - Formula NED)", formula_sim, score01(formula_sim),
+         "Applies only to documents with detected formulas."),
+        ("Table content (TEDS)", mean("mean_teds"), score01(mean("mean_teds")),
+         "Applies only to documents with table pairs."),
+        ("Table structure (TEDS-Struct)", mean("mean_teds_struct"), score01(mean("mean_teds_struct")),
+         "Applies only to documents with table pairs."),
+        ("Positional fit (BBox IoU)", mean("mean_bbox_iou"), score01(mean("mean_bbox_iou")),
+         "Positional similarity of elements on the page."),
         ("Urutan baca (Kendall tau)", tau,
          score01((tau + 1.0) / 2.0) if isinstance(tau, (int, float)) else None,
          "Korelasi urutan baca; skor 100 berarti urutan identik."),
@@ -672,7 +672,7 @@ def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> Non
 
     ws.cell(row=row, column=1, value=f"Tabel D.1  Timing Diagnostik {run_label}").font = CAP
     row += 1
-    for c, h in enumerate(["Besaran", "Nilai"], start=1):
+    for c, h in enumerate(["Metric", "Value"], start=1):
         cell = ws.cell(row=row, column=c, value=h)
         cell.font = HDR
         cell.fill = HDR_FILL
@@ -697,8 +697,8 @@ def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> Non
         row += 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
     ws.cell(row=row, column=1, value=(
-        f"Catatan: timing di workbook {report_mode} hanya membantu audit. Untuk klaim performa, "
-        "gunakan report_mode=timing_final dengan warm-up dan measured repeats."
+        f"Note: timing in workbook {report_mode} is diagnostic only. For performance claims, "
+        "use report_mode=timing_final with warm-up and measured repeats."
     )).font = NOTE
     ws.row_dimensions[row].height = 30
     row += 2
@@ -707,7 +707,7 @@ def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> Non
     row += 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
     ws.cell(row=row, column=1, value=(
-        f"Pada {sample_label} ini, workbook utama dipakai untuk audit kesepadanan output JS terhadap "
+        f"In this {sample_label}, the main workbook is used for auditing JS output parity against "
         "baseline Python. Klaim akurasi absolut dan signifikansi JS vs Python harus merujuk ke "
         "workbook *_gt_accuracy.xlsx; bila hasil Holm tidak signifikan, narasi yang aman adalah "
         + safe_claim
@@ -715,13 +715,13 @@ def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> Non
     ws.row_dimensions[row].height = 48
     row += 2
 
-    ws.cell(row=row, column=1, value="Gambar 4.1  Skor Kesepadanan Output (0-100)").font = CAP
+    ws.cell(row=row, column=1, value="Figure 4.1  Skor Kesepadanan Output (0-100)").font = CAP
     chart = BarChart()
     chart.type = "bar"
     chart.style = 11
     chart.title = "Kesepadanan Output terhadap Baseline Python"
-    chart.x_axis.title = "Skor (0-100)"
-    chart.y_axis.title = "Aspek"
+    chart.x_axis.title = "Score (0-100)"
+    chart.y_axis.title = "Aspect"
     chart.x_axis.scaling.min = 0
     chart.x_axis.scaling.max = 100
     data = Reference(ws, min_col=3, max_col=3, min_row=data_start - 1, max_row=data_end)
@@ -735,10 +735,10 @@ def _write_accuracy_summary_sheet(wb, rows: List[Dict], report_mode: str) -> Non
 
 
 def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_final") -> None:
-    """Formal, thesis-ready summary sheet (Bab 4) with native Excel charts.
+    """Formal, report-ready summary sheet (Chapter 4) with native Excel charts.
 
-    Designed to be copied directly into a thesis results chapter: numbered
-    tables (Tabel 4.x), figure captions (Gambar 4.x), formal interpretation
+    Designed to be copied directly into a results chapter: numbered
+    tables (Table 4.x), figure captions (Figure 4.x), formal interpretation
     prose, and clean grouped/bar charts that reference visible data blocks so
     nothing overlaps or renders as broken 3-D shapes.
     """
@@ -749,7 +749,7 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     from openpyxl.utils import get_column_letter
     from openpyxl.chart import BarChart, Reference
 
-    ws = wb.create_sheet("Ringkasan", 0)
+    ws = wb.create_sheet("Summary", 0)
     ws.sheet_view.showGridLines = False
 
     # â”€â”€ Palette (subtle, academic) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -812,23 +812,23 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     # â”€â”€ Title block â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     ws.merge_cells(f"A{row}:H{row}")
     ws.cell(row=row, column=1,
-            value="Ringkasan Hasil Pengujian Komparatif Sistem A dan Sistem B").font = F_TITLE
+            value="Summary Hasil Pengujian Komparatif Sistem A dan Sistem B").font = F_TITLE
     ws.row_dimensions[row].height = 22
     row += 1
     ws.merge_cells(f"A{row}:H{row}")
     ws.cell(row=row, column=1, value=(
         f"Sistem A = implementasi JavaScript/peramban; Sistem B = implementasi Python (baseline pembanding). "
-        f"Jumlah dokumen uji: {n_docs}. Nilai waktu merupakan rata-rata aritmetik; rasio menggunakan rata-rata "
+        f"Test documents: {n_docs}. Time values are arithmetic means; ratios use "
         f"geometrik. Sistem B berperan sebagai acuan pembanding, bukan ground truth.")).font = F_NOTE
     ws.row_dimensions[row].height = 28
     row += 2
 
     # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # TABEL 4.1 â€” Waktu eksekusi per tahap
+    # Table 4.1 â€” Waktu eksekusi per tahap
     # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     ws.merge_cells(f"A{row}:E{row}")
     ws.cell(row=row, column=1,
-            value="Tabel 4.1  Perbandingan Waktu Eksekusi per Tahap Pemrosesan (detik)").font = F_CAP
+            value="Table 4.1  Perbandingan Waktu Eksekusi per Tahap Pemrosesan (detik)").font = F_CAP
     row += 1
     t1_hdr = row
     headers = ["Tahap Pemrosesan", "Sistem A (s)", "Sistem B (s)", "Rasio A/B", "Lebih Cepat"]
@@ -884,13 +884,13 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     row += 2
 
     # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # TABEL 4.2 â€” Kesepadanan keluaran
+    # Table 4.2 â€” Kesepadanan keluaran
     # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     ws.merge_cells(f"A{row}:E{row}")
     ws.cell(row=row, column=1,
-            value="Tabel 4.2  Metrik Kesepadanan Keluaran Sistem A terhadap Sistem B").font = F_CAP
+            value="Table 4.2  Metrik Kesepadanan Keluaran Sistem A terhadap Sistem B").font = F_CAP
     row += 1
-    for j, h in enumerate(["Aspek Kesepadanan", "Nilai", "Skor (0â€“100)", "Interpretasi"], start=1):
+    for j, h in enumerate(["Parity Aspect", "Value", "Score (0â€“100)", "Interpretasi"], start=1):
         cell = ws.cell(row=row, column=j, value=h)
         cell.font = F_HDRW; cell.fill = HDR_FILL; cell.border = box; cell.alignment = cC
     # widen interpretation column via merge over D:E
@@ -903,7 +903,7 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     text_sim = (1 - ned_norm) if isinstance(ned_norm, (int, float)) else None
     quality = [
         ("Cakupan item (F1)", cov_f1, score(cov_f1),
-         "Proporsi item yang sama-sama terdeteksi kedua sistem."),
+         "Proportion of items detected by both systems."),
         ("Kemiripan teks (1 - NED norm)", text_sim, score(text_sim),
          "Tingkat kemiripan teks berbasis NED; CER/WER tetap dilaporkan sebagai error metric."),
         ("Struktur tabel (TEDS-Struct)", teds_s, score(teds_s),
@@ -934,13 +934,13 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     row += 1
 
     # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # TABEL 4.3 â€” Ringkasan statistik waktu & cold-start
+    # Table 4.3 â€” Summary statistik waktu & cold-start
     # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     ws.merge_cells(f"A{row}:E{row}")
     ws.cell(row=row, column=1,
-            value="Tabel 4.3  Ringkasan Statistik Waktu Inferensi").font = F_CAP
+            value="Table 4.3  Summary Statistik Waktu Inferensi").font = F_CAP
     row += 1
-    for j, h in enumerate(["Besaran", "Nilai"], start=1):
+    for j, h in enumerate(["Metric", "Value"], start=1):
         cell = ws.cell(row=row, column=j, value=h)
         cell.font = F_HDRW; cell.fill = HDR_FILL; cell.border = box; cell.alignment = cC
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
@@ -986,7 +986,7 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
          f"cakupan item mencapai {score(cov_f1) if score(cov_f1) is not None else '-'} dari 100, "
          f"kemiripan teks {score(text_sim) if score(text_sim) is not None else '-'} dari 100, dan "
          f"struktur tabel {score(teds_s) if score(teds_s) is not None else '-'} dari 100. "
-         f"Hindari klaim paritas final tanpa evaluasi GT dan kecukupan sampel."),
+         f"Avoid claiming final parity without GT evaluation and sample adequacy."),
         ("Perbandingan dilakukan dalam kerangka deployment-config (membandingkan kedua sistem "
          "sebagaimana digunakan secara nyata), sehingga perbedaan waktu mencakup pengaruh bahasa, "
          "pustaka runtime, dan penyedia eksekusi sekaligus, bukan isolasi satu variabel."),
@@ -1007,10 +1007,10 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     CH_W, CH_H = 16, 8.5
     GAP = 19
 
-    # Gambar 4.1 â€” waktu per tahap (grouped column, A vs B)
+    # Figure 4.1 â€” waktu per tahap (grouped column, A vs B)
     ws.merge_cells(f"A{row}:E{row}")
     ws.cell(row=row, column=1,
-            value="Gambar 4.1  Perbandingan Waktu Eksekusi per Tahap").font = F_CAP
+            value="Figure 4.1  Perbandingan Waktu Eksekusi per Tahap").font = F_CAP
     anchor1 = row + 1
     ch1 = BarChart()
     ch1.type = "col"; ch1.grouping = "clustered"; ch1.style = 10
@@ -1026,10 +1026,10 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     ws.add_chart(ch1, f"A{anchor1}")
     row = anchor1 + GAP
 
-    # Gambar 4.2 â€” rasio per tahap (horizontal bar)
+    # Figure 4.2 â€” rasio per tahap (horizontal bar)
     ws.merge_cells(f"A{row}:E{row}")
     ws.cell(row=row, column=1,
-            value="Gambar 4.2  Rasio Waktu Sistem A terhadap Sistem B per Tahap").font = F_CAP
+            value="Figure 4.2  Rasio Waktu Sistem A terhadap Sistem B per Tahap").font = F_CAP
     anchor2 = row + 1
     ch2 = BarChart()
     ch2.type = "bar"; ch2.style = 12
@@ -1045,15 +1045,15 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     ws.add_chart(ch2, f"A{anchor2}")
     row = anchor2 + GAP
 
-    # Gambar 4.3 â€” kesepadanan output (horizontal bar, 0-100)
+    # Figure 4.3 â€” kesepadanan output (horizontal bar, 0-100)
     ws.merge_cells(f"A{row}:E{row}")
     ws.cell(row=row, column=1,
-            value="Gambar 4.3  Skor Kesepadanan Keluaran (skala 0â€“100)").font = F_CAP
+            value="Figure 4.3  Skor Kesepadanan Keluaran (skala 0â€“100)").font = F_CAP
     anchor3 = row + 1
     ch3 = BarChart()
     ch3.type = "bar"; ch3.style = 11
     ch3.title = "Kesepadanan Keluaran Sistem A terhadap Sistem B"
-    ch3.x_axis.title = "Skor (0â€“100)"; ch3.y_axis.title = "Aspek"
+    ch3.x_axis.title = "Score (0â€“100)"; ch3.y_axis.title = "Aspek"
     ch3.height, ch3.width = CH_H, CH_W
     ch3.gapWidth = 80
     d3 = Reference(ws, min_col=3, max_col=3, min_row=t2_data_start - 1, max_row=t2_data_end)
@@ -1071,7 +1071,7 @@ def _write_summary_sheet(wb, rows: List[Dict], report_mode: str = "accuracy_fina
     ws.cell(row=row, column=1, value=(
         "Sumber: hasil pengujian penulis. Rasio dihitung dengan rata-rata geometrik; selang "
         "kepercayaan 95% diperoleh melalui bootstrap. Uji signifikansi (Wilcoxon signed-rank) dan "
-        "rincian per dokumen tersedia pada lembar 'Per Dokumen', 'Statistik Agregat', dan 'Uji Statistik'."
+        "rincian per dokumen tersedia pada lembar 'Per Document', 'Aggregate Statistics', dan 'Statistical Tests'."
     )).font = F_NOTE
     ws.row_dimensions[row].height = 28
 
@@ -1090,9 +1090,9 @@ def write_excel(rows: List[Dict], output_path: Path,
     HDR = Font(bold=True, color="FFFFFF")
     BLUE = PatternFill("solid", fgColor="4472C4")
 
-    # â”€â”€ Sheet 1: Per Dokumen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Sheet 1: Per Document â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     ws = wb.active
-    ws.title = "Per Dokumen"
+    ws.title = "Per Document"
     GROUPS = [
         ("Dokumen", "4472C4", ["document", "page_count", "config_mismatch",
             "status", "input_kind", "input_same_bytes"]),
@@ -1199,8 +1199,8 @@ def write_excel(rows: List[Dict], output_path: Path,
     ws.row_dimensions[2].height = 30
     ws.freeze_panes = "D3"
 
-    # â”€â”€ Sheet 2: Statistik Agregat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    ws2 = wb.create_sheet("Statistik Agregat")
+    # â”€â”€ Sheet 2: Aggregate Statistics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    ws2 = wb.create_sheet("Aggregate Statistics")
     stat_keys = [
         ("js_inference_s", "JS Inferensi (s)"), ("py_inference_s", "Py Inferensi (s)"),
         ("js_per_page_s", "JS Inf/Halaman (s)"), ("py_per_page_s", "Py Inf/Halaman (s)"),
@@ -1274,8 +1274,8 @@ def write_excel(rows: List[Dict], output_path: Path,
              value="Catatan: untuk rasio gunakan Geomean (mean-of-ratios bias). "
                    "CI via bootstrap 5000x atas log-rasio.").font = Font(italic=True)
 
-    # â”€â”€ Sheet 3: Uji Statistik â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    ws4 = wb.create_sheet("Uji Statistik")
+    # â”€â”€ Sheet 3: Statistical Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    ws4 = wb.create_sheet("Statistical Tests")
     ws4.append(["Uji Wilcoxon signed-rank (paired, JS vs Python) atas dokumen"])
     ws4["A1"].font = Font(bold=True)
     ws4.append([])
@@ -1349,7 +1349,7 @@ def write_excel(rows: List[Dict], output_path: Path,
     ws3.column_dimensions["L"].width = 55
     ws3.column_dimensions["M"].width = 55
 
-    # â”€â”€ Sheet 0: Ringkasan (plain-language summary + charts), inserted first â”€
+    # â”€â”€ Sheet 0: Summary (plain-language summary + charts), inserted first â”€
     try:
         _write_summary_sheet(wb, rows, report_mode=report_mode)
     except Exception as e:  # never let the summary break the main export
@@ -1542,9 +1542,9 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
 
     metric_keys = _GT_METRIC_KEYS
 
-    # â”€â”€ Sheet 1: Per Dokumen (both systems) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Sheet 1: Per Document (both systems) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     ws = wb.active
-    ws.title = "Akurasi vs GT (Per Dok)"
+    ws.title = "Accuracy vs GT (Per Document)"
     head = ["Dokumen", "Sistem", "Status", "Doc Type", "Bahasa"] + [lbl for _, lbl in metric_keys] \
         + ["N Teks", "N Formula GT", "N Tabel GT", "N Formula Match",
            "N Tabel Match", "Hanya Pred", "Hanya GT"]
@@ -1575,8 +1575,8 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
                "penalti. Jangan dibandingkan dengan angka leaderboard."])
     ws.cell(row=ws.max_row, column=1).font = NOTE
 
-    # â”€â”€ Sheet 2: Ringkasan per Sistem â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    ws2 = wb.create_sheet("Ringkasan per Sistem")
+    # â”€â”€ Sheet 2: System Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    ws2 = wb.create_sheet("System Summary")
     ws2.append(["Sistem", "N Dok", "N Dok Formula", "N Dok Tabel", "N Formula GT", "N Tabel GT"]
                + [lbl for _, lbl in metric_keys])
     for cell in ws2[1]:
@@ -1593,12 +1593,12 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
     for c in range(1, len(metric_keys) + 7):
         ws2.column_dimensions[get_column_letter(c)].width = 16
 
-    # â”€â”€ Sheet 3: Per Kategori Dokumen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    ws3 = wb.create_sheet("Per Kategori Dokumen")
+    # â”€â”€ Sheet 3: By Document Category â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    ws3 = wb.create_sheet("By Document Category")
     _write_strata_sheet(ws3, scores, "data_source", metric_keys, HDR, BLUE)
 
-    # â”€â”€ Sheet 4: Per Bahasa â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    ws4 = wb.create_sheet("Per Bahasa")
+    # â”€â”€ Sheet 4: By Language â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    ws4 = wb.create_sheet("By Language")
     _write_strata_sheet(ws4, scores, "language", metric_keys, HDR, BLUE)
 
     # â”€â”€ Sheet 5: JS vs Py vs GT (head-to-head, PAIRED + significance) â”€â”€â”€â”€â”€â”€â”€
@@ -1660,7 +1660,7 @@ def write_gt_excel(scores: Dict[str, List[Dict]], output_path: Path) -> None:
     for c in range(1, 11):
         ws5.column_dimensions[get_column_letter(c)].width = 18
 
-    # â”€â”€ Sheet 6: Kecukupan Sampel (sample adequacy) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Sheet 6: Sample Adequacy (sample adequacy) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     _write_sample_adequacy_sheet(wb, scores, metric_keys, HDR, BLUE, NOTE)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1683,14 +1683,14 @@ def _write_sample_adequacy_sheet(wb, scores, metric_keys, HDR, FILL, NOTE) -> No
 
     BOLD = Font(bold=True)
     RED = PatternFill("solid", fgColor="F4CCCC")
-    ws = wb.create_sheet("Kecukupan Sampel")
+    ws = wb.create_sheet("Sample Adequacy")
 
     # ---- overall sample size + recommendation -------------------------------
     n_js = len(scores.get("js", []))
     n_py = len(scores.get("py", []))
     paired_docs = len(set(r.get("document") for r in scores.get("js", []))
                       & set(r.get("document") for r in scores.get("py", [])))
-    ws.append(["Diagnostik Kecukupan Sampel â€” Akurasi vs GT"])
+    ws.append(["Diagnostik Sample Adequacy â€” Accuracy vs GT"])
     ws.cell(row=ws.max_row, column=1).font = BOLD
     ws.append(["Dokumen JS", n_js])
     ws.append(["Dokumen Python", n_py])
@@ -1920,7 +1920,7 @@ def run_evaluation(js_dir: Path, py_dir: Path, output: Path,
                 print(f"  [WARN] Accuracy corpus n={paired_docs} is BELOW the "
                       f"defensible floor (~{FLOOR}) from sample_size.py. Pooled "
                       f"estimates have wide CIs; do NOT make per-stratum claims "
-                      f"(strata with n<10 are flagged in the 'Kecukupan Sampel' sheet).")
+                      f"(strata with n<10 are flagged in the 'Sample Adequacy' sheet).")
     return rows
 
 

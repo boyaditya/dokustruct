@@ -1772,6 +1772,7 @@ function renderAssetGate({ error = null } = {}) {
   const downloading = Boolean(assetDownloadController);
   const warmupStatus = appState.get('warmupStatus') || 'idle';
   const warmupError = appState.get('warmupError');
+  void warmupStatus;
   const engineReady = warmupStatus === 'ready';
   const engineFailed = warmupStatus === 'error';
   const engineLoading = isWarmupActive();

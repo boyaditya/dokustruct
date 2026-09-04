@@ -1237,6 +1237,7 @@ function setupEventListeners() {
     }
   });
   el.fileInput?.addEventListener('change', handleFileSelect);
+  document.getElementById('sampleGallery')?.addEventListener('click', handleSampleClick);
   [el.setupInputPane, el.taskDropzone, el.viewerScroll].forEach((target) => {
     target?.addEventListener('dragenter', handleViewerDragEnter);
     target?.addEventListener('dragover', handleViewerDragOver);
@@ -1982,6 +1983,30 @@ function handleFileSelect(e) {
     addSelectedFiles(files);
   }
   e.target.value = ''; // Reset input
+}
+
+async function handleSampleClick(e) {
+  const card = e.target.closest?.('.sample-card');
+  if (!card) return;
+  if (appState.get('isProcessing')) {
+    showLoading('Processing is still running');
+    return;
+  }
+  const fileName = card.dataset.sample;
+  if (!fileName) return;
+  card.setAttribute('aria-busy', 'true');
+  try {
+    const res = await fetch(`samples/${fileName}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+    addSelectedFiles([file]);
+  } catch (err) {
+    console.warn('[sample] failed to load', fileName, err);
+    showLoading(`Could not load sample ${fileName}`);
+  } finally {
+    card.removeAttribute('aria-busy');
+  }
 }
 
 function handleTaskDropzoneClick(event) {

@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>DokuStruct - Document Intelligence</title>
+  <title>DokuStruct — Local Document Extraction</title>
+  <meta name="description" content="DokuStruct extracts text, tables and formulas from PDFs and images — fully in your browser. No upload."/>
   <link rel="stylesheet" href="ui/styles/app.css" />
 </head>
 <body>
@@ -24,20 +25,18 @@
         </div>
       </div>
 
-      <!-- New Task Button -->
       <button class="create-task-btn" id="uploadBtn">
         <i data-lucide="plus"></i>
-        <span>New Task</span>
+        <span>New</span>
       </button>
 
-      <!-- History -->
       <div class="file-list-section">
         <div class="file-list-header">
           <div class="file-list-header-top">
             <i data-lucide="folder"></i>
-            <span id="queueTitle">Processed documents</span>
+            <span id="queueTitle">History</span>
           </div>
-          <div class="file-list-header-note">Saved in browser only</div>
+          <div class="file-list-header-note">Local only</div>
         </div>
         <div class="file-list" id="fileList">
           <!-- History items will be loaded here -->
@@ -70,10 +69,10 @@
     </div>
   </section>
 
-  <section class="dokustruct-drawer hidden" id="settingsPanel" role="dialog" aria-modal="false" aria-label="Extraction Settings">
+  <section class="dokustruct-drawer hidden" id="settingsPanel" role="dialog" aria-modal="false" aria-label="Settings">
     <div class="drawer-header">
       <div class="drawer-title">
-        <h2>Extraction Settings</h2>
+        <h2>Settings</h2>
       </div>
       <button class="icon-btn drawer-close" type="button" data-close-panel="settingsPanel" aria-label="Close settings">
         <i data-lucide="x"></i>
@@ -82,8 +81,8 @@
     <div class="drawer-body settings-control-stack" id="optionsContent">
       <div class="settings-control-row settings-control-row--toggle">
         <div class="settings-control-copy">
-          <strong>Math Formulas</strong>
-          <span>Detect and extract mathematical formulas and equations.</span>
+          <strong>Formulas</strong>
+          <span>Extract math as LaTeX.</span>
         </div>
         <label class="settings-toggle" for="formulaEnable">
           <input type="checkbox" id="formulaEnable"/>
@@ -95,7 +94,7 @@
       <div class="settings-control-row settings-control-row--toggle">
         <div class="settings-control-copy">
           <strong>Tables</strong>
-          <span>Detect and preserve table structure including rows, columns, and headers.</span>
+          <span>Keep rows, columns and headers.</span>
         </div>
         <label class="settings-toggle" for="tableEnable">
           <input type="checkbox" id="tableEnable"/>
@@ -105,7 +104,7 @@
       </div>
 
       <details class="settings-advanced">
-        <summary>Advanced settings</summary>
+        <summary>Advanced</summary>
         <div class="settings-advanced-body">
           <div class="adv-row">
             <span>OCR model</span>
@@ -187,11 +186,11 @@
       <section class="setup-input-pane">
         <div class="setup-pane-header">
           <div>
-            <h1>Extract documents</h1>
-            <p>Upload a file, adjust settings, then run extraction.</p>
+            <h1>Extract</h1>
+            <p>Drop a PDF or image, tune settings, run — all in your browser.</p>
             <div class="local-note">
               <i data-lucide="shield"></i>
-              <span>Fully local — files stay on your device.</span>
+              <span>100% local — nothing leaves this browser.</span>
             </div>
           </div>
         </div>
@@ -209,6 +208,30 @@
               </span>
             </button>
             <div class="setup-file-cards" id="setupFileCards"></div>
+          </div>
+          <div class="sample-gallery" id="sampleGallery" aria-label="Try a sample">
+            <div class="sample-gallery-head">
+              <span>Try a sample</span>
+              <span class="sample-gallery-note">One click to load — no upload</span>
+            </div>
+            <div class="sample-grid">
+              <button type="button" class="sample-card" data-sample="01-table.jpg" data-label="Table">
+                <img src="samples/01-table.jpg" alt="Table sample" loading="lazy"/>
+                <span><strong>Table</strong><small>Wired + structure</small></span>
+              </button>
+              <button type="button" class="sample-card" data-sample="02-layout.png" data-label="Layout">
+                <img src="samples/02-layout.png" alt="Layout sample" loading="lazy"/>
+                <span><strong>Layout</strong><small>Multi-column</small></span>
+              </button>
+              <button type="button" class="sample-card" data-sample="03-paper.jpg" data-label="Paper">
+                <img src="samples/03-paper.jpg" alt="Paper sample" loading="lazy"/>
+                <span><strong>Paper</strong><small>Text + figure</small></span>
+              </button>
+              <button type="button" class="sample-card" data-sample="04-mixed.png" data-label="Mixed">
+                <img src="samples/04-mixed.png" alt="Mixed sample" loading="lazy"/>
+                <span><strong>Mixed</strong><small>Text + table</small></span>
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -328,8 +351,8 @@
         <div class="viewer-scroll" id="viewerScroll">
           <div class="viewer-container" id="viewerContainer">
             <div class="empty-viewer" id="emptyViewer">
-              <strong>No document selected</strong>
-              <p>Upload a file to preview it here.</p>
+              <strong>No file</strong>
+              <p>Drop a file or try a sample below.</p>
             </div>
             <div class="page-stack" id="pageStack">
               <div class="document-page" data-page-index="0">

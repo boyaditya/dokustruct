@@ -71,7 +71,7 @@ function standardizedData(
   if (!layoutDetRes || !layoutDetRes.boxes) {
     layoutDetRes = { boxes: [] };
   }
-  // Porting fix: use Map (insertion-order preserving) instead of plain object (integer keys sort differently)
+  // Parity: use Map (insertion-order preserving) instead of plain object (integer keys sort differently)
   const matchedOcrDict = new Map();
   const regionToBlockMap = {};
   const blockToOcrMap = {};
@@ -422,7 +422,7 @@ function getLayoutParsingObjects(
 
   for (let regionIdx = 0; regionIdx < regionDetRes.boxes.length; regionIdx++) {
     const regionInfo = regionDetRes.boxes[regionIdx];
-    const regionBbox = regionInfo.coordinate.map(intTrunc); // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
+    const regionBbox = regionInfo.coordinate.map(intTrunc); // Parity: intTrunc matches Python int() truncation
     const regionBlocks = (
       regionBlockOcrIdxMap.region_to_block_map[regionIdx] || []
     ).map((idx) => layoutParsingBlocks[idx]);
@@ -435,7 +435,7 @@ function getLayoutParsingObjects(
   }
 
   const layoutParsingPage = new LayoutRegion(
-    pageRegionBbox.map(intTrunc), // FIX R5/R7/R8/R9: intTrunc matches Python int() truncation
+    pageRegionBbox.map(intTrunc), // Parity: intTrunc matches Python int() truncation
     layoutParsingRegions
   );
   return layoutParsingPage;

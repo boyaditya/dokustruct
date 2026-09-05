@@ -13,7 +13,7 @@ import { formatPipelineError, MAX_CONCURRENT_BATCHES, yieldToBrowser } from '../
 import { RecPreProcess } from './ocr_preprocess.js';
 import { ctcDecode, getWordInfo } from './ocr_ctc_decode.js';
 
-// Porting fix: scale MAX_CONCURRENT_BATCHES based on detected device tier.
+// Parity: scale MAX_CONCURRENT_BATCHES based on detected device tier.
 // User-provided recBatchNum config overrides this at the recognizer level.
 //
 // Note: the device tier is derived from system RAM (deviceMemory API), not
@@ -37,7 +37,7 @@ function getMaxConcurrentBatches(useWebGpu) {
 
 /**
  * Yield execution back to the browser event loop between OCR rec batches.
- * Porting fix: keeps the event loop responsive between non-critical OCR rec batches.
+ * Parity: keeps the event loop responsive between non-critical OCR rec batches.
  *
  * NOTE: this used to call requestIdleCallback (falling back to setTimeout), but
  * both are heavily throttled — or suspended entirely — in hidden/background
@@ -212,7 +212,7 @@ export class TextRecognizer {
       if (inFlight.size >= cap) {
         await Promise.race(inFlight);
       }
-      // Porting fix: first batch is critical — start immediately without yielding.
+      // Parity: first batch is critical — start immediately without yielding.
       // Subsequent batches are non-critical; yield to idle so the browser event
       // loop stays responsive between batches.
       if (isFirstBatch) {

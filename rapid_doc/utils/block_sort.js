@@ -47,7 +47,7 @@ function deepCopy(obj) {
  * Compare two arrays element-by-element for value equality.
  * Used for bbox arrays (e.g. [x0, y0, x1, y1]) where reference equality fails
  * when arrays are re-created from the same numeric values.
- * FIX 8.10: replaces `===` reference check in xycut-plus fallback.
+ * Parity: replaces `===` reference check in xycut-plus fallback.
  *
  * @param {Array} a
  * @param {Array} b
@@ -66,7 +66,7 @@ function deepEqualArray(a, b) {
 /**
  * Find the first index in `arr` where `deepEqualArray(arr[i], target)` is true.
  * Returns -1 if not found.
- * FIX 8.10: value-equality replacement for `arr.findIndex(b => b === target)`.
+ * Parity: value-equality replacement for `arr.findIndex(b => b === target)`.
  *
  * @param {Array[]} arr Array of bbox arrays
  * @param {Array} target Bbox array to find

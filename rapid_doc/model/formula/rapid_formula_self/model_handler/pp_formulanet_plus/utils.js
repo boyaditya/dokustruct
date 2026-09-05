@@ -21,7 +21,7 @@ export function fixLatex(formula) {
   return result;
 }
 
-// Porting fix: HuggingFace byte-level BPE inverse map for Greek/CJK token decoding
+// Parity: HuggingFace byte-level BPE inverse map for Greek/CJK token decoding
 //
 // The HuggingFace GPT-2 BPE byte_to_unicode map encodes each of the 256 byte
 // values to a unique Unicode character, avoiding "problematic" control/whitespace

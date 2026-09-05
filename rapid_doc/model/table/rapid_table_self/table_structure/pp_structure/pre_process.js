@@ -43,7 +43,7 @@ export class TablePreprocess {
    * @returns {cv.Mat} float32 BGR Mat (caller must delete)
    */
   normalize(img) {
-    // Porting fix: keep BGR for SLANET_plus inference (matches Python).
+    // Parity: keep BGR for SLANET_plus inference (matches Python).
     let float32 = new cv.Mat();
     img.convertTo(float32, cv.CV_32F, 1.0 / 255.0);
 

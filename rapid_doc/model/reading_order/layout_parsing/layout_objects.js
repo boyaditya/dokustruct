@@ -133,7 +133,7 @@ class TextLine {
             // no live re-inference available — matches Python: crop_img_rec_score = 0
             const recScore = 0;
             span.text = "-"; // preserve text="-" assignment for parity
-            // Porting fix: skip low-score spans in formula path
+            // Parity: skip low-score spans in formula path
             if (recScore < textRecScoreThresh) continue;
           }
           newSpans.push(span);
@@ -298,7 +298,7 @@ class LayoutBlock {
   constructor(label, bbox, content = "") {
     this.label = label;
     this.order_label = null;
-    // Porting fix: intTrunc matches Python int truncation
+    // Parity: intTrunc matches Python int truncation
     this.bbox = bbox.map(intTrunc);
     this.content = content;
     this.seg_start_coordinate = Infinity;
@@ -325,7 +325,7 @@ class LayoutBlock {
    * Generator that yields own serializable [key, value] pairs lazily.
    * Callers that need only a subset of properties can iterate and break early
    * without materialising the full object — reducing peak memory on dense pages.
-   * Porting fix: streaming property serializer.
+   * Parity: streaming property serializer.
    * @yields {[string, *]}
    */
   *entries() {
@@ -337,7 +337,7 @@ class LayoutBlock {
   /**
    * Serialize to a plain object (backward-compatible).
    * Internally driven by the lazy entries generator.
-   * Porting fix: replaces eager spread `{ ...this }`.
+   * Parity: replaces eager spread `{ ...this }`.
    * @returns {Object}
    */
   toDict() {

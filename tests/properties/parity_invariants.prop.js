@@ -179,8 +179,8 @@ describe('Property: Threshold Table Singularity', () => {
   /**
    * **, 2.7, 2.8, 9.1**
    *
-   * PP_DOCLAYOUTV2_Threshold[5] must be 0.5 (FIXED from 0.4, ).
-   * PP_DOCLAYOUTV2_Threshold[15] must be 0.5 (FIXED from 0.4, ).
+   * PP_DOCLAYOUTV2_Threshold[5] must be 0.5 (parity: 0.4 → 0.5).
+   * PP_DOCLAYOUTV2_Threshold[15] must be 0.5 (parity: 0.4 → 0.5).
    */
   it('PP_DOCLAYOUTV2_Threshold has correct fixed values at indices 5 and 15', () => {
     expect(PP_DOCLAYOUTV2_Threshold[5]).toBe(0.5);
@@ -190,8 +190,8 @@ describe('Property: Threshold Table Singularity', () => {
   /**
    * **, 9.1**
    *
-   * PP_DOCLAYOUT_L_Threshold[7] must be 0.5 (FIXED from 0.3, ).
-   * PP_DOCLAYOUT_L_Threshold[16] must be 0.45 (FIXED from 0.2, ).
+   * PP_DOCLAYOUT_L_Threshold[7] must be 0.5 (parity: 0.3 → 0.5).
+   * PP_DOCLAYOUT_L_Threshold[16] must be 0.45 (parity: 0.2 → 0.45).
    */
   it('PP_DOCLAYOUT_L_Threshold has correct fixed values at indices 7 and 16', () => {
     expect(PP_DOCLAYOUT_L_Threshold[7]).toBe(0.5);

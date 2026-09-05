@@ -385,7 +385,7 @@ export function shrinkSupplementRegionBbox(
           const srcIdx2 = ed.indexOf(maxDist);
           const dstIdx2 = indexConversionMap[srcIdx2];
           tmpRegionBbox[dstIdx2] = splitBlockBbox[srcIdx2];
-          // Porting fix: capture return value from recursive call
+          // Parity: capture return value from recursive call
           let inerIdxes;
           [tmpRegionBbox, inerIdxes] = shrinkSupplementRegionBbox(
             tmpRegionBbox,
@@ -395,7 +395,7 @@ export function shrinkSupplementRegionBbox(
             new Set(inerBlockIdxes),
             blockBboxes
           );
-          if (inerIdxes.length === 0) continue; // FIX R2: was missing
+          if (inerIdxes.length === 0) continue; // Parity: preserve empty check
         }
       }
       const matchedBboxes = inerBlockIdxes.map((idx) => blockBboxes[idx]);
@@ -421,7 +421,7 @@ export function shrinkSupplementRegionBbox(
 export function updateRegionBox(bbox, regionBox) {
   if (regionBox === null) return bbox.slice();
   const [x1, y1, x2, y2] = bbox;
-  // Porting fix: intTrunc matches Python int truncation
+  // Parity: intTrunc matches Python int truncation
   return [
     Math.min(x1, regionBox[0]),
     Math.min(y1, regionBox[1]),

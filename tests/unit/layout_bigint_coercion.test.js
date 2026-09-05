@@ -33,7 +33,7 @@ import { tensorToNumber, tensorDataToFloat64 } from '../../rapid_doc/utils/math_
  */
 function extractAndCoerce(tensor) {
   const rawData = tensor.data;
-  // Porting fix: coerce BigInt to Number for arithmetic
+  // Parity: coerce BigInt to Number for arithmetic
   const data = (rawData instanceof BigInt64Array || tensor.type === 'int64')
     ? tensorDataToFloat64(rawData)
     : rawData;
@@ -46,7 +46,7 @@ function extractAndCoerce(tensor) {
  * Replicate the key part of _formatOutput that was fixed:
  *
  *   for (let idx = 0; idx < boxNumsData.length; idx++) {
- *     // Porting fix: coerce BigInt to Number for arithmetic
+ *     // Parity: coerce BigInt to Number for arithmetic
  *     const np_boxes_num = tensorToNumber(boxNumsData[idx]);
  *     const boxIdxEnd = boxIdxStart + np_boxes_num;
  *     ...
@@ -56,11 +56,11 @@ function extractAndCoerce(tensor) {
 function simulateFormatOutputLoop(boxNumsData) {
   const results = [];
   let boxIdxStart = 0;
-  // Porting fix: use tensorToNumber in reduce
+  // Parity: use tensorToNumber in reduce
   const totalBoxes = Array.from(boxNumsData).reduce((a, b) => a + tensorToNumber(b), 0) || 1;
 
   for (let idx = 0; idx < boxNumsData.length; idx++) {
-    // Porting fix: coerce BigInt to Number for arithmetic
+    // Parity: coerce BigInt to Number for arithmetic
     const np_boxes_num = tensorToNumber(boxNumsData[idx]);
     const boxIdxEnd = boxIdxStart + np_boxes_num;
     results.push({ start: boxIdxStart, end: boxIdxEnd, count: np_boxes_num });

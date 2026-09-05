@@ -36,9 +36,7 @@ export {
 // Constants
 // ─────────────────────────────────────────────────────────────
 
-/** FIX 11.2: Maximum recursion depth for recursive_xy_cut / recursive_yx_cut.
- *  Prevents V8 stack overflow on degenerate layouts with many tiny non-separable boxes.
- */
+/** Maximum recursion depth for recursive_xy_cut / recursive_yx_cut. */
 const MAX_XYCUT_DEPTH = 100;
 
 // ─────────────────────────────────────────────────────────────
@@ -80,7 +78,7 @@ function getNearestEdgeDistance(bbox1, bbox2, weight = [1, 1, 1, 1]) {
  */
 function projectionByBboxes(boxes, axis) {
   if (!boxes || boxes.length === 0) return new Int32Array(0);
-  // Porting fix: check both axis and axis+2 columns in both branches
+  // Parity: check both axis and axis+2 columns in both branches
   // determine histogram length
   let maxLength = 0;
   for (const box of boxes) {
@@ -107,7 +105,7 @@ function projectionByBboxes(boxes, axis) {
   for (const box of boxes) {
     const start = Math.abs(box[axis]);
     const end = Math.abs(box[axis + 2]);
-    // Porting fix: removed swap [start, end] — matches Python (no swap in Python baseline)
+    // Parity: removed swap [start, end] — matches Python (no swap in Python baseline)
     for (let i = start; i < end && i < maxLength; i++) projection[i]++;
   }
   return projection;
@@ -135,7 +133,7 @@ function splitProjectionProfile(arrValues, minValue, minGap) {
   const starts = [sigIdxs[0]];
   const ends = [];
   for (const gi of gapIdxs) {
-    ends.push(sigIdxs[gi]);    // FIX R4: was sigIdxs[gi] + 1 (off-by-one)
+    ends.push(sigIdxs[gi]);    // Parity: sigIdxs[gi] + 1 (off-by-one)
     starts.push(sigIdxs[gi + 1]);
   }
   ends.push(sigIdxs[sigIdxs.length - 1] + 1); // last segment keeps +1 (matches Python np.append(..., last+1))
@@ -151,7 +149,7 @@ function splitProjectionProfile(arrValues, minValue, minGap) {
  * @param {number} depth current recursion depth (default 0)
  */
 function recursiveYxCut(boxes, indices, res, minGap = 1, depth = 0) {
-  // FIX 11.2: guard against stack overflow on degenerate layouts
+  // Parity: guard against stack overflow on degenerate layouts
   if (depth >= MAX_XYCUT_DEPTH) {
     console.warn(
       `[xycut_enhanced] recursiveYxCut reached MAX_XYCUT_DEPTH (${MAX_XYCUT_DEPTH}); ` +
@@ -160,10 +158,10 @@ function recursiveYxCut(boxes, indices, res, minGap = 1, depth = 0) {
     res.push(...indices);
     return;
   }
-  // Porting fix: boxes is always the root array; indices is the active slice — no length-match check
+  // Parity: boxes is always the root array; indices is the active slice — no length-match check
   if (indices.length === 0) return;
 
-  // Porting fix: sort only the index array by y_min — no new box sub-array allocation
+  // Parity: sort only the index array by y_min — no new box sub-array allocation
   const ySortedIndices = [...indices].sort((a, b) => boxes[a][1] - boxes[b][1]);
   // Transient view needed only for projectionByBboxes (not passed to recursion)
   const ySortedBoxes = ySortedIndices.map(i => boxes[i]);
@@ -175,7 +173,7 @@ function recursiveYxCut(boxes, indices, res, minGap = 1, depth = 0) {
   const [yStarts, yEnds] = yIntervals;
   for (let k = 0; k < yStarts.length; k++) {
     const yStart = yStarts[k], yEnd = yEnds[k];
-    // Porting fix: filter only the index array — eliminates per-cut box-array allocation
+    // Parity: filter only the index array — eliminates per-cut box-array allocation
     const yIdxChunk = ySortedIndices.filter(idx => boxes[idx][1] >= yStart && boxes[idx][1] < yEnd);
 
     // Sort by x_min (index-only sort)
@@ -199,7 +197,7 @@ function recursiveYxCut(boxes, indices, res, minGap = 1, depth = 0) {
 
     for (let m = 0; m < effectiveStarts.length; m++) {
       const xStart = effectiveStarts[m], xEnd = effectiveEnds[m];
-      // Porting fix: filter only the index array; pass root boxes unchanged to recursion
+      // Parity: filter only the index array; pass root boxes unchanged to recursion
       const xIdxFiltered = xSortedIndices.filter(idx => Math.abs(boxes[idx][0]) >= xStart && Math.abs(boxes[idx][0]) < xEnd);
       recursiveYxCut(
         boxes,
@@ -221,7 +219,7 @@ function recursiveYxCut(boxes, indices, res, minGap = 1, depth = 0) {
  * @param {number} depth current recursion depth (default 0)
  */
 function recursiveXyCut(boxes, indices, res, minGap = 1, depth = 0) {
-  // FIX 11.2: guard against stack overflow on degenerate layouts
+  // Parity: guard against stack overflow on degenerate layouts
   if (depth >= MAX_XYCUT_DEPTH) {
     console.warn(
       `[xycut_enhanced] recursiveXyCut reached MAX_XYCUT_DEPTH (${MAX_XYCUT_DEPTH}); ` +
@@ -230,10 +228,10 @@ function recursiveXyCut(boxes, indices, res, minGap = 1, depth = 0) {
     res.push(...indices);
     return;
   }
-  // Porting fix: boxes is always the root array; indices is the active slice — no length-match check
+  // Parity: boxes is always the root array; indices is the active slice — no length-match check
   if (indices.length === 0) return;
 
-  // Porting fix: sort only the index array by x_min — no new box sub-array allocation
+  // Parity: sort only the index array by x_min — no new box sub-array allocation
   const xSortedIndices = [...indices].sort((a, b) => boxes[a][0] - boxes[b][0]);
   // Transient view needed only for projectionByBboxes (not passed to recursion)
   const xSortedBoxes = xSortedIndices.map(i => boxes[i]);
@@ -249,7 +247,7 @@ function recursiveXyCut(boxes, indices, res, minGap = 1, depth = 0) {
 
   for (let k = 0; k < effStarts.length; k++) {
     const xStart = effStarts[k], xEnd = effEnds[k];
-    // Porting fix: filter only the index array — eliminates per-cut box-array allocation
+    // Parity: filter only the index array — eliminates per-cut box-array allocation
     const xIdxChunk = xSortedIndices.filter(idx => Math.abs(boxes[idx][0]) >= xStart && Math.abs(boxes[idx][0]) < xEnd);
 
     // Sort by y_min (index-only sort)
@@ -268,7 +266,7 @@ function recursiveXyCut(boxes, indices, res, minGap = 1, depth = 0) {
     }
     for (let m = 0; m < yStarts.length; m++) {
       const yStart = yStarts[m], yEnd = yEnds[m];
-      // Porting fix: filter only the index array; pass root boxes unchanged to recursion
+      // Parity: filter only the index array; pass root boxes unchanged to recursion
       const yIdxFiltered = ySortedIndices.filter(idx => boxes[idx][1] >= yStart && boxes[idx][1] < yEnd);
       recursiveXyCut(
         boxes,
@@ -679,7 +677,7 @@ function updateVisionChildBlocks(block, region) {
       block, refBlocks, threshold, direction
     );
 
-    // Porting fix: distinct break conditions for prev/post blocks (matches Python)
+    // Parity: distinct break conditions for prev/post blocks (matches Python)
     const processPrevBlocks = (group) => {
       for (const ref of group) {
         // prev: break if label is not in (text_labels + vision_title_labels)

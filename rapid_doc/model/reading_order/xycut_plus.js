@@ -31,7 +31,7 @@ export function projectionByBboxes(boxes, axis) {
 
   const projection = new Int32Array(maxLength);
   for (const box of boxes) {
-    // Porting fix: removed swap [start, end] — matches Python (no swap in Python baseline)
+    // Parity: removed swap [start, end] — matches Python (no swap in Python baseline)
     let start = Math.abs(Math.round(box[axis]));
     let end = Math.abs(Math.round(box[axis + 2]));
     start = Math.max(0, start);
@@ -251,7 +251,7 @@ export function calculateTextLineDirection(bboxes, directionRatio = 1.5) {
  */
 export function sortByXycut(blockBboxes, direction = "vertical", minGap = 1) {
   if (!blockBboxes.length) return [];
-  // Porting fix: intTrunc matches Python int truncation
+  // Parity: intTrunc matches Python int truncation
   const intBoxes = blockBboxes.map((b) => b.map(intTrunc));
   const indices = Array.from({ length: intBoxes.length }, (_, i) => i);
   const res = [];

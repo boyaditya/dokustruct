@@ -209,7 +209,7 @@ export class PPPreProcess {
     //   squeezed = np.squeeze(grayscale_image)
     //   img = cv2.merge([squeezed] * 3)
     //
-    // Porting fix: INTENTIONAL R/B coefficient swap — matches Python training distribution. DO NOT "FIX".
+    // Parity: INTENTIONAL R/B coefficient swap — matches Python training distribution. do not revert.
     // Python's pipeline feeds RGB-ordered data into cv2.COLOR_BGR2GRAY, which applies
     // BGR weights (0.114·B + 0.587·G + 0.299·R) to what it thinks is BGR but is actually
     // RGB. The net effect is the swapped formula: Y = 0.114·R + 0.587·G + 0.299·B.

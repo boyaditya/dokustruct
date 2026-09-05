@@ -3094,7 +3094,7 @@ function buildOverlayBlocksFromMiddlePdfInfo(results) {
     const discardedBlocks = Array.isArray(page?.discarded_blocks) ? page.discarded_blocks : [];
     const pageContent = contentByPage.get(pageIndex) || [];
     let contentCursor = 0;
-    // Porting fix: two paragraphs with the same text (different
+    // Parity: two paragraphs with the same text (different
     // positions) both matched the FIRST physical preproc block by text.
     // Track claimed blocks (by object identity — sort keys collide when
     // original_order/index are missing) so the second paragraph is forced
@@ -3110,7 +3110,7 @@ function buildOverlayBlocksFromMiddlePdfInfo(results) {
         paraBlock, paraText, globalPreprocBlocks, pageIndex, claimedPreprocKeys,
       );
       let overlayParts = physicalBlocks.length ? physicalBlocks : [paraBlock];
-      // Porting fix: PDF-text lists render as <ol>/<ul> with one <li> per
+      // Parity: PDF-text lists render as <ol>/<ul> with one <li> per
       // line, but the layout emits ONE 'content' box covering the whole list.
       // Expand list/index para-blocks into per-line boxes so every <li> gets
       // its own overlay box and its own link id.
@@ -3261,7 +3261,7 @@ function findPreprocBlocksForPara(paraBlock, paraText, preprocBlocks, paraPageIn
       if (!text) return false;
       if (block?.lines_deleted) return false;
       if (!isCompatibleOverlayType(paraBlock, block)) return false;
-      // Porting fix: skip blocks already claimed by an earlier
+      // Parity: skip blocks already claimed by an earlier
       // paragraph — identical text must not reuse the same physical block.
       if (claimedKeys?.has(block)) return false;
       const blockLabelGroup = labelGroupKey(block?.original_label, block?.type);

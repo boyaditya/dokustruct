@@ -40,7 +40,7 @@ function getMetadataValue(metaMap, key) {
 }
 
 function resolveTokenizerJson(metaMap = {}) {
-  // Porting fix: prefer Python metadata path, but keep top-level support for older S assets.
+  // Parity: prefer Python metadata path, but keep top-level support for older S assets.
   const characterObj = parseMetadataObject(getMetadataValue(metaMap, "character"), "character");
   const fromCharacter = normalizeTokenizerPayload(characterObj?.fast_tokenizer_file);
   if (fromCharacter) return fromCharacter;

@@ -359,7 +359,7 @@ export class DownloadFile {
     }));
     const bytes = toUint8Array(buffer);
 
-    // Porting fix: SHA-256 verification
+    // Parity: SHA-256 verification
     if (cfg.sha256) {
       const computed = await computeSha256Hex(bytes);
       if (computed && computed !== cfg.sha256.toLowerCase()) {

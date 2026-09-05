@@ -57,15 +57,16 @@ describe('asset manifest resolution', () => {
 
   });
 
-  it('matches local model URLs even when cache-busting query strings are present', () => {
-    const asset = findAssetByUrl('/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx?t=patched');
-    expect(asset?.id).toBe('layout_pp_doclayoutv2');
+  it('matches HF and legacy local model URLs even when cache-busting query strings are present', () => {
+    const assetHf = findAssetByUrl(`${HF_ASSET_BASE}/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx?t=patched`);
+    expect(assetHf?.id).toBe('layout_pp_doclayoutv2');
+    const assetLegacy = findAssetByUrl('/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx?t=patched');
+    expect(assetLegacy?.id).toBe('layout_pp_doclayoutv2');
   });
 
-  it('keeps local URLs before external fallback URLs', () => {
+  it('returns HF-only URLs for models (no local /models fallback)', () => {
     const sources = getAssetSourceUrls('layout_pp_doclayoutv2');
-    expect(sources[0]).toBe('/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx');
-    expect(sources.at(-1)).toBe(`${HF_ASSET_BASE}/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx`);
+    expect(sources).toEqual([`${HF_ASSET_BASE}/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx`]);
   });
 
   it('keeps Hugging Face as fallback for model and data assets', () => {
@@ -129,12 +130,9 @@ describe('asset cache downloads', () => {
     __setSha256VerificationForTests(false);
   });
 
-  it('tries the local source first, falls back externally, and caches the result', async () => {
+  it('fetches directly from HF, caches the result, and serves from cache', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const fetchMock = vi.fn(async (url) => {
-      if (!String(url).startsWith('https://')) {
-        return new Response('missing', { status: 404 });
-      }
       return new Response(bytes, {
         status: 200,
         headers: { 'Content-Length': String(bytes.byteLength) },
@@ -145,9 +143,8 @@ describe('asset cache downloads', () => {
     const progress = [];
     const buffer = await downloadAsset('layout_pp_doclayoutv2', event => progress.push(event));
     expect([...new Uint8Array(buffer)]).toEqual([...bytes]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[0][0])).toBe('/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx');
-    expect(String(fetchMock.mock.calls[1][0])).toMatch(/^https:\/\//);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^https:\/\//);
     expect(progress.at(-1)?.percent).toBe(100);
 
     const status = await getAssetStatus('layout_pp_doclayoutv2');
@@ -155,7 +152,7 @@ describe('asset cache downloads', () => {
 
     const cached = await downloadAsset('layout_pp_doclayoutv2');
     expect([...new Uint8Array(cached)]).toEqual([...bytes]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('rejects unknown assets', async () => {
@@ -194,14 +191,11 @@ describe('asset cache downloads', () => {
   });
 
   it('surfaces the final source error when every source fails', async () => {
-    const fetchMock = vi.fn(async (url) => {
-      if (String(url).startsWith('https://')) throw new Error('external down');
-      return new Response('missing', { status: 500 });
-    });
+    const fetchMock = vi.fn(async () => { throw new Error('external down'); });
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(downloadAsset('layout_pp_doclayoutv2')).rejects.toThrow(/external down/);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(await getAssetStatus('layout_pp_doclayoutv2')).toMatchObject({ cached: false });
   });
 

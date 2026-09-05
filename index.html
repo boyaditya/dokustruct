@@ -5,49 +5,48 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>DokuStruct — Local Document Extraction</title>
   <meta name="description" content="DokuStruct extracts text, tables and formulas from PDFs and images — fully in your browser. No upload."/>
-  <link rel="stylesheet" href="ui/styles/app.css" />
+  <link rel="stylesheet" href="ui/styles/app.css"/>
+  <link rel="stylesheet" href="ui/styles/landing.css"/>
 </head>
-<body>
+<body class="has-below">
 
 <div class="dokustruct-app">
   
-  <!-- LEFT SIDEBAR -->
+  <!-- LEFT SIDEBAR — refined -->
   <aside class="dokustruct-sidebar" id="sidebar">
     <div class="sidebar-content">
       
-      <!-- Logo & Collapse -->
       <div class="sidebar-header">
-        <div class="logo-section">
-          <div class="logo-icon">
-            <i data-lucide="file-text"></i>
-          </div>
+        <button class="logo-section logo-link" id="sidebarLogoBtn" type="button" aria-label="Start new task" title="Start new task — same as New">
           <span class="logo-text">DokuStruct</span>
-        </div>
+        </button>
+        <button class="icon-btn sidebar-toggle" id="sidebarToggleBtn" type="button" aria-label="Toggle sidebar" title="Toggle sidebar">
+          <i data-lucide="panel-left"></i>
+        </button>
       </div>
 
-      <button class="create-task-btn" id="uploadBtn">
-        <i data-lucide="plus"></i>
-        <span>New</span>
-      </button>
+      <div class="sidebar-action">
+        <button class="create-task-btn" id="uploadBtn">
+          <i data-lucide="plus"></i>
+          <span>New</span>
+        </button>
+      </div>
 
       <div class="file-list-section">
         <div class="file-list-header">
-          <div class="file-list-header-top">
-            <i data-lucide="folder"></i>
+          <div class="file-list-title">
+            <i data-lucide="clock-3"></i>
             <span id="queueTitle">History</span>
+            <span class="history-count" id="historyCount"></span>
           </div>
-          <div class="file-list-header-note">Local only</div>
+          <span class="file-list-note">on this device only</span>
         </div>
         <div class="file-list" id="fileList">
-          <!-- History items will be loaded here -->
         </div>
       </div>
 
-      <!-- Build provenance: static stamp, no JS needed -->
       <div class="sidebar-footer">
-        <span class="build-stamp">DokuStruct 0.1.0 · local build</span>
-        <span class="build-provenance">RapidDoc 0.9.4 port · MinerU 2.6.4 base</span>
-        <span class="build-stack">ORT Web · OpenCV · PDF.js</span>
+        <span class="build-meta">DokuStruct 0.1.0 · RapidDoc 0.9.4</span>
       </div>
 
     </div>
@@ -186,11 +185,11 @@
       <section class="setup-input-pane">
         <div class="setup-pane-header">
           <div>
-            <h1>Extract</h1>
-            <p>Drop a PDF or image, tune settings, run — all in your browser.</p>
+            <h1>Turn documents into structured markdown</h1>
+            <p>Drop a PDF or image. Layout, OCR, tables and formulas run entirely on-device. No server, no upload.</p>
             <div class="local-note">
-              <i data-lucide="shield"></i>
-              <span>100% local — nothing leaves this browser.</span>
+              <i data-lucide="shield-check"></i>
+              <span>Private by design. Everything stays in this browser.</span>
             </div>
           </div>
         </div>
@@ -233,6 +232,10 @@
               </button>
             </div>
           </div>
+          <button class="pane-hint" id="belowHint" type="button" aria-label="Scroll to about this project">
+            <span>about this project</span>
+            <i data-lucide="chevron-down"></i>
+          </button>
         </div>
       </section>
 
@@ -272,9 +275,6 @@
     <div class="workspace-toolbar">
       <div class="workspace-toolbar-row workspace-toolbar-main">
         <div class="workspace-title">
-          <button class="icon-btn" id="toggleSidebar" title="Toggle sidebar" aria-label="Toggle sidebar">
-            <i data-lucide="menu"></i>
-          </button>
           <div class="file-info">
             <span class="file-name" id="currentFileName"></span>
             <span class="file-meta" id="currentFileMeta"></span>
@@ -343,10 +343,7 @@
       </div>
     </div>
     
-    <!-- Content Split View -->
     <div class="content-split">
-      
-      <!-- Left: PDF/Image Viewer -->
       <div class="viewer-pane" id="viewerPane">
         <div class="viewer-scroll" id="viewerScroll">
           <div class="viewer-container" id="viewerContainer">
@@ -363,21 +360,35 @@
           </div>
         </div>
       </div>
-
-      <!-- Resize Handle -->
       <div class="resize-handle" id="resizeHandle"></div>
-
-      <!-- Right: Markdown/JSON Viewer -->
       <div class="markdown-pane" id="markdownPane">
         <div class="markdown-content active" id="markdownContent">
+        </div>
+        <div class="markdown-skeleton hidden" id="markdownSkeleton" aria-hidden="true">
+          <div class="sk-block sk-title"></div>
+          <div class="sk-block sk-line sk-line--90"></div>
+          <div class="sk-block sk-line"></div>
+          <div class="sk-block sk-line sk-line--80"></div>
+          <div class="sk-block sk-gap"></div>
+          <div class="sk-block sk-subtitle"></div>
+          <div class="sk-block sk-line sk-line--95"></div>
+          <div class="sk-block sk-line sk-line--85"></div>
+          <div class="sk-block sk-line"></div>
+          <div class="sk-block sk-gap"></div>
+          <div class="sk-table">
+            <div class="sk-table-row"><span></span><span></span><span></span></div>
+            <div class="sk-table-row"><span></span><span></span><span></span></div>
+            <div class="sk-table-row"><span></span><span></span><span></span></div>
+          </div>
+          <div class="sk-block sk-gap"></div>
+          <div class="sk-block sk-line sk-line--70"></div>
+          <div class="sk-block sk-line sk-line--90"></div>
         </div>
         <div class="json-content" id="contentJsonContent" style="display: none;">
           <div class="json-viewer-container">
             <pre id="contentJsonViewer"></pre>
           </div>
         </div>
-        
-        <!-- Progress Overlay (Only on markdown pane) -->
         <div class="progress-overlay hidden" id="progressOverlay">
           <div class="progress-surface">
             <div class="spinner"></div>
@@ -398,18 +409,43 @@
           </div>
         </div>
       </div>
-
     </div>
 
   </main>
 
 </div>
 
+<!-- About — synced with README, kept simple -->
+<div class="below-app" id="belowApp">
+  <div class="below-inner">
+    <div class="below-kicker">about this project</div>
+    <h2>DokuStruct runs document extraction in your browser</h2>
+    <p>DokuStruct is a browser native port of RapidDoc, which comes from MinerU. It does OCR, layout, tables, formulas and reading order with ONNX Runtime Web. No server. Your files never leave the browser. This is my Computer Science thesis.</p>
+
+    <h3>What it does</h3>
+    <ul>
+      <li>text and layout with PP-OCRv5 and PP-DocLayout, keeps reading order</li>
+      <li>tables with SLANet-Plus and UNet</li>
+      <li>formulas as LaTeX with PP-FormulaNet Plus, shown with KaTeX</li>
+      <li>orientation fix, batch of files, export to Markdown and JSON, works offline after first load</li>
+    </ul>
+
+    <h3>How it works</h3>
+    <p>PDF or image is sliced into pages. Each page goes through layout detection, text recognition, then table and formula recognition, then reading order. Results are assembled into Markdown and JSON with boxes you can inspect on the page.</p>
+    <p>Everything runs locally. The app picks WebGPU when available and falls back to WASM. Large files are split into small windows so the browser stays responsive and does not run out of memory.</p>
+
+    <h3>Tested</h3>
+    <p>Checked on OmniDocBench v1.6 with 350 pages for output and 50 for timing, seed 42. Port fidelity to Python is about 0.95 F1. Proxy composite is about 71.7 for this build and 74.3 for Python. Full workbook and sample list are in <a href="https://github.com/boyaditya/dokustruct/tree/main/docs/evidence" target="_blank" rel="noopener noreferrer">docs/evidence</a>.</p>
+
+    <h3>References and detail</h3>
+    <p>Built from <a href="https://github.com/opendatalab/MinerU" target="_blank" rel="noopener noreferrer">MinerU 2.6.4</a> to <a href="https://github.com/RapidAI/RapidDoc" target="_blank" rel="noopener noreferrer">RapidDoc 0.9.4</a> to DokuStruct 0.1.0. Stack is ONNX Runtime Web, OpenCV.js and PDF.js. My Computer Science thesis, 240 tests, Apache 2.0. See <a href="https://github.com/boyaditya/dokustruct/blob/main/docs/porting-decisions.md" target="_blank" rel="noopener noreferrer">porting notes</a> and <a href="https://github.com/boyaditya/dokustruct/blob/main/benchmark/README.md" target="_blank" rel="noopener noreferrer">benchmark method</a> for full detail.</p>
+
+    <p><a class="below-repo-link" href="https://github.com/boyaditya/dokustruct" target="_blank" rel="noopener noreferrer">github.com/boyaditya/dokustruct</a></p>
+    <p class="below-foot">If you use it a star helps. If it breaks open an issue, I read them.</p>
+  </div>
+</div>
+</div>
+
 <script type="module" src="ui/app.js"></script>
 </body>
-</html>
-
-</body>
-</html>
-y>
 </html>

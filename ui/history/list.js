@@ -48,6 +48,8 @@ export function loadHistory() {
   const { el, getHistory, formatDuration, formatFileSize, formatDate, escapeHtml, refreshIcons, loadHistoryItem, requestHistoryDelete } = _ctx;
 
   const history = getHistory();
+  const countEl = el.historyCount || document.getElementById('historyCount');
+  if (countEl) countEl.textContent = history.length ? String(history.length) : '';
   if (!el.fileList) return;
 
   // Disconnect any previous virtual list before rebuilding DOM

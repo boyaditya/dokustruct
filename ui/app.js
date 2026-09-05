@@ -16,30 +16,48 @@ import { createSubscriptionBag } from './lifecycle/subscriptionBag.js';
 import { createRafCoalescer } from './perf/rafCoalescer.js';
 import { ctx as linkingCtx, initLinkingContext } from './linking/index.js';
 import {
+  Bug,
   CheckCircle,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  Clock3,
   Copy,
+  Database,
   Download,
+  ExternalLink,
   Eye,
   EyeOff,
   FilePlus2,
+  FileSpreadsheet,
   FileText,
+  FlaskConical,
   Folder,
+  Github,
+  GitCompare,
   Image as ImageIcon,
+  LayoutPanelTop,
+  Mail,
   Maximize2,
   Menu,
+  PanelLeft,
   Play,
   Plus,
-  Settings,
-  Shield,
+  Scale,
   Scan,
   ScanLine,
+  ScanText,
+  Settings,
+  Shield,
+  ShieldCheck,
+  Sigma,
   Square,
+  Table2,
   Timer,
   TriangleAlert,
   Trash2,
+  User,
   X,
   ZoomIn,
   ZoomOut,
@@ -77,30 +95,48 @@ function hasKatexRenderError(html) {
 }
 
 const lucideIcons = {
+  Bug,
   CheckCircle,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  Clock3,
   Copy,
+  Database,
   Download,
+  ExternalLink,
   Eye,
   EyeOff,
   FilePlus2,
+  FileSpreadsheet,
   FileText,
+  FlaskConical,
   Folder,
+  Github,
+  GitCompare,
   Image: ImageIcon,
+  LayoutPanelTop,
+  Mail,
   Maximize2,
   Menu,
+  PanelLeft,
   Play,
   Plus,
+  Scale,
   Scan,
   ScanLine,
+  ScanText,
   Settings,
   Shield,
+  ShieldCheck,
+  Sigma,
   Square,
+  Table2,
   Timer,
   TriangleAlert,
   Trash2,
+  User,
   X,
   ZoomIn,
   ZoomOut,
@@ -787,6 +823,7 @@ let assetSummary = null;
 let formulaAssetSummary = null;
 let assetRefreshToken = 0;
 let assetDownloadController = null;
+let markdownSkeletonVisible = false;
 
 // ===== DOM ELEMENTS =====
 const el = {};
@@ -853,7 +890,10 @@ async function init() {
   
   // Cache DOM elements
   el.sidebar = document.getElementById('sidebar');
+  el.sidebarLogoBtn = document.getElementById('sidebarLogoBtn');
+  el.sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
   el.fileList = document.getElementById('fileList');
+  el.historyCount = document.getElementById('historyCount');
   el.uploadBtn = document.getElementById('uploadBtn');
   el.fileInput = document.getElementById('fileInput');
   el.setupWorkspace = document.getElementById('setupWorkspace');
@@ -934,6 +974,7 @@ async function init() {
   el.resizeHandle = document.getElementById('resizeHandle');
   el.markdownPane = document.getElementById('markdownPane');
   el.markdownContent = document.getElementById('markdownContent');
+  el.markdownSkeleton = document.getElementById('markdownSkeleton');
   el.contentJsonContent = document.getElementById('contentJsonContent');
   el.contentJsonViewer = document.getElementById('contentJsonViewer');
   el.copyMarkdown = document.getElementById('copyMarkdown');
@@ -1223,8 +1264,24 @@ async function init() {
 
 // ===== EVENT LISTENERS =====
 function setupEventListeners() {
+  // Pane hint — inside setup-input-pane, scrolls to below-app
+  const belowHint = document.getElementById('belowHint');
+  const belowApp = document.getElementById('belowApp');
+  if (belowHint && belowApp) {
+    const goBelow = () => belowApp.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    belowHint.addEventListener('click', goBelow);
+    belowHint.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        goBelow();
+      }
+    });
+  }
+
   // Sidebar
-  el.toggleSidebar?.addEventListener('click', toggleSidebar);
+  el.sidebarToggleBtn?.addEventListener('click', toggleSidebar);
+  // Logo doubles as "New" — same action as the New button
+  el.sidebarLogoBtn?.addEventListener('click', startNewTask);
   
   // Task composer
   el.uploadBtn?.addEventListener('click', startNewTask);
@@ -1386,6 +1443,29 @@ function switchViewerTab(tab) {
   Object.entries(panels).forEach(([key, panel]) => {
     if (panel) panel.style.display = key === activeTab ? 'block' : 'none';
   });
+
+  // Keep skeleton in sync with tab while processing
+  if (markdownSkeletonVisible) {
+    if (activeTab === 'rendered') {
+      if (el.markdownContent) {
+        el.markdownContent.classList.add('hidden');
+        el.markdownContent.style.display = 'none';
+      }
+      if (el.markdownSkeleton) {
+        el.markdownSkeleton.classList.remove('hidden');
+        el.markdownSkeleton.setAttribute('aria-hidden', 'false');
+      }
+    } else {
+      if (el.markdownSkeleton) {
+        el.markdownSkeleton.classList.add('hidden');
+        el.markdownSkeleton.setAttribute('aria-hidden', 'true');
+      }
+      if (el.markdownContent) {
+        el.markdownContent.classList.add('hidden');
+        el.markdownContent.style.display = 'none';
+      }
+    }
+  }
 }
 
 function mountSettingsPanelInline() {
@@ -2195,8 +2275,38 @@ function clearViewer() {
     if (viewer) viewer.textContent = '';
   });
   
+  hideMarkdownSkeleton();
   // Reset to rendered tab
   switchViewerTab('rendered');
+}
+
+function showMarkdownSkeleton() {
+  if (!el.markdownContent || !el.markdownSkeleton) return;
+  markdownSkeletonVisible = true;
+  const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab || 'rendered';
+  if (activeTab !== 'rendered') return;
+  el.markdownContent.classList.add('hidden');
+  el.markdownContent.style.display = 'none';
+  el.markdownSkeleton.classList.remove('hidden');
+  el.markdownSkeleton.setAttribute('aria-hidden', 'false');
+  if (el.markdownPane && el.markdownPane.style.display === 'none') {
+    el.markdownPane.style.display = '';
+  }
+}
+
+function hideMarkdownSkeleton() {
+  markdownSkeletonVisible = false;
+  if (!el.markdownSkeleton) return;
+  el.markdownSkeleton.classList.add('hidden');
+  el.markdownSkeleton.setAttribute('aria-hidden', 'true');
+  if (el.markdownContent) {
+    el.markdownContent.classList.remove('hidden');
+    const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab || 'rendered';
+    if (activeTab === 'rendered') {
+      el.markdownContent.style.display = 'block';
+      if (el.contentJsonContent) el.contentJsonContent.style.display = 'none';
+    }
+  }
 }
 
 function resetPageStack() {
@@ -2380,18 +2490,22 @@ function renderSetupFileCards() {
 
   selectedFiles.forEach((file, index) => {
     const fileName = String(file.name || 'Untitled document');
+    const isActive = index === currentFileIndex;
     const isImage = isImageFile(file);
     const thumb = isImage
       ? `<img src="${getFilePreviewUrl(file)}" alt="" loading="lazy"/>`
       : `<i data-lucide="file-text"></i>`;
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `setup-file-card${index === currentFileIndex ? ' active' : ''}`;
+    button.className = `setup-file-card${isActive ? ' active' : ''}`;
+    button.setAttribute('aria-label', `${fileName} — click to preview`);
+    button.title = isActive ? 'Selected — click to preview' : 'Click to preview';
     button.innerHTML = `
       <span class="setup-file-thumb ${isImage ? 'is-image' : 'is-pdf'}">${thumb}</span>
       <span class="setup-file-body">
         <strong title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</strong>
         <small>${formatFileSize(file.size)}</small>
+        <span class="setup-file-hint" aria-hidden="true"><i data-lucide="eye"></i><span>Click to preview</span></span>
       </span>
     `;
     button.addEventListener('click', async (event) => {
@@ -2590,6 +2704,7 @@ function showProgress() {
   if (el.progressTitle) el.progressTitle.textContent = 'Processing document';
   if (el.progressMessage) el.progressMessage.textContent = 'Extracting content from the current document.';
   updateProgress(0);
+  showMarkdownSkeleton();
 
   // Preserve elapsed time during resume — don't reset if already set by init.
   if (!processingStartTime) {
@@ -2642,6 +2757,7 @@ function hideProgress() {
     elapsedTimerId = null;
   }
   processingStartTime = 0;
+  hideMarkdownSkeleton();
 }
 
 // ===== RESULTS DISPLAY =====
@@ -2654,6 +2770,7 @@ function displayResults(results, opts = {}) {
     results.fileSize = currentFile.size;
   }
   setWorkspaceMode('workspace');
+  hideMarkdownSkeleton();
   
   try {
     prepareLinkedBlocks(results);

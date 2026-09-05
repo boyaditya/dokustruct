@@ -884,7 +884,7 @@ function shrinkOverlappingBoxes(boxes, direction = "horizontal", minThreshold = 
     if (direction === "vertical") {
       if (
         (matchIou > 0 && cutIou > minThreshold && cutIou < maxThreshold) ||
-        _y2 === y1p ||
+        y2 === y1p ||
         Math.abs(y2 - y1p) <= 3
       ) {
         const overlapYMin = Math.max(y1, y1p);

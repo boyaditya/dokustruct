@@ -3,22 +3,27 @@
  */
 
 import { DownloadFile, DownloadFileInput } from '../../utils/download_file.js';
+import { HF_ASSET_BASE } from '../../utils/model_url_map.js';
+
+function hfOcr(path) {
+  return `${HF_ASSET_BASE}/${String(path).replace(/^\/?(models\/)?/, '')}`;
+}
 
 // ─── Default model URLs ───────────────────────────────────────────────────────
 
-export const DEFAULT_DET_MODEL_URL = '/models/ocr/ch_PP-OCRv5_mobile_det.onnx';
-export const DEFAULT_REC_MODEL_URL_CH = '/models/ocr/ch_PP-OCRv5_rec_mobile_infer.onnx';
-export const DEFAULT_REC_MODEL_URL_EN = '/models/ocr/en_PP-OCRv5_rec_mobile_infer.onnx';
+export const DEFAULT_DET_MODEL_URL = hfOcr('ocr/ch_PP-OCRv5_mobile_det.onnx');
+export const DEFAULT_REC_MODEL_URL_CH = hfOcr('ocr/ch_PP-OCRv5_rec_mobile_infer.onnx');
+export const DEFAULT_REC_MODEL_URL_EN = hfOcr('ocr/en_PP-OCRv5_rec_mobile_infer.onnx');
 export const REMOTE_REC_MODEL_URL_EN_CANDIDATES = [
   'https://www.modelscope.cn/models/RapidAI/PP-OCRv5_rec/resolve/main/en_PP-OCRv5_rec_mobile_infer.onnx',
   'https://www.modelscope.cn/models/RapidAI/PP-OCRv5_rec/resolve/main/PP-OCRv5_mobile_rec.onnx',
 ];
 
-// SHA-256 hashes for OCR model files in public/models/
+// SHA-256 hashes for OCR model files
 export const DEFAULT_DET_MODEL_SHA256 = '4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae';
 export const DEFAULT_REC_MODEL_SHA256_CH = '5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5';
 export const DEFAULT_REC_MODEL_SHA256_EN = 'c3461add59bb4323ecba96a492ab75e06dda42467c9e3d0c18db5d1d21924be8';
-export const DEFAULT_SEAL_DET_MODEL_URL = '/models/ocr/pp-ocrv4_mobile_seal_det.onnx';
+export const DEFAULT_SEAL_DET_MODEL_URL = hfOcr('ocr/pp-ocrv4_mobile_seal_det.onnx');
 export const DEFAULT_SEAL_DET_MODEL_SHA256 = 'e6109a1022b5ebf0822fc00646ef2398a7ef387390ca5c978de79352b1314204';
 
 /**

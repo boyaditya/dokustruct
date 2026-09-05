@@ -71,8 +71,8 @@ export class ModelHandler {
     let tokenizerJson = resolveTokenizerJson(metaMap);
 
     if (!tokenizerJson) {
-      // Fallback (asset bundled with app)
-      tokenizerJson = await fetchAssetText('/models/formula/formula_vocab.json');
+      const { HF_ASSET_BASE } = await import("../../../../utils/model_url_map.js");
+      tokenizerJson = await fetchAssetText(`${HF_ASSET_BASE}/formula/formula_vocab.json`);
     }
 
     const modelTypeLower = (cfg.modelType ?? "").toLowerCase();

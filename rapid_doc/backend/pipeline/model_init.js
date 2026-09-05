@@ -9,6 +9,7 @@ import { RapidOrientationModel } from "../../model/orientation/rapid_orientation
 import { makeHashable } from "../../utils/hash_utils.js";
 import { formatPipelineError } from "../../utils/browser_utils.js";
 import { AbortException } from "../../utils/exceptions.js";
+import { HF_ASSET_BASE } from "../../utils/model_url_map.js";
 
 const DISPOSED_MARK = Symbol.for("rapiddoc.disposed");
 const DISPOSABLE_KEYS = [
@@ -199,7 +200,7 @@ export async function ocrModelInit(
     detDbUnclipRatio,
     enableMergeDetBoxes,
     isSeal,
-    detModelUrl: isSeal ? "/models/ocr/pp-ocrv4_mobile_seal_det.onnx" : undefined,
+    detModelUrl: isSeal ? `${HF_ASSET_BASE}/ocr/pp-ocrv4_mobile_seal_det.onnx` : undefined,
     executionProvider: preferredEp,
     executionProviders,
   });

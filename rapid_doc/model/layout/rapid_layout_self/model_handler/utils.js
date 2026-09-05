@@ -1,65 +1,60 @@
 /**
- * ModelProcessor: resolves model URLs from embedded model map.
- * Models are served as static assets and cached in IndexedDB by OrtInferSession.create().
+ * ModelProcessor: resolves model URLs from the HF asset manifest.
  */
 
 import { getLogger } from '../utils/logger.js';
+import { HF_ASSET_BASE } from '../../../../utils/model_url_map.js';
 
 export { ModelType } from '../utils/typings.js';
 
 const logger = getLogger('ModelProcessor');
 
-// Models are served locally from public/models/ (Vite static assets).
-// SHA-256 values updated to match locally-patched ONNX files
-// (patch_ppdoclayout.py post-processes layout models; hashes reflect patched versions).
-// Models not present locally (PP-DocLayout-L/M/S, doclayout_docstructbench, RT-DETR)
-// retain their upstream hashes — validate against actual files when deployed.
+function hfLayout(path) {
+  return `${HF_ASSET_BASE}/${String(path).replace(/^\/?(models\/)?/, '')}`;
+}
 
 /** @type {Record<string, {url: string, sha256: string|null}>} */
 export const DEFAULT_MODEL_MAP = Object.freeze({
   pp_doclayout_plus_l: {
-    url: '/models/layout/PP-DocLayout_plus-L/pp_doclayout_plus_l.onnx',
-    // SHA-256 of locally-patched file in public/models/
+    url: hfLayout('layout/PP-DocLayout_plus-L/pp_doclayout_plus_l.onnx'),
     sha256: '79583a4b865279d50dd20f6b74436927e91ef6c63dea2f09a8cdb714a7fd09b5',
   },
   pp_doclayoutv2: {
-    url: '/models/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx',
-    // SHA-256 of locally-patched file in public/models/
+    url: hfLayout('layout/PP-DocLayoutV2/pp_doclayoutv2.onnx'),
     sha256: '6f4cd6e99c9384751923adb02565b5541f19fa8b5a4b4fdc1e24c7c30883d1a0',
   },
   pp_doclayoutv3: {
-    url: '/models/layout/PP-DocLayoutV3/pp_doclayoutv3.onnx',
-    // SHA-256 of locally-patched file in public/models/
+    url: hfLayout('layout/PP-DocLayoutV3/pp_doclayoutv3.onnx'),
     sha256: '0f5997e6bef6eaaa8b3f2b487106877d55a0b9b218b353895bb3a2df0c6d9393',
   },
   pp_doclayout_l: {
-    url: '/models/layout/PP-DocLayout-L/pp_doclayout_l.onnx',
-    // TODO: file not present locally — fill in sha256 when model is available
+    url: hfLayout('layout/PP-DocLayout-L/pp_doclayout_l.onnx'),
+    // TODO: file not present on HF — fill in sha256 when model is available
     sha256: null,
   },
   pp_doclayout_m: {
-    url: '/models/layout/PP-DocLayout-M/pp_doclayout_m.onnx',
-    // TODO: file not present locally — fill in sha256 when model is available
+    url: hfLayout('layout/PP-DocLayout-M/pp_doclayout_m.onnx'),
+    // TODO: file not present on HF — fill in sha256 when model is available
     sha256: null,
   },
   pp_doclayout_s: {
-    url: '/models/layout/PP-DocLayout-S/pp_doclayout_s.onnx',
-    // TODO: file not present locally — fill in sha256 when model is available
+    url: hfLayout('layout/PP-DocLayout-S/pp_doclayout_s.onnx'),
+    // TODO: file not present on HF — fill in sha256 when model is available
     sha256: null,
   },
   doclayout_docstructbench: {
-    url: '/models/layout/doclayout/doclayout_yolo_docstructbench_imgsz1024.onnx',
-    // TODO: file not present locally — fill in sha256 when model is available
+    url: hfLayout('layout/doclayout/doclayout_yolo_docstructbench_imgsz1024.onnx'),
+    // TODO: file not present on HF — fill in sha256 when model is available
     sha256: null,
   },
   rt_detr_l_wired_table_cell_det: {
-    url: '/models/table/RT-DETR-L_wired_table_cell_det/rt_detr_l_wired_table_cell_det.onnx',
-    // TODO: file not present locally — fill in sha256 when model is available
+    url: hfLayout('table/RT-DETR-L_wired_table_cell_det/rt_detr_l_wired_table_cell_det.onnx'),
+    // TODO: file not present on HF — fill in sha256 when model is available
     sha256: null,
   },
   rt_detr_l_wireless_table_cell_det: {
-    url: '/models/table/RT-DETR-L_wireless_table_cell_det/rt_detr_l_wireless_table_cell_det.onnx',
-    // TODO: file not present locally — fill in sha256 when model is available
+    url: hfLayout('table/RT-DETR-L_wireless_table_cell_det/rt_detr_l_wireless_table_cell_det.onnx'),
+    // TODO: file not present on HF — fill in sha256 when model is available
     sha256: null,
   },
 });

@@ -42,6 +42,11 @@ import {
   buildDefaultCharList,
   prepareCtcCharacterList,
 } from './ocr_helpers.js';
+import { HF_ASSET_BASE } from '../../utils/model_url_map.js';
+
+function hfOcrDict(path) {
+  return `${HF_ASSET_BASE}/${String(path).replace(/^\/?(models\/)?/, '')}`;
+}
 
 const logger = getLogger('RapidOcrModel');
 
@@ -205,8 +210,8 @@ export class RapidOcrModel {
     }
 
     const dictUrl = params.lang === 'en'
-      ? '/models/ocr/ppocrv5_en_dict.txt'
-      : '/models/ocr/ppocrv5_dict.txt';
+      ? hfOcrDict('ocr/ppocrv5_en_dict.txt')
+      : hfOcrDict('ocr/ppocrv5_dict.txt');
     logger.info(`Loading dictionary from: ${dictUrl}`);
 
     let charList = null;

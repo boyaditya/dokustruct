@@ -49,9 +49,10 @@ export class PPTableStructurer {
     
     // If empty, load from external dict file
     if (!charList || charList.length === 0) {
+      const { HF_ASSET_BASE } = await import("../../../../../utils/model_url_map.js");
       const dictUrl = modelType === ModelType.PPSTRUCTURE_EN
-        ? '/models/table/table_structure_dict_en.txt'
-        : '/models/table/table_structure_dict_ch.txt';
+        ? `${HF_ASSET_BASE}/table/table_structure_dict_en.txt`
+        : `${HF_ASSET_BASE}/table/table_structure_dict_ch.txt`;
       
       try {
         const text = await fetchAssetText(dictUrl);

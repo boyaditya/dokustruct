@@ -4,23 +4,23 @@
 
 import { DownloadFile, DownloadFileInput } from "../utils/download_file.js";
 import { ModelType } from "../utils/typings.js";
+import { HF_ASSET_BASE } from "../../../../utils/model_url_map.js";
 
-// Default model download URLs
-// PORTING NOTE: These URLs would point to your hosted model files.
-// Replace with actual CDN/server URLs when deploying.
-// Models are served locally from public/models/ (Vite static assets).
-// Run `python scripts/copy-models-to-public.py` to populate public/models/.
+function hfFormula(path) {
+  return `${HF_ASSET_BASE}/${String(path).replace(/^\/?(models\/)?/, '')}`;
+}
+
 const MODEL_URLS = {
   [ModelType.PP_FORMULANET_PLUS_S]: {
-    modelUrl: '/models/formula/PP-FormulaNet_plus-S/pp_formulanet_plus_s.onnx',
+    modelUrl: hfFormula('formula/PP-FormulaNet_plus-S/pp_formulanet_plus_s.onnx'),
     sha256: '30998d10c94ccff1ad8981df0c71048cb1f3eec7b1e515b809767f1f72aebe3b',
   },
   [ModelType.PP_FORMULANET_PLUS_M]: {
-    modelUrl: '/models/formula/PP-FormulaNet_plus-M/pp_formulanet_plus_m.onnx',
+    modelUrl: hfFormula('formula/PP-FormulaNet_plus-M/pp_formulanet_plus_m.onnx'),
     sha256: '71b6d389cf7b857e45252a4b98cfced1a3ffca7bf24d9497d02d052a41d9493b',
   },
   [ModelType.PP_FORMULANET_PLUS_L]: {
-    modelUrl: '/models/formula/PP-FormulaNet_plus-L/pp_formulanet_plus_l.onnx',
+    modelUrl: hfFormula('formula/PP-FormulaNet_plus-L/pp_formulanet_plus_l.onnx'),
     sha256: '5ef81a0b197ea2c8c1463b31c3eb2ad0ae1eb655fb1ff3b550858c7d85bc84e8',
   },
 };

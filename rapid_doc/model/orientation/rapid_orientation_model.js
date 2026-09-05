@@ -3,8 +3,9 @@ import { configureOrtRuntime, acquireGlobalGpu } from "../../utils/ort_runtime.j
 import { fetchAssetBuffer } from "../../utils/download_file.js";
 import { LoadImage } from "../table/rapid_table_self/utils/load_image.js";
 import { deleteMat } from "../../utils/resource_utils.js";
+import { HF_ASSET_BASE } from "../../utils/model_url_map.js";
 
-const DEFAULT_MODEL_URL = "/models/orientation/rapid_orientation.onnx";
+const DEFAULT_MODEL_URL = `${HF_ASSET_BASE}/orientation/rapid_orientation.onnx`;
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
 const IMAGENET_STD = [0.229, 0.224, 0.225];
 const FALLBACK_LABELS = ["0", "90", "180", "270"];

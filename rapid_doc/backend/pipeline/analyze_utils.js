@@ -215,7 +215,7 @@ function collectOcrDetCrops(ocrResAllPage, ocrConfig) {
 
       delete res.need_ocr_det;
 
-      const { newImage: bgrImage, usefulList } = cropImg(res, ocrResDict.np_img, 50, 50);
+      const { newImage: bgrImage, usefulList } = cropImg(res, ocrResDict.np_img, 50, 50, { layoutShapeMode: 'rect' });
       const adjustedMfdetrecRes = getAdjustedMfdetrecRes(
         combineMfdetrecAndCheckbox(ocrResDict), usefulList
       );
@@ -254,10 +254,14 @@ function groupByResolution(langCropList) {
  * Process detection results for a single resolution group.
  */
 function processDetGroupResults(groupCrops, batchResults) {
+  let totalDtBoxes = 0;
+  let totalOcrResults = 0;
   for (let i = 0; i < groupCrops.length; i++) {
     const info = groupCrops[i];
     const [bgrImage, detImage, usefulList, ocrResDict, adjustedMfdetrecRes, lang, res, ocrEnable] = info;
-    const { boxes: dtBoxes } = batchResults[i];
+    const { boxes: dtBoxes } = batchResults[i] || {};
+    const dtCount = dtBoxes?.length ?? 0;
+    totalDtBoxes += dtCount;
 
     if (dtBoxes && dtBoxes.length > 0) {
       const dtBoxesSorted = sortedBoxes(dtBoxes);
@@ -273,11 +277,15 @@ function processDetGroupResults(groupCrops, batchResults) {
           res.original_label, res.original_order
         );
         ocrResDict.layout_res.push(...ocrResultList);
+        totalOcrResults += ocrResultList.length;
       }
     }
 
     if (detImage !== bgrImage) deleteMat(detImage);
     deleteMat(bgrImage);
+  }
+  if (totalDtBoxes === 0) {
+    console.warn(`[processDetGroupResults] 0 dtBoxes from ${groupCrops.length} crops — OCR will produce 0 text`);
   }
 }
 
@@ -291,8 +299,9 @@ function processDetGroupResults(groupCrops, batchResults) {
 export async function runOcrDetBatch(ocrResAllPage, atomModelManager, ocrConfig, onProgress = null) {
   const ocrDetBaseBatchSize = (ocrConfig || {})["Det.rec_batch_num"] || 1;
   const allCroppedInfo = collectOcrDetCrops(ocrResAllPage, ocrConfig);
-
-  if (!allCroppedInfo.length) return;
+  if (!allCroppedInfo.length) {
+    return;
+  }
 
   // Group by language
   const langGroups = {};
@@ -394,6 +403,9 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig, onProgres
   const needOcrByLang = {};
   const imgCropByLang = {};
 
+  let totalOcrText = 0;
+  for (const lr of imagesLayoutRes) totalOcrText += lr.filter(i=>i.category_id===CategoryId.OcrText).length;
+
   for (const layoutRes of imagesLayoutRes) {
     for (const item of layoutRes) {
       if (item.category_id !== CategoryId.OcrText) continue;
@@ -411,7 +423,10 @@ export async function runOcrRecPostprocess(imagesLayoutRes, ocrConfig, onProgres
     }
   }
 
-  if (!Object.keys(imgCropByLang).length) return;
+  if (!Object.keys(imgCropByLang).length) {
+    if (totalOcrText === 0) console.warn(`[runOcrRecPostprocess] No OcrText with np_img/lang found — OCR will produce 0 text`);
+    return;
+  }
 
   let processedSpans = 0;
   const totalSpans = Object.values(imgCropByLang).reduce((sum, arr) => sum + arr.length, 0);

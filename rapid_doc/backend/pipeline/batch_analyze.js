@@ -395,6 +395,10 @@ export class BatchAnalyze {
     }
     
     let imagesLayoutRes = allResults.map(item => filterOverlapBoxes(item, this.useCustomOcr));
+    // Keep single summary for diagnostics (debug level)
+    if (imagesLayoutRes.some(r => r.length === 0)) {
+      console.warn(`[BatchAnalyze] Layout returned 0 boxes for some pages (model=${this.layoutConfig?.model_type ?? 'unknown'})`);
+    }
 
     if (this.useDetMode === 'txt') {
       imagesLayoutRes = removeLayoutInOriImages(imagesLayoutRes, pdfDictList, scaleList);
@@ -425,7 +429,25 @@ export class BatchAnalyze {
       const npImg = npImages[index];
       const layoutRes = imagesLayoutRes[index];
 
-      const { ocrResList, tableResList, formulaResList } = getResListFromLayoutRes(layoutRes, npImg);
+      let { ocrResList, tableResList, formulaResList } = getResListFromLayoutRes(layoutRes, npImg);
+
+      // Fallback for image-only pages where layout yields no text regions
+      if (ocrResList.length === 0 && ocrEnable) {
+        const w = npImg?.cols ?? npImg?.width ?? 1000;
+        const h = npImg?.rows ?? npImg?.height ?? 1000;
+        const fallbackPoly = [0, 0, w, 0, w, h, 0, h];
+        const hasNonOcrOnly = layoutRes.length === 0 || layoutRes.every(r => ![0,1,2,4,6,7].includes(Number(r.category_id)));
+        if (hasNonOcrOnly) {
+          ocrResList = [{
+            bbox: [0, 0, w, h],
+            poly: fallbackPoly,
+            category_id: CategoryId.Text,
+            original_label: 'text',
+            score: 0.85,
+            polygon_points: null,
+          }];
+        }
+      }
 
       // Checkbox detection
       const checkboxRes = [];

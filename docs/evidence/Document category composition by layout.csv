@@ -1,0 +1,34 @@
+Layout,DocType,N,Pct
+Single column,PPT2PDF,42,22.340425531914892
+Single column,book,41,21.80851063829787
+Single column,research_report,28,14.893617021276595
+Single column,note,26,13.829787234042554
+Single column,academic_literature,22,11.702127659574469
+Single column,exam_paper,14,7.446808510638298
+Single column,colorful_textbook,13,6.914893617021277
+Single column,magazine,1,0.5319148936170213
+Single column,historical_document,1,0.5319148936170213
+Two columns,exam_paper,15,41.666666666666664
+Two columns,academic_literature,11,30.555555555555557
+Two columns,book,5,13.88888888888889
+Two columns,colorful_textbook,4,11.11111111111111
+Two columns,magazine,1,2.7777777777777777
+Three columns,newspaper,6,54.54545454545455
+Three columns,magazine,2,18.181818181818183
+Three columns,book,1,9.090909090909092
+Three columns,exam_paper,1,9.090909090909092
+Three columns,academic_literature,1,9.090909090909092
+Irregular columns,exam_paper,8,27.586206896551722
+Irregular columns,academic_literature,6,20.689655172413794
+Irregular columns,magazine,5,17.24137931034483
+Irregular columns,book,5,17.24137931034483
+Irregular columns,colorful_textbook,4,13.793103448275861
+Irregular columns,PPT2PDF,1,3.4482758620689653
+Tata letak lainnya,newspaper,25,29.069767441860463
+Tata letak lainnya,magazine,23,26.74418604651163
+Tata letak lainnya,colorful_textbook,15,17.441860465116278
+Tata letak lainnya,PPT2PDF,7,8.13953488372093
+Tata letak lainnya,exam_paper,5,5.813953488372093
+Tata letak lainnya,academic_literature,4,4.651162790697675
+Tata letak lainnya,book,4,4.651162790697675
+Tata letak lainnya,historical_document,3,3.488372093023256

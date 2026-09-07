@@ -10,7 +10,7 @@ import { setLinkedHighlight, clearLinkedHighlight } from './highlight.js';
 import { pinLinkedBlock } from './pin.js';
 import { createListenerBag } from '../lifecycle/listenerBag.js';
 
-/** Listener bag for all linking event handlers — dispose on teardown. */
+/** Listener bag for all linking event handlers - dispose on teardown. */
 export const linkingListenerBag = createListenerBag('linking');
 
 // ── Preview panel handlers ────────────────────────────────────────────────
@@ -82,7 +82,7 @@ export function handleMarkdownLinkFocusOut(event) {
 
 /**
  * Register all linking event listeners using the listener bag.
- * Idempotent — disposes previous bag before re-registering.
+ * Idempotent - disposes previous bag before re-registering.
  */
 export function wireLinkingEvents() {
   linkingListenerBag.dispose();
@@ -97,7 +97,7 @@ export function wireLinkingEvents() {
     linkingListenerBag.add(markdownContent, 'mouseover', handleMarkdownLinkHover);
     linkingListenerBag.add(markdownContent, 'mouseout', handleMarkdownLinkLeave);
     linkingListenerBag.add(markdownContent, 'click', handleMarkdownLinkClick);
-    // keyboard parity — focusin/focusout delegation
+    // keyboard parity - focusin/focusout delegation
     linkingListenerBag.add(markdownContent, 'focusin', handleMarkdownLinkFocusIn);
     linkingListenerBag.add(markdownContent, 'focusout', handleMarkdownLinkFocusOut);
   }

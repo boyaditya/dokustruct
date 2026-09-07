@@ -3,7 +3,7 @@
  * Central reactive state store for the DokuStruct web UI.
  *
  * Pattern: lightweight pub/sub with path-based subscriptions.
- * No external framework — vanilla JS only.
+ * No external framework - vanilla JS only.
  *
  * Usage:
  *   const state = new AppState();
@@ -65,31 +65,31 @@
  * Full application state shape.
  * @typedef {object} AppStateShape
  *
- * — Input —
+ * - Input  - 
  * @property {File[]} files
  * @property {number} currentFileIndex
  * @property {PageRange} pageRange
  * @property {number} maxPages
  *
- * — Parse options —
+ * - Parse options  - 
  * @property {'auto'|'ocr'|'txt'} parseMethod
  * @property {boolean} forceOcr
  * @property {string} language
  * @property {'auto'|'txt'|'ocr'} useDetMode
  *
- * — Feature toggles —
+ * - Feature toggles  - 
  * @property {boolean} formulaEnable
  * @property {boolean} tableEnable
  * @property {boolean} checkboxEnable
  * @property {0|1} formulaLevel
  *
- * — Layout config —
+ * - Layout config  - 
  * @property {string} layoutModelType
  * @property {number} layoutConfThresh
  * @property {'auto'|'rect'} layoutShapeMode
  * @property {string[]} markdownIgnoreLabels
  *
- * — Table config —
+ * - Table config  - 
  * @property {string} tableModelType
  * @property {boolean} tableForceOcr
  * @property {boolean} tableUseWordBox
@@ -99,7 +99,7 @@
  * @property {boolean} tableUseImg2table
  * @property {boolean} tableCompareMode
  *
- * — Output options —
+ * - Output options  - 
  * @property {boolean} dumpMd
  * @property {boolean} dumpMiddleJson
  * @property {boolean} dumpModelOutput
@@ -111,23 +111,23 @@
  * @property {'mm_markdown'|'nlp_markdown'|'content_list'} makeMode
  * @property {'a'|'b'|'all'} latexDelimiterType
  *
- * — Processing state —
+ * - Processing state  - 
  * @property {boolean} isProcessing
  * @property {string|null} processingStage
  * @property {Progress} progress
  * @property {AbortController|null} abortController
  *
- * — Results —
+ * - Results  - 
  * @property {object|null} results
  * @property {'markdown'|'raw'|'json_content'|'json_middle'|'json_model'|'layout_vis'} activeOutputTab
  * @property {boolean} showOutputPanel
  *
- * — Benchmarks —
+ * - Benchmarks  - 
  * @property {Timings} timings
  * @property {string|null} activeExecutionProvider
  * @property {number} peakMemoryMb
  *
- * — Model management —
+ * - Model management  - 
  * @property {Object.<string, ModelStatusValue>} modelStatus
  * @property {Object.<string, number>} modelProgress
  * @property {Object.<string, number>} modelSizeMb
@@ -137,7 +137,7 @@
  * @property {Timings} startupTimings
  * @property {string|null} warmupError
  *
- * — UI state —
+ * - UI state  - 
  * @property {boolean} leftDrawerOpen
  * @property {boolean} rightSheetOpen
  * @property {boolean} showPdfPreview
@@ -294,10 +294,10 @@ export class AppState {
    */
   #subscribers = new Map();
 
-  /** Batching flag — suppresses individual notifications during patch. */
+  /** Batching flag - suppresses individual notifications during patch. */
   #batching = false;
 
-  /** Keys changed during a batch — flushed after batch completes. */
+  /** Keys changed during a batch - flushed after batch completes. */
   #batchDirty = new Set();
 
   constructor() {
@@ -335,7 +335,7 @@ export class AppState {
    */
   set(key, value) {
     const prev = this.#state[key];
-    if (prev === value) return;              // reference equality — skip if unchanged
+    if (prev === value) return;              // reference equality - skip if unchanged
     this.#state[key] = value;
 
     if (this.#batching) {
@@ -405,7 +405,7 @@ export class AppState {
    * Reset state to initial values and notify all subscribers.
    * Preserves: modelStatus, modelProgress, modelSizeMb, assetStatus,
    *            assetProgress,
-   *            activeExecutionProvider (hardware detection — not user config).
+   *            activeExecutionProvider (hardware detection - not user config).
    */
   reset() {
     const preserved = {
@@ -852,7 +852,7 @@ export class AppState {
 }
 
 // ---------------------------------------------------------------------------
-// Singleton export (optional — components can also instantiate their own)
+// Singleton export (optional - components can also instantiate their own)
 // ---------------------------------------------------------------------------
 
 /**

@@ -66,7 +66,7 @@ export function createVirtualList({ container, threshold = 50, rootMargin = '300
      */
     observe(items) {
       const arr = Array.from(items);
-      if (arr.length <= threshold) return; // below threshold — no virtualization
+      if (arr.length <= threshold) return; // below threshold - no virtualization
 
       if (!observer) {
         observer = new IntersectionObserver(onIntersect, {

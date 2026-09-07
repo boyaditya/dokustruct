@@ -116,7 +116,7 @@ export class ExportUtils {
     const unified = {
       filename:            file?.name ?? results?.fileName ?? '',
       page_count:          results?.page_count ?? meta.page_count ?? 0,
-      // Seconds (primary — matches Python output)
+      // Seconds (primary - matches Python output)
       total_s:             round4(totalMs / 1000),
       model_init_s:        round4(modelInitMs / 1000),
       layout_s:            round4(layoutMs / 1000),
@@ -125,7 +125,7 @@ export class ExportUtils {
       table_s:             round4(tableMs / 1000),
       postprocess_s:       round4(postMs / 1000),
       total_inference_s:   round4(inferenceMs / 1000),
-      // Milliseconds (secondary — for compatibility with existing CSV exports)
+      // Milliseconds (secondary - for compatibility with existing CSV exports)
       total_ms:            Math.round(totalMs),
       model_init_ms:       Math.round(modelInitMs),
       layout_ms:           Math.round(layoutMs),
@@ -251,7 +251,7 @@ export class ExportUtils {
    * Download individual output files (no ZIP).
    * @param {import('../state/appState.js').AppState} state
    * @param {object} results
-   * @param {string} stem — base filename without extension
+   * @param {string} stem - base filename without extension
    */
   _downloadIndividual(state, results, stem) {
     const contentList = resultArtifact(results, 'content_list', 'contentList', 'content_list_json');

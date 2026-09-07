@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>DokuStruct — Local Document Extraction</title>
-  <meta name="description" content="DokuStruct extracts text, tables and formulas from PDFs and images — fully in your browser. No upload."/>
+  <title>DokuStruct · Local Document Extraction</title>
+  <meta name="description" content="DokuStruct extracts text, tables and formulas from PDFs and images, fully in your browser. No upload."/>
   <link rel="stylesheet" href="ui/styles/app.css"/>
   <link rel="stylesheet" href="ui/styles/landing.css"/>
 </head>
@@ -12,12 +12,12 @@
 
 <div class="dokustruct-app">
   
-  <!-- LEFT SIDEBAR — refined -->
+  <!-- LEFT SIDEBAR: refined -->
   <aside class="dokustruct-sidebar" id="sidebar">
     <div class="sidebar-content">
       
       <div class="sidebar-header">
-        <button class="logo-section logo-link" id="sidebarLogoBtn" type="button" aria-label="Start new task" title="Start new task — same as New">
+        <button class="logo-section logo-link" id="sidebarLogoBtn" type="button" aria-label="Start new task" title="Start new task: same as New">
           <span class="logo-text">DokuStruct</span>
         </button>
         <button class="icon-btn sidebar-toggle" id="sidebarToggleBtn" type="button" aria-label="Toggle sidebar" title="Toggle sidebar">
@@ -186,8 +186,8 @@
         <div class="setup-pane-header">
           <div>
             <h1>Turn documents into structured markdown</h1>
-            <p>Drop a PDF or image. Layout, OCR, tables and formulas run entirely on-device. No server, no upload.</p>
-            <div class="local-note">
+            <p style="max-width: 100%; margin-top: 12px;">Drop a PDF or image. Run entirely on-device. No server, no upload.</p>
+            <div class="local-note" style="margin-bottom: 12px;">
               <i data-lucide="shield-check"></i>
               <span>Private by design. Everything stays in this browser.</span>
             </div>
@@ -211,24 +211,36 @@
           <div class="sample-gallery" id="sampleGallery" aria-label="Try a sample">
             <div class="sample-gallery-head">
               <span>Try a sample</span>
-              <span class="sample-gallery-note">One click to load — no upload</span>
             </div>
+            <p class="sample-gallery-legend">Formula and Table samples turn on the required model automatically. Extra download only if not cached.</p>
             <div class="sample-grid">
-              <button type="button" class="sample-card" data-sample="01-table.jpg" data-label="Table">
-                <img src="samples/01-table.jpg" alt="Table sample" loading="lazy"/>
-                <span><strong>Table</strong><small>Wired + structure</small></span>
+              <button type="button" class="sample-card" data-sample="01-formula.png" data-label="Formula" data-formula="on" data-table="off" title="Turns on Formula (PP-FormulaNet Plus S + vocab, ~234 MB extra if not cached)">
+                <span class="sample-media"><img src="samples/01-formula.png" alt="Formula sample: math expressions" loading="lazy"/></span>
+                <span class="sample-body">
+                  <span class="sample-title"><strong>Formula</strong><small>Math → LaTeX</small></span>
+                  <span class="sample-meta"><i data-lucide="sigma"></i> Requires formula model · ~234 MB</span>
+                </span>
               </button>
-              <button type="button" class="sample-card" data-sample="02-layout.png" data-label="Layout">
-                <img src="samples/02-layout.png" alt="Layout sample" loading="lazy"/>
-                <span><strong>Layout</strong><small>Multi-column</small></span>
+              <button type="button" class="sample-card" data-sample="02-table.jpg" data-label="Table" data-formula="off" data-table="on" title="Turns on Table (UNet + SLANet Plus, core model, ~40 MB, downloaded once if not cached)">
+                <span class="sample-media"><img src="samples/02-table.jpg" alt="Table sample: structured table" loading="lazy"/></span>
+                <span class="sample-body">
+                  <span class="sample-title"><strong>Table</strong><small>Wired + structure</small></span>
+                  <span class="sample-meta"><i data-lucide="table-2"></i> Requires table model · ~40 MB</span>
+                </span>
               </button>
-              <button type="button" class="sample-card" data-sample="03-paper.jpg" data-label="Paper">
-                <img src="samples/03-paper.jpg" alt="Paper sample" loading="lazy"/>
-                <span><strong>Paper</strong><small>Text + figure</small></span>
+              <button type="button" class="sample-card" data-sample="03-book-scan.pdf" data-label="Book scan" data-formula="off" data-table="off" title="Text and layout only, no extra model">
+                <span class="sample-media sample-media--pdf" aria-hidden="true"><i data-lucide="file-text"></i><small>PDF · 8 pages</small></span>
+                <span class="sample-body">
+                  <span class="sample-title"><strong>Book scan</strong><small>Text &amp; layout only</small></span>
+                  <span class="sample-meta sample-meta--quiet">No extra model</span>
+                </span>
               </button>
-              <button type="button" class="sample-card" data-sample="04-mixed.png" data-label="Mixed">
-                <img src="samples/04-mixed.png" alt="Mixed sample" loading="lazy"/>
-                <span><strong>Mixed</strong><small>Text + table</small></span>
+              <button type="button" class="sample-card" data-sample="04-mixed.png" data-label="Mixed" data-formula="on" data-table="on" title="Turns on Formula and Table (formula ~234 MB + table ~40 MB, ~274 MB extra if not cached)">
+                <span class="sample-media"><img src="samples/04-mixed.png" alt="Mixed sample: text with figures" loading="lazy"/></span>
+                <span class="sample-body">
+                  <span class="sample-title"><strong>Mixed</strong><small>Text + formula + table</small></span>
+                  <span class="sample-meta"><i data-lucide="layers"></i> Requires formula & table · ~274 MB</span>
+                </span>
               </button>
             </div>
           </div>
@@ -415,7 +427,7 @@
 
 </div>
 
-<!-- About — synced with README, kept simple -->
+<!-- About - synced with README, kept simple -->
 <div class="below-app" id="belowApp">
   <div class="below-inner">
     <div class="below-kicker">about this project</div>

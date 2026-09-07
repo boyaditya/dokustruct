@@ -29,7 +29,7 @@ import {
   waitForOpenCV,
 } from '../../rapid_doc/utils/opencv_loader.js';
 
-/** Pages per chunk — hard-reset on GPU buffer saturation (~138 pages). */
+/** Pages per chunk - hard-reset on GPU buffer saturation (~138 pages). */
 const VRAM_CHUNK_SIZE = 8;
 
 // ---------------------------------------------------------------------------
@@ -296,7 +296,7 @@ async function imageFileToPdfBytes(file) {
 }
 
 // ---------------------------------------------------------------------------
-// Lazy imports — engine modules loaded only when needed to keep initial
+// Lazy imports - engine modules loaded only when needed to keep initial
 // bundle time minimal. Replace these paths if the JS entry points change.
 // ---------------------------------------------------------------------------
 
@@ -381,7 +381,7 @@ function extractLayoutLabelBlocks(middleJson) {
 }
 
 // ---------------------------------------------------------------------------
-// Resume helpers — save state via IndexedDB + sessionStorage before reload.
+// Resume helpers - save state via IndexedDB + sessionStorage before reload.
 // ---------------------------------------------------------------------------
 
 const RESUME_DB = 'DokuStructResume';
@@ -535,7 +535,7 @@ async function clearResumeState() {
 }
 
 // ---------------------------------------------------------------------------
-// VRAM chunking helpers — used by _runFullAnalysis to split large PDFs
+// VRAM chunking helpers - used by _runFullAnalysis to split large PDFs
 // into sequential chunks, resetting the GPU device between chunks.
 // ---------------------------------------------------------------------------
 
@@ -636,7 +636,7 @@ function createStageProgressAccumulator() {
 }
 
 /**
- * Lightweight page count — reads PDF metadata only, no rendering.
+ * Lightweight page count - reads PDF metadata only, no rendering.
  * Returns Infinity for corrupt/unreadable PDFs (unchunkable fallback).
  * Image input always counts as a single page.
  * @param {File} file
@@ -704,8 +704,8 @@ export class PipelineAdapter {
     this._prepareKey = null;
     this._preparePromise = null;
     // Optional UI notification hook: (msg: string, type: 'info'|'success'|'error'|'warning') => void.
-    // Set by the app shell (e.g. to showLoading). Kept as a hook — never import
-    // UI code here — so the engine stays UI-agnostic.
+    // Set by the app shell (e.g. to showLoading). Kept as a hook - never import
+    // UI code here - so the engine stays UI-agnostic.
     this.onNotify = null;
   }
 
@@ -722,7 +722,7 @@ export class PipelineAdapter {
 
   /**
    * Returns true if the current config uses windowed (streaming) processing.
-   * Can be called before a run starts — depends only on execution provider.
+   * Can be called before a run starts - depends only on execution provider.
    * @param {import('../state/appState.js').AppState} [state]
    * @returns {boolean}
    */
@@ -736,7 +736,7 @@ export class PipelineAdapter {
   /**
    * Execute the full pipeline for all queued files, driven by appState.
    *
-   * @param {import('../state/appState.js').AppState} [state] — defaults to singleton
+   * @param {import('../state/appState.js').AppState} [state] - defaults to singleton
    */
   async run(state = appState) {
     if (state.get('isProcessing')) return;
@@ -800,7 +800,7 @@ export class PipelineAdapter {
     if (!resume.startPage || resume.startPage <= 0) return false;
 
     console.debug(
-      `[pipelineAdapter] Resuming from crash — page ${resume.startPage}, ` +
+      `[pipelineAdapter] Resuming from crash - page ${resume.startPage}, ` +
       `${resume.accumulatedPageCount} prior pages`
     );
 
@@ -819,11 +819,11 @@ export class PipelineAdapter {
     const file = new File([fb], resume.fileName || 'resume.pdf', {
       type: resume.fileType || 'application/pdf',
     });
-    // currentFile is a getter deriving from files[currentFileIndex] —
+    // currentFile is a getter deriving from files[currentFileIndex]  - 
     // we must populate the files array so appState.currentFile resolves.
     state.patch({ files: [file], currentFileIndex: 0 });
 
-    // Re-prepare engine — essential after fresh reload (models not cached)
+    // Re-prepare engine - essential after fresh reload (models not cached)
     startKeepAlive();
     try {
       const signal = new AbortController().signal;
@@ -831,7 +831,7 @@ export class PipelineAdapter {
       setGlobalAbortSignal(signal);
       await this.prepare(state, file, signal);
 
-      // Run chunked analysis — _runFullAnalysis detects resumeState,
+      // Run chunked analysis - _runFullAnalysis detects resumeState,
       // restores accumulated content, and starts from the correct chunk.
       state.set('abortController', new AbortController());
       await this._runFullAnalysis(state, file, signal);
@@ -1028,7 +1028,7 @@ export class PipelineAdapter {
       state.updateMemory();
 
       state.finishProcessing(results);
-      this._notify(`OCR complete — ${totalPages} page(s) in ${(total / 1000).toFixed(1)}s`, 'success');
+      this._notify(`OCR complete - ${totalPages} page(s) in ${(total / 1000).toFixed(1)}s`, 'success');
 
       return {
         preprocessing:  tPre1 - tPre0,
@@ -1188,7 +1188,7 @@ export class PipelineAdapter {
       if (useChunking) {
         // ── Chunked path: sequential docAnalyze invocations with engineReset ──
         console.debug(
-          `[pipelineAdapter] Chunked mode — ${totalPages} pages in ` +
+          `[pipelineAdapter] Chunked mode - ${totalPages} pages in ` +
           `${totalChunks} chunks of ≤${chunkSize} pages with engineReset between chunks`
         );
 
@@ -1214,14 +1214,14 @@ export class PipelineAdapter {
           if (resumeState.accumulatedPdfInfo) accumulatedPdfInfo = resumeState.accumulatedPdfInfo;
           if (resumeState.accumulatedTimings) accumulatedTimings = resumeState.accumulatedTimings;
           startChunkIdx = Math.floor(resumeState.startPage / chunkSize);
-          // fileBytes are restored from IndexedDB — use them instead of the
+          // fileBytes are restored from IndexedDB - use them instead of the
           // File API bytes (which won't be available after a page reload).
           const fb = resumeState.fileBytes;
           fileBytes = fb.buffer.slice(fb.byteOffset, fb.byteOffset + fb.byteLength);
           // Re-build config from saved state for consistency.
           Object.assign(config, resumeState.config);
           console.debug(
-            `[pipelineAdapter] Resumed from page ${resumeState.startPage} — ` +
+            `[pipelineAdapter] Resumed from page ${resumeState.startPage} - ` +
             `${accumulatedPageCount} pages already accumulated`
           );
           await clearResumeState();
@@ -1247,7 +1247,7 @@ export class PipelineAdapter {
           }
         }
 
-        // Per-chunk streaming accumulator — concat across chunks so the UI
+        // Per-chunk streaming accumulator - concat across chunks so the UI
         // shows progressive total markdown, not just the current chunk's.
         let prevChunksMarkdown = '';
         let prevChunksContentList = [];
@@ -1259,7 +1259,7 @@ export class PipelineAdapter {
           const chunkPages = chunkEnd - chunkStart + 1;
 
           console.debug(
-            `[pipelineAdapter] Chunk ${chunkIdx + 1}/${totalChunks} — ` +
+            `[pipelineAdapter] Chunk ${chunkIdx + 1}/${totalChunks} - ` +
             `pages ${chunkStart}-${chunkEnd} (${chunkPages} pages)`
           );
 
@@ -1301,7 +1301,7 @@ export class PipelineAdapter {
               on_progress:    chunkOnProgress,
               // Let the engine fire per-window streaming callbacks so the UI
               // updates incrementally within each chunk. The adapter's
-              // streamingImageWriter is chunk-scoped — each chunk gets its own.
+              // streamingImageWriter is chunk-scoped - each chunk gets its own.
               on_window_result: async ({ markdown: wMarkdown, contentList: wContentList, pageCount: wPageCount, imageWriter }) => {
                 const chunkImages = imageWriter
                   ? await this._collectImageMap(imageWriter)
@@ -1333,7 +1333,7 @@ export class PipelineAdapter {
               formatPipelineError(chunkErr)
             );
             // Save resume state and reload the page.
-            // The GPU device is permanently dead after a native ORT crash —
+            // The GPU device is permanently dead after a native ORT crash  - 
             // only a browser page reload can get a fresh GPU adapter + WASM
             // heap. sessionStorage survives the reload.
             await saveResumeState({
@@ -1355,13 +1355,13 @@ export class PipelineAdapter {
               _startTime: this._resumeStartTime || 0,
             });
             location.reload();
-            return null; // unreachable — reload stops execution
+            return null; // unreachable - reload stops execution
           }
 
           if (!docResult || !docResult._windowed) {
             throw new Error(
               `Chunk ${chunkIdx + 1} did not return windowed mode result. ` +
-              `This is unexpected — all chunks should use windowed processing.`
+              `This is unexpected - all chunks should use windowed processing.`
             );
           }
 
@@ -1420,12 +1420,12 @@ export class PipelineAdapter {
 
           // When a chunk returns 0 pages, the GPU device's internal buffer
           // pool is saturated. engineReset + model reload cannot revive a
-          // damaged pool — subsequent chunks will trigger native ORT crashes
+          // damaged pool - subsequent chunks will trigger native ORT crashes
           // that kill the JS renderer process before we can save state.
           // Save now and reload to get a fresh GPU adapter.
           if (pdfInfo.length === 0 && chunkIdx > 0) {
             console.warn(
-              `[pipelineAdapter] Chunk ${chunkIdx + 1} returned 0 pages — ` +
+              `[pipelineAdapter] Chunk ${chunkIdx + 1} returned 0 pages - ` +
               `GPU pool saturated. Saving state and reloading for fresh GPU.`
             );
             await saveResumeState({
@@ -1481,19 +1481,19 @@ export class PipelineAdapter {
         _chunkImageWriters = allImageWriters;
 
         console.debug(
-          `[pipelineAdapter] Chunked processing complete — ` +
+          `[pipelineAdapter] Chunked processing complete - ` +
           `${totalChunks} chunks, ${accumulatedPageCount} pages, ` +
           `${accumulatedMarkdown.length} chars markdown, ` +
           `${accumulatedContentList.length} content items`
         );
       } else {
         // ── Single-run path (unchunked, includes small PDFs and image files) ──
-        // Streaming callback for windowed processing — updates UI incrementally
+        // Streaming callback for windowed processing - updates UI incrementally
         let streamingImageWriter = null;
         const onWindowResult = pdfPagesBatch > 0
           ? async ({ markdown, contentList, pageCount, imageWriter }) => {
               streamingImageWriter = streamingImageWriter || imageWriter;
-              console.debug(`[adapter] onWindowResult fired — markdown: ${(markdown || '').length} chars, pages: ${pageCount}, contentList: ${contentList?.length ?? 0} items`);
+              console.debug(`[adapter] onWindowResult fired - markdown: ${(markdown || '').length} chars, pages: ${pageCount}, contentList: ${contentList?.length ?? 0} items`);
               const images = streamingImageWriter
                 ? await this._collectImageMap(streamingImageWriter)
                 : {};
@@ -1589,7 +1589,7 @@ export class PipelineAdapter {
             const lang         = langList[0]  ?? config.language ?? 'ch';
             const ocrEnabled   = ocrEnabledList[0] ?? false;
 
-            // MemoryDataWriter stub — collects cut images in-memory
+            // MemoryDataWriter stub - collects cut images in-memory
             const imageWriter = (typeof engine.MemoryDataWriter === 'function')
               ? new engine.MemoryDataWriter()
               : { files: {}, write(path, bytes) { this.files[path] = bytes; } };
@@ -1675,7 +1675,7 @@ export class PipelineAdapter {
         } else if (typeof engine.default === 'function') {
           throwIfAborted(signal);        rawResult = await engine.default(new Uint8Array(fileBytes.slice(0)), config, { onProgress, signal });
         } else {
-          throw new Error('Unknown engine API shape — cannot call parse.');
+          throw new Error('Unknown engine API shape - cannot call parse.');
         }
       }
 
@@ -1772,7 +1772,7 @@ export class PipelineAdapter {
       //.
       const skipCount = results?._stageSkipWarnings?.length ?? 0;
       if (skipCount > 0) {
-        this._notify(`Some content could not be extracted (${skipCount} issue(s) — see console).`, 'warning');
+        this._notify(`Some content could not be extracted (${skipCount} issue(s) - see console).`, 'warning');
       } else {
         this._notify('Document processed successfully.', 'success');
       }
@@ -1853,14 +1853,14 @@ export class PipelineAdapter {
       }
       // GPU drain: best-effort flush of pending WebGPU work. On fatal failure,
       // also tear down the entire engine + WebGPU device. The next run will
-      // re-create the device and reload sessions — slower but guarantees
+      // re-create the device and reload sessions - slower but guarantees
       // VRAM is returned to the driver.
       try {
         if (_runFailedFatally && _engineRef && typeof _engineRef.engineReset === 'function') {
           await _engineRef.engineReset();
           console.warn('[pipelineAdapter] engineReset() called after fatal GPU error.');
         } else if (_engineRef) {
-          // Light-weight drain. Do NOT release the device on success — that
+          // Light-weight drain. Do NOT release the device on success - that
           // would force a 60s reload on next run with no benefit when the
           // pool is healthy. cleanMemory below is async but we don't await
           // it, since the run is already complete.
@@ -1945,7 +1945,7 @@ export class PipelineAdapter {
       const isWebGpu = String(state.get('activeExecutionProvider') || '').toLowerCase() === 'webgpu';
       // Reserve one CPU core for the main thread when running WASM: the pool
       // gets hardwareConcurrency-1 threads, leaving a core free for UI input/
-      // rendering — this is what prevents the "laggy at 100% CPU" symptom
+      // rendering - this is what prevents the "laggy at 100% CPU" symptom
       // without reducing inference throughput.
       const { setReserveMainThreadCore } = await import('../../rapid_doc/utils/ort_runtime.js');
       setReserveMainThreadCore(!isWebGpu);
@@ -2120,7 +2120,7 @@ export class PipelineAdapter {
         }, signal);
         state.setModelStatus(modelId, 'cached', 100);
       } else {
-        // No engine download API — mark as pending (engine will load lazily)
+        // No engine download API - mark as pending (engine will load lazily)
         state.setModelStatus(modelId, 'not_downloaded', 0);
       }
     } catch (e) {

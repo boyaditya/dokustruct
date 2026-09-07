@@ -38,6 +38,7 @@ import {
   GitCompare,
   Image as ImageIcon,
   LayoutPanelTop,
+  Layers,
   Mail,
   Maximize2,
   Menu,
@@ -132,6 +133,7 @@ const lucideIcons = {
   ShieldCheck,
   Sigma,
   Square,
+  Layers,
   Table2,
   Timer,
   TriangleAlert,
@@ -1028,7 +1030,7 @@ async function init() {
 
   setupEventListeners();
   // Engine notifications surface through the loading indicator. The engine
-  // stays UI-agnostic via the onNotify hook — no toast system, no emoji.
+  // stays UI-agnostic via the onNotify hook - no toast system, no emoji.
   pipelineAdapter.onNotify = (msg, type) => showLoading(msg, type === 'error' ? 3000 : 2000);
   setupOverlayResizeObservers();
   switchViewerTab(prefs.activeOutputTab || 'rendered');
@@ -1143,7 +1145,7 @@ async function init() {
       const resume = JSON.parse(resumeRaw);
       if (resume.startPage > 0) {
         console.debug(
-          `[UI] Detected resume state — page ${resume.startPage}, ` +
+          `[UI] Detected resume state - page ${resume.startPage}, ` +
           `${resume.accumulatedPageCount} prior pages. Auto-resuming...`
         );
 
@@ -1214,7 +1216,7 @@ async function init() {
           el.progressOverlay.dataset.timerStart = processingStartTime || Date.now();
         }
         if (el.progressTitle) {
-          el.progressTitle.textContent = `Resuming from page ${resume.startPage} — preparing engine...`;
+          el.progressTitle.textContent = `Resuming from page ${resume.startPage} - preparing engine...`;
         }
         const resumePct = Math.round((resume.startPage / resume.totalPages) * 100);
         updateProgress(resumePct);
@@ -1264,7 +1266,7 @@ async function init() {
 
 // ===== EVENT LISTENERS =====
 function setupEventListeners() {
-  // Pane hint — inside setup-input-pane, scrolls to below-app
+  // Pane hint - inside setup-input-pane, scrolls to below-app
   const belowHint = document.getElementById('belowHint');
   const belowApp = document.getElementById('belowApp');
   if (belowHint && belowApp) {
@@ -1280,7 +1282,7 @@ function setupEventListeners() {
 
   // Sidebar
   el.sidebarToggleBtn?.addEventListener('click', toggleSidebar);
-  // Logo doubles as "New" — same action as the New button
+  // Logo doubles as "New" - same action as the New button
   el.sidebarLogoBtn?.addEventListener('click', startNewTask);
   
   // Task composer
@@ -2066,6 +2068,46 @@ function handleFileSelect(e) {
   e.target.value = ''; // Reset input
 }
 
+const SAMPLE_PRESETS = Object.freeze({
+  '01-formula.png': { formulaEnable: true, tableEnable: false, requires: 'formula', label: 'Formula' },
+  '02-table.jpg': { formulaEnable: false, tableEnable: true, requires: 'table', label: 'Table' },
+  '03-book-scan.pdf': { formulaEnable: false, tableEnable: false, requires: null, label: 'Book scan' },
+  '04-mixed.png': { formulaEnable: true, tableEnable: true, requires: 'both', label: 'Mixed' },
+});
+
+function getSamplePreset(fileName) {
+  return SAMPLE_PRESETS[fileName] ?? { formulaEnable: false, tableEnable: false, requires: null, label: fileName };
+}
+
+function applySamplePreset(fileName) {
+  const preset = getSamplePreset(fileName);
+  const wantFormula = Boolean(preset.formulaEnable);
+  const wantTable = Boolean(preset.tableEnable);
+  let changed = false;
+  if (el.formulaEnable && el.formulaEnable.checked !== wantFormula) {
+    el.formulaEnable.checked = wantFormula;
+    changed = true;
+  }
+  if (el.tableEnable && el.tableEnable.checked !== wantTable) {
+    el.tableEnable.checked = wantTable;
+    changed = true;
+  }
+  if (changed) updateConfig();
+  return { preset, changed };
+}
+
+function notifySamplePreset(preset) {
+  if (preset.requires === 'formula') {
+    showLoading('Formula sample: enabled Formula, disabled Table. Requires formula model (PP-FormulaNet Plus S + vocab, ~234 MB). Extra download only if not cached.', 5000);
+  } else if (preset.requires === 'table') {
+    showLoading('Table sample: enabled Table, disabled Formula. Requires table model (UNet + SLANet Plus, ~40 MB, part of core). Download only if not cached.', 5000);
+  } else if (preset.requires === 'both') {
+    showLoading('Mixed sample: enabled Formula and Table. Requires formula (~234 MB) + table (~40 MB), ~274 MB total. Extra download only if not cached.', 5000);
+  } else {
+    showLoading(`${preset.label} sample: Formula off, Table off. No extra model needed.`, 3500);
+  }
+}
+
 async function handleSampleClick(e) {
   const card = e.target.closest?.('.sample-card');
   if (!card) return;
@@ -2075,12 +2117,15 @@ async function handleSampleClick(e) {
   }
   const fileName = card.dataset.sample;
   if (!fileName) return;
+  const { preset } = applySamplePreset(fileName);
+  notifySamplePreset(preset);
   card.setAttribute('aria-busy', 'true');
   try {
     const res = await fetch(`samples/${fileName}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
-    const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+    const resolvedType = blob.type || (fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+    const file = new File([blob], fileName, { type: resolvedType });
     addSelectedFiles([file]);
   } catch (err) {
     console.warn('[sample] failed to load', fileName, err);
@@ -2137,7 +2182,7 @@ function addSelectedFiles(files) {
   setWorkspaceMode('setup');
   setSetupTab('upload');
   updateSetupUploadState();
-  // Store the file but DON'T render preview yet — that happens in runPipeline.
+  // Store the file but DON'T render preview yet - that happens in runPipeline.
   currentFile = validFiles[0];
   currentFileType = isImageFile(currentFile) ? 'image' : 'pdf';
   currentPage = 1;
@@ -2495,28 +2540,70 @@ function renderSetupFileCards() {
     const thumb = isImage
       ? `<img src="${getFilePreviewUrl(file)}" alt="" loading="lazy"/>`
       : `<i data-lucide="file-text"></i>`;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `setup-file-card${isActive ? ' active' : ''}`;
-    button.setAttribute('aria-label', `${fileName} — click to preview`);
-    button.title = isActive ? 'Selected — click to preview' : 'Click to preview';
-    button.innerHTML = `
+    const card = document.createElement('div');
+    card.className = `setup-file-card${isActive ? ' active' : ''}`;
+
+    const mainBtn = document.createElement('button');
+    mainBtn.type = 'button';
+    mainBtn.className = 'setup-file-card-main';
+    mainBtn.setAttribute('aria-label', `${fileName} - click to preview`);
+    mainBtn.title = isActive ? 'Selected - click to preview' : 'Click to preview';
+    mainBtn.innerHTML = `
       <span class="setup-file-thumb ${isImage ? 'is-image' : 'is-pdf'}">${thumb}</span>
       <span class="setup-file-body">
         <strong title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</strong>
         <small>${formatFileSize(file.size)}</small>
-        <span class="setup-file-hint" aria-hidden="true"><i data-lucide="eye"></i><span>Click to preview</span></span>
       </span>
     `;
-    button.addEventListener('click', async (event) => {
+    mainBtn.addEventListener('click', async (event) => {
       event.stopPropagation();
       currentFileIndex = index;
       await loadFile(file, { replaceQueue: false });
       setWorkspaceMode('setup');
       openSetupPreviewDialog();
     });
-    el.setupFileCards.appendChild(button);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'setup-file-remove';
+    removeBtn.setAttribute('aria-label', `Remove ${fileName}`);
+    removeBtn.title = 'Remove file';
+    removeBtn.innerHTML = `<i data-lucide="x"></i>`;
+    removeBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      removeSetupFile(index);
+    });
+
+    card.append(mainBtn, removeBtn);
+    el.setupFileCards.appendChild(card);
   });
+  refreshIcons();
+}
+
+function removeSetupFile(index) {
+  if (appState.get('isProcessing')) {
+    showLoading('Processing is still running');
+    return;
+  }
+  const file = selectedFiles[index];
+  if (!file) return;
+  revokeFilePreviewUrl(file);
+  selectedFiles.splice(index, 1);
+  if (selectedFiles.length === 0) {
+    currentFile = null;
+    currentFileIndex = 0;
+    currentFileType = null;
+    closeSetupPreviewDialog();
+    appState.patch({ files: [], currentFileIndex: 0, results: null });
+  } else {
+    currentFileIndex = Math.min(index, selectedFiles.length - 1);
+    currentFile = selectedFiles[currentFileIndex];
+    currentFileType = isImageFile(currentFile) ? 'image' : 'pdf';
+    appState.patch({ files: [...selectedFiles], currentFileIndex });
+  }
+  updateSetupUploadState();
+  updateUI();
+  showLoading('File removed');
   refreshIcons();
 }
 
@@ -2576,7 +2663,7 @@ async function runPipeline() {
   updateRunSummary(currentRunConfig);
   setWorkspaceMode('workspace');
 
-  // Wake lock — prevents OS sleep during long pipeline runs.
+  // Wake lock - prevents OS sleep during long pipeline runs.
   startKeepAlive();
 
   showProgress();
@@ -2589,7 +2676,7 @@ async function runPipeline() {
   try {
     await _saveProcessingHistoryEntry();
     loadHistory();
-  } catch { /* best-effort — history is not critical */ }
+  } catch { /* best-effort - history is not critical */ }
 
   try {
     // ── Step 1: Render PDF preview → viewer fills with pages ──
@@ -2606,7 +2693,7 @@ async function runPipeline() {
     }
     if (currentFileType === 'pdf') {
       // For a single-page PDF this callback fires once (1/1). Skip the
-      // percent update then — the pipeline stage events that follow will
+      // percent update then - the pipeline stage events that follow will
       // drive the bar. Multi-page PDFs keep the per-page fill.
       await loadPdfPreview(currentFile, (rendered, total) => {
         if (el.progressTitle) el.progressTitle.textContent = `Rendering page ${rendered} of ${total}`;
@@ -2616,7 +2703,7 @@ async function runPipeline() {
         }
       });
     } else {
-      // Image input — only 1 page, so show indeterminate progress instead
+      // Image input - only 1 page, so show indeterminate progress instead
       // of a bar that would jump straight from 0% to 100%.
       if (el.progressTitle) el.progressTitle.textContent = 'Preparing image';
       if (el.progressMessage) el.progressMessage.textContent = 'Converting image for processing.';
@@ -2706,7 +2793,7 @@ function showProgress() {
   updateProgress(0);
   showMarkdownSkeleton();
 
-  // Preserve elapsed time during resume — don't reset if already set by init.
+  // Preserve elapsed time during resume - don't reset if already set by init.
   if (!processingStartTime) {
     processingStartTime = Date.now();
     el.progressOverlay.dataset.timerStart = processingStartTime;
@@ -2724,7 +2811,7 @@ function _injectProgressWarning() {
   overlay.querySelector('.progress-warning')?.remove();
   const warning = document.createElement('span');
   warning.className = 'progress-warning';
-  warning.textContent = 'Keep this tab visible — background tabs may slow processing';
+  warning.textContent = 'Keep this tab visible - background tabs may slow processing';
   warning.title = 'Chrome throttles background-tab CPU. Keep this browser tab active for full speed.';
   const bar = overlay.querySelector('.progress-bar');
   if (bar) {
@@ -2820,7 +2907,7 @@ function displayMarkdown(markdown, _pageCount = 1, _contentList = null) {
     const latexBlocks = [];
     let protectedSource = markdown;
 
-      // Protect display math ($$...$$) — must come before inline ($...$)
+      // Protect display math ($$...$$) - must come before inline ($...$)
       protectedSource = protectedSource.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
         const trimmed = sanitizeFormulaLatex(latex.trim());
         const idx = latexBlocks.length;
@@ -2832,7 +2919,7 @@ function displayMarkdown(markdown, _pageCount = 1, _contentList = null) {
       // Protect inline math ($...$)
       protectedSource = protectedSource.replace(/(?<!\$)\$(?!\$)([\s\S]+?)(?<!\$)\$(?!\$)/g, (_, latex) => {
         const trimmed = sanitizeFormulaLatex(latex.trim());
-        if (!trimmed) return `$${latex}$`; // empty — skip
+        if (!trimmed) return `$${latex}$`; // empty - skip
         const idx = latexBlocks.length;
         latexBlocks.push({ latex: trimmed, display: false });
         const safe = trimmed.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -3096,7 +3183,7 @@ function buildOverlayBlocksFromMiddlePdfInfo(results) {
     let contentCursor = 0;
     // Parity: two paragraphs with the same text (different
     // positions) both matched the FIRST physical preproc block by text.
-    // Track claimed blocks (by object identity — sort keys collide when
+    // Track claimed blocks (by object identity - sort keys collide when
     // original_order/index are missing) so the second paragraph is forced
     // to match the second physical block instead of reusing the first.
     const claimedPreprocKeys = new WeakSet();
@@ -3116,7 +3203,7 @@ function buildOverlayBlocksFromMiddlePdfInfo(results) {
       // its own overlay box and its own link id.
       const paraTypeLower = String(paraBlock?.type || '').toLowerCase();
       const lines = Array.isArray(paraBlock?.lines) ? paraBlock.lines : [];
-      // PDF-text enumeration is not a layout 'list' block — the pipeline
+      // PDF-text enumeration is not a layout 'list' block - the pipeline
       // classifies it as plain 'text' while the markdown still renders <ol>.
       // Detect numbered-list lines: "1. ", "(2) ", "1) " prefixes.
       const numberedLineCount = lines.filter((line) => {
@@ -3262,7 +3349,7 @@ function findPreprocBlocksForPara(paraBlock, paraText, preprocBlocks, paraPageIn
       if (block?.lines_deleted) return false;
       if (!isCompatibleOverlayType(paraBlock, block)) return false;
       // Parity: skip blocks already claimed by an earlier
-      // paragraph — identical text must not reuse the same physical block.
+      // paragraph - identical text must not reuse the same physical block.
       if (claimedKeys?.has(block)) return false;
       const blockLabelGroup = labelGroupKey(block?.original_label, block?.type);
       return paraLabelGroup === blockLabelGroup;
@@ -3700,7 +3787,7 @@ function linkMarkdownBlocks(_pageCount = 1, _contentList = null) {
     candidatesByPage.get(p).push(c);
   });
 
-  // Every fragment of every merge group, sorted by physical order — needed to
+  // Every fragment of every merge group, sorted by physical order - needed to
   // bind each <li> to its own overlay box when the list para-block produced
   // one box per line.
   const groupParts = new Map();
@@ -3753,7 +3840,7 @@ function linkMarkdownBlocks(_pageCount = 1, _contentList = null) {
     return null;
   };
 
-  // Peek the next candidate WITHOUT consuming it — lets the list handler
+  // Peek the next candidate WITHOUT consuming it - lets the list handler
   // decide between "one box per line" and "one box for the whole list".
   const peekNextCandidate = () => {
     for (let j = 0; j < sortedPages.length; j++) {
@@ -3771,7 +3858,7 @@ function linkMarkdownBlocks(_pageCount = 1, _contentList = null) {
   //     <li> consumes its own candidate in sequence → different link ids.
   //  2. A merge group with per-line fragments: bind each <li> to its fragment.
   //  3. A single box whose type/label is 'content' covering the whole list:
-  //     all <li> share that ONE id — one unit.
+  //     all <li> share that ONE id - one unit.
   const processedLists = new Set();
 
   const isContentBox = (candidate) => {
@@ -3793,7 +3880,7 @@ function linkMarkdownBlocks(_pageCount = 1, _contentList = null) {
         const firstCandidate = peekNextCandidate();
         if (!firstCandidate) break;
 
-        // Case 2: merge group — one fragment per line, bound in order.
+        // Case 2: merge group - one fragment per line, bound in order.
         if (firstCandidate.mergeGroupId) {
           const candidate = takeNextCandidate();
           const parts = groupParts.get(candidate.mergeGroupId) ?? [];
@@ -3812,14 +3899,14 @@ function linkMarkdownBlocks(_pageCount = 1, _contentList = null) {
           continue;
         }
 
-        // Case 3: a 'content' box covers the whole list — one unit, one id.
+        // Case 3: a 'content' box covers the whole list - one unit, one id.
         if (isContentBox(firstCandidate)) {
           const candidate = takeNextCandidate();
           liShells.forEach((liShell) => assign(liShell, candidate));
           continue;
         }
 
-        // Case 1: per-line text boxes — one candidate per <li>, in sequence.
+        // Case 1: per-line text boxes - one candidate per <li>, in sequence.
         for (const liShell of liShells) {
           const candidate = takeNextCandidate();
           if (!candidate) break;
@@ -3827,7 +3914,7 @@ function linkMarkdownBlocks(_pageCount = 1, _contentList = null) {
         }
         continue;
       }
-      // li in an already-processed list — skip (handled by its group).
+      // li in an already-processed list - skip (handled by its group).
       if (listEl && processedLists.has(listEl)) continue;
     }
 
@@ -3948,7 +4035,7 @@ function updateProgress(progress) {
   if (el.progressPercent && !indeterminate) {
     el.progressPercent.textContent = `${Math.round(percent)}%`;
   }
-  // Keep elapsed time fresh — setInterval alone stalls under WebGPU load.
+  // Keep elapsed time fresh - setInterval alone stalls under WebGPU load.
   updateElapsedTime();
 }
 
@@ -5106,7 +5193,7 @@ function subscribeToState() {
   });
   
   _stateBag.subscribe(appState, 'processingStage', () => {
-    // Silenced — page-based progress via progressStage replaces this
+    // Silenced - page-based progress via progressStage replaces this
   });
   
   _stateBag.subscribe(appState, 'timings', (_timings) => {
@@ -5141,7 +5228,7 @@ function subscribeToState() {
       const total = appState.get('progressTotal') || 0;
       const stage = appState.get('progressStage') || '';
       const isPageProgress = stage === 'pages';
-      // Only 'pages' events with a single page are meaningless — stage
+      // Only 'pages' events with a single page are meaningless - stage
       // events always carry a real cumulative percent from the engine.
       const isIndeterminate = isPageProgress && total <= 1;
       setProgressIndeterminate(isIndeterminate);
@@ -5182,11 +5269,11 @@ function subscribeToState() {
 
 // ===== LOADING INDICATOR (LOFI) =====
 
-// Does NOT mutate native `disabled` on inputs — uses aria-disabled + pointer-events.
+// Does NOT mutate native `disabled` on inputs - uses aria-disabled + pointer-events.
 const _processingInterceptor = (e) => {
   if (appState.get('isProcessing')) {
     // Whitelist: allow interaction with all toolbar and settings elements,
-    // plus the progress overlay itself — its Cancel button must stay
+    // plus the progress overlay itself - its Cancel button must stay
     // clickable or the user has no way to stop a run.
     const allowed = e.target?.closest?.(
       '.dokustruct-drawer, .drawer-backdrop, .settings-control-stack, .settings-advanced, ' +
@@ -5202,7 +5289,7 @@ const _processingInterceptor = (e) => {
 let _processingChromeActive = false;
 
 function setProcessingChrome(isProcessing) {
-  // Only lock the run/upload/download buttons — toolbar remains interactive.
+  // Only lock the run/upload/download buttons - toolbar remains interactive.
   const controls = [
     el.startBtn, el.uploadBtn, el.downloadBtn,
   ].filter(Boolean);

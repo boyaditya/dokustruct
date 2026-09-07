@@ -159,7 +159,7 @@ function appendMergeConnectorPath(layer, groupId, points, { showLabel = false } 
  * Render SVG merge-connector lines between grouped overlay boxes.
  * Phase 1 (read): collect box positions from the live overlay DOM.
  * Phase 2 (write): clear the SVG layer and append new paths.
- *  — reads before writes.
+ *  - reads before writes.
  */
 export function renderMergeConnectors() {
   const layer = getGlobalMergeConnectorLayer();

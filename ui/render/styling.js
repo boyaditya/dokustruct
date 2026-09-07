@@ -129,7 +129,7 @@ function populateMapFromSourceData(layoutLabelMap, sourceData) {
         }
       });
     }
-    // layout_dets do not include text content directly — skip.
+    // layout_dets do not include text content directly - skip.
   });
 }
 
@@ -157,9 +157,9 @@ export function applyLayoutBasedStyling() {
 
   if (layoutLabelMap.size === 0) {
     // Image-only pages (tables, figures with no text spans) legitimately produce
-    // an empty layout map — this is expected, not an error.
+    // an empty layout map - this is expected, not an error.
     console.info(
-      `${_ctx.UI_LOG_PREFIX} No text content found in layout data — page may be image-only. Skipping text-based styling.`,
+      `${_ctx.UI_LOG_PREFIX} No text content found in layout data - page may be image-only. Skipping text-based styling.`,
     );
     centerAlignVisuals();
     return;

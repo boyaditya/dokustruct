@@ -102,7 +102,7 @@ export function blockHasFormula(block) {
 /**
  * Extract link-comparison text from a rendered markdown block, substituting
  * KaTeX placeholders with their original LaTeX source so the scorer can match
- * middle-json paragraphs (which carry bare LaTeX — no surrounding $...$/$$...$$
+ * middle-json paragraphs (which carry bare LaTeX - no surrounding $...$/$$...$$
  * wrappers, per pipelineAdapter.extractLayoutLabelBlocks).
  *
  * Apply formula-link styling.
@@ -112,7 +112,7 @@ export function blockHasFormula(block) {
  */
 export function extractBlockLinkText(block) {
   if (!block) return '';
-  // Standalone display formula block — use the source LaTeX directly.
+  // Standalone display formula block - use the source LaTeX directly.
   if (block.classList?.contains('katex-display-placeholder')) {
     const src = block.getAttribute?.('data-formula-source') || '';
     return _ctx.normalizeLayoutText(src);
@@ -186,7 +186,7 @@ export function hoistDisplayFormulaPlaceholders(root) {
 
 /**
  * Wrap each rendered markdown block in a .block-shell div and append a
- * copy-action button bar. Idempotent — blocks already inside a .block-shell
+ * copy-action button bar. Idempotent - blocks already inside a .block-shell
  * are skipped.
  *
  * : every content block must be actionable (copy).
@@ -195,7 +195,7 @@ export function attachBlockActions() {
   const mc = _ctx.markdownContent;
   if (!mc) return;
 
-  // each <li> becomes its own shell — the pipeline's
+  // each <li> becomes its own shell - the pipeline's
   // content_list emits one TEXT entry per list line, so each list item must
   // carry its own data-link-id. Wrapping the whole <ol>/<ul> as a single
   // shell made one candidate consume an entire list and shifted every
@@ -208,7 +208,7 @@ export function attachBlockActions() {
     if (block.closest('.block-shell')) return;
 
     // <li> is handled itself; other elements nested inside a list belong to
-    // their li's shell — wrapping them separately would create extra shells
+    // their li's shell - wrapping them separately would create extra shells
     // and shift links.
     const tag = String(block.tagName || '').toLowerCase();
     if (tag !== 'li' && block.closest('li')) return;

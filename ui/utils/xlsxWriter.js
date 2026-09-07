@@ -3,7 +3,7 @@
  * ======================
  * Minimal, dependency-light XLSX writer built on top of JSZip (already a
  * project dependency). Produces a valid .xlsx workbook from in-memory sheets
- * so the browser benchmark can export an Excel file directly — no SheetJS.
+ * so the browser benchmark can export an Excel file directly - no SheetJS.
  *
  * Each sheet is { name, rows } where rows is a 2D array of cells. A cell is a
  * primitive (string | number | null) or { v, bold, fill } for light styling.

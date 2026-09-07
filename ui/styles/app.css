@@ -7,7 +7,7 @@
 }
 
 :root {
-    /* Single blue / green / red family — every tint below derives from these. */
+    /* Single blue / green / red family - every tint below derives from these. */
     --primary: #1d4ed8;
     --primary-hover: #1e40af;
     --primary-wash: #eff6ff;
@@ -75,8 +75,8 @@ body {
     display: flex;
     flex-direction: column;
     height: 100%;
-    overflow-y: auto;
-    overflow-x: hidden;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .sidebar-content::-webkit-scrollbar {
@@ -249,20 +249,24 @@ body {
     min-height: 0;
     border-bottom: 1px solid var(--border-light);
     margin-bottom: 8px;
+    position: sticky;
+    top: 0;
+    background: var(--white);
+    z-index: 2;
 }
 
 .hidden {
     display: none !important;
 }
 
-/* File List Section */
+/* File List Section - header sticky, list scrolls */
 .file-list-section {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 0 10px 8px;
-    overflow-y: auto;
     min-height: 0;
+    padding: 0;
+    overflow: hidden;
 }
 
 .history-item.is-processing {
@@ -284,13 +288,21 @@ body {
 }
 
 .file-list-header {
-    height: 30px;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    height: auto;
+    min-height: 0;
+    padding: 6px 4px 6px;
+    border-bottom: 1px solid var(--border-light);
+    margin-bottom: 6px;
+    position: sticky;
+    top: 0;
+    background: var(--white);
+    z-index: 2;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
 }
 
@@ -298,11 +310,15 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 8px;
+    gap: 4px;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 2px;
+    padding-bottom: 8px;
 }
 
-/* Build provenance — compact */
+/* Build provenance - compact */
 .sidebar-footer {
     flex: 0 0 auto;
     display: flex;
@@ -792,10 +808,10 @@ input:focus-visible {
     font-size: 14px;
 }
 
-/* Sample gallery — 4 plain cards, below dropzone. */
+/* Sample gallery - native to DokuStruct: quiet borders, no AI gradients. */
 .sample-gallery {
-    margin-top: 16px;
-    padding-top: 14px;
+    margin-top: 18px;
+    padding-top: 16px;
     border-top: 1px solid var(--border-light);
 }
 
@@ -804,7 +820,7 @@ input:focus-visible {
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
     font-size: 12px;
 }
 
@@ -818,6 +834,13 @@ input:focus-visible {
     font-size: 11px;
 }
 
+.sample-gallery-legend {
+    margin: 0 0 12px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-tertiary);
+}
+
 .sample-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -825,9 +848,11 @@ input:focus-visible {
 }
 
 .sample-card {
-    display: grid;
-    gap: 8px;
-    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
     border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
     background: var(--white);
@@ -835,36 +860,9 @@ input:focus-visible {
     cursor: pointer;
 }
 
-.sample-card img {
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    object-fit: cover;
-    border-radius: 4px;
-    border: 1px solid var(--border-light);
-    background: var(--hover-bg);
-}
-
-.sample-card span {
-    display: grid;
-    gap: 1px;
-}
-
-.sample-card strong {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text);
-    line-height: 1.2;
-}
-
-.sample-card small {
-    font-size: 11px;
-    color: var(--text-tertiary);
-    line-height: 1.2;
-}
-
 .sample-card:hover {
     border-color: var(--border);
-    background: var(--hover-bg);
+    background: var(--white);
 }
 
 .sample-card:focus-visible {
@@ -873,9 +871,107 @@ input:focus-visible {
     box-shadow: 0 0 0 2px var(--focus);
 }
 
+.sample-media {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    background: var(--hover-bg);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.sample-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.sample-media--pdf {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--text-tertiary);
+    background: var(--hover-bg);
+}
+
+.sample-media--pdf i,
+.sample-media--pdf svg {
+    width: 22px;
+    height: 22px;
+    color: var(--text-secondary);
+}
+
+.sample-media--pdf small {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.sample-body {
+    display: grid;
+    gap: 6px;
+    padding: 8px 9px 9px;
+    min-width: 0;
+}
+
+.sample-title {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.sample-title strong {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.25;
+}
+
+.sample-title small {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    line-height: 1.2;
+}
+
+.sample-meta {
+    display: block;
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: var(--text-tertiary);
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.sample-meta i,
+.sample-meta svg {
+    width: 11px;
+    height: 11px;
+    display: inline;
+    vertical-align: -1.5px;
+    margin-right: 3px;
+    color: var(--text-tertiary);
+}
+
+.sample-meta--quiet {
+    color: var(--text-tertiary);
+}
+
 @media (max-width: 860px) {
     .sample-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .sample-meta {
+        font-size: 10px;
+        gap: 4px;
+    }
+    .sample-title strong {
+        font-size: 11.5px;
     }
 }
 
@@ -1705,7 +1801,7 @@ input:focus-visible {
     margin-bottom: 12px;
 }
 
-/* ===== MARKDOWN SKELETON — shown while isProcessing ===== */
+/* ===== MARKDOWN SKELETON - shown while isProcessing ===== */
 .markdown-skeleton {
     padding: 16px;
     display: flex;
@@ -1887,18 +1983,20 @@ input:focus-visible {
 
 /* ===== UTILITIES ===== */
 
-/* ===== HISTORY ITEMS — compact ===== */
+/* ===== HISTORY ITEMS - roomy, no cut ===== */
 .history-item {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) 20px;
-    align-items: center;
+    grid-template-columns: 30px minmax(0, 1fr) 24px;
+    align-items: start;
     gap: 8px;
-    min-height: 48px;
-    padding: 6px 8px;
+    min-height: 62px;
+    height: auto;
+    padding: 8px 6px;
     border: 1px solid var(--border-light);
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
     transition: background 0.2s, border-color 0.2s;
+    overflow: visible;
 }
 
 .history-item:hover {
@@ -2469,7 +2567,7 @@ input:focus-visible {
     min-width: 36px;
 }
 
-/* Indeterminate mode — used for image inputs where percent would jump 0% → 100% */
+/* Indeterminate mode - used for image inputs where percent would jump 0% → 100% */
 .progress-overlay.is-indeterminate .progress-fill {
     width: 42%;
     animation: progress-indeterminate-slide 1.2s ease-in-out infinite;
@@ -2669,33 +2767,37 @@ body {
 }
 
 .history-item {
-    min-height: 46px;
-    padding: 6px 28px 6px 6px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: transparent;
-    display: grid;
-    grid-template-columns: 30px minmax(0, 1fr);
-    gap: 8px;
-    align-items: center;
     position: relative;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) 28px;
+    gap: 10px;
+    align-items: center;
+    min-height: 64px;
+    padding: 8px 8px 8px 9px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: var(--white);
     cursor: pointer;
+    overflow: hidden;
+    transition: border-color 0.14s ease, background 0.14s ease;
 }
 
 .history-item:hover {
-    border-color: var(--border-light);
+    border-color: var(--border);
     background: var(--white);
 }
 
 .history-icon {
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     border: 1px solid var(--border-light);
     border-radius: 6px;
-    background: var(--white);
+    background: var(--hover-bg);
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
+    align-self: center;
 }
 
 .history-icon svg,
@@ -2706,59 +2808,73 @@ body {
 
 .history-info {
     min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    justify-content: center;
 }
 
 .history-name {
-    font-size: 12px;
-    line-height: 1.25;
+    font-size: 12.5px;
+    line-height: 1.3;
     font-weight: 500;
     color: var(--text);
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .history-meta {
-    margin-top: 2px;
-    font-size: 10px;
+    font-size: 11px;
+    line-height: 1.2;
     color: var(--text-tertiary);
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .history-delete {
-    position: absolute;
-    right: 7px;
-    top: 50%;
-    transform: translateY(-50%);
+    position: relative;
     width: 28px;
     height: 28px;
-    border: 1px solid var(--border-light);
-    border-radius: 8px;
-    background: var(--white);
-    color: var(--text-secondary);
-    display: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-tertiary);
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    align-self: center;
+    transition: opacity 0.14s ease, border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
 }
 
 .history-item:hover .history-delete,
 .history-delete:focus-visible {
-    display: inline-flex;
+    opacity: 1;
+    pointer-events: auto;
+    border-color: var(--border-light);
+    background: var(--white);
 }
 
 .history-delete:hover {
     border-color: var(--danger-border);
     background: var(--danger-wash);
     color: var(--danger);
+    opacity: 1;
 }
 
 .history-delete svg,
 .history-delete i {
-    width: 15px;
-    height: 15px;
+    width: 14px;
+    height: 14px;
 }
 
 .file-list-header {
@@ -3309,21 +3425,29 @@ body {
     font-family: var(--mono);
 }
 
-/* ===== LOADING INDICATOR (LOFI) ===== */
+/* ===== LOADING INDICATOR - native, not AI slop =====
+   White card, subtle border/shadow - same system as history/sample cards.
+   No dark backdrop, no thick left border, no dot. */
 .loading-indicator {
     position: fixed;
-    bottom: 20px;
+    bottom: 18px;
     left: 50%;
-    transform: translateX(-50%) translateY(100px);
-    background: var(--text);
-    color: white;
-    padding: 12px 24px;
+    transform: translateX(-50%) translateY(8px);
+    background: var(--white);
+    color: var(--text);
+    padding: 10px 14px;
+    border: 1px solid var(--border-light);
     border-radius: 8px;
-    font-size: 13px;
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1.5;
+    max-width: min(92vw, 400px);
+    box-shadow: 0 6px 20px rgba(15,23,42,0.08), 0 1px 3px rgba(15,23,42,0.06);
     z-index: 9999;
     opacity: 0;
-    transition: all 0.3s ease;
     pointer-events: none;
+    transition: transform 0.22s ease, opacity 0.22s ease;
+    text-align: left;
 }
 
 .loading-indicator.show {
@@ -3466,7 +3590,7 @@ json-viewer {
     }
 }
 
-/* ===== FINAL SETUP / WORKSPACE REFINEMENTS — narrowed settings pane ===== */
+/* ===== FINAL SETUP / WORKSPACE REFINEMENTS - narrowed settings pane ===== */
 .setup-workspace {
     grid-template-columns: minmax(0, 1fr) 300px;
 }
@@ -3480,7 +3604,7 @@ json-viewer {
     padding: 7px 8px;
 }
 
-/* narrow pane — prevent select overflow at 300px */
+/* narrow pane - prevent select overflow at 300px */
 .setup-settings-pane select {
     min-width: 0 !important;
     max-width: 100% !important;
@@ -3583,29 +3707,46 @@ json-viewer {
     line-height: 1.3;
 }
 
+/* Single-file mode: one horizontal card, not a grid of squares */
 .setup-file-cards {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-    gap: 10px;
-    margin: 0;
+    width: min(480px, 100%);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .setup-file-card {
-    min-height: 132px;
-    padding: 8px;
-    border-radius: 12px;
-    grid-template-columns: 1fr;
-    grid-template-rows: 76px minmax(0, 1fr);
-    gap: 8px;
+    position: relative;
+    display: block;
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    background: var(--white);
+    overflow: hidden;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.setup-file-card-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 10px 36px 10px 12px;
+    border: none;
+    background: transparent;
     text-align: left;
+    cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .setup-file-thumb {
-    width: 100%;
-    height: 76px;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
     border: 1px solid var(--border-light);
-    border-radius: 9px;
+    border-radius: 7px;
     background: var(--hover-bg);
     color: var(--primary);
     display: flex;
@@ -3618,18 +3759,28 @@ json-viewer {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
 }
 
 .setup-file-thumb svg,
 .setup-file-thumb i {
-    width: 28px;
-    height: 28px;
+    width: 20px;
+    height: 20px;
+}
+
+.setup-file-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .setup-file-body strong {
     display: block;
     font-size: 13px;
-    line-height: 1.25;
+    line-height: 1.3;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3637,39 +3788,48 @@ json-viewer {
 
 .setup-file-body small {
     font-size: 11px;
-}
-
-.setup-file-hint {
-    display: none;
-    align-items: center;
-    gap: 4px;
-    margin-top: 4px;
-    color: var(--primary);
-    font-size: 10px;
-    font-weight: 600;
     line-height: 1.2;
-    letter-spacing: 0.01em;
+    color: var(--text-tertiary);
 }
 
-.setup-file-hint i {
+.setup-file-remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--border-light);
+    border-radius: 999px;
+    background: var(--white);
+    color: var(--text-tertiary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.14s ease, border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+
+.setup-file-card:hover .setup-file-remove,
+.setup-file-remove:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.setup-file-remove:hover {
+    border-color: var(--danger-border);
+    background: var(--danger-wash);
+    color: var(--danger);
+}
+
+.setup-file-remove i {
     width: 12px;
     height: 12px;
-    flex: 0 0 auto;
-    opacity: 0.95;
-}
-
-/* Active card shows helper text; inactive cards reveal on hover/focus for discoverability */
-.setup-file-card.active .setup-file-hint {
-    display: inline-flex;
-}
-
-.setup-file-card:hover .setup-file-hint,
-.setup-file-card:focus-visible .setup-file-hint {
-    display: inline-flex;
 }
 
 .setup-file-card.active {
-    position: relative;
+    border-color: rgba(29, 78, 216, 0.22);
 }
 
 .setup-file-card.active .setup-file-thumb {
@@ -3924,21 +4084,37 @@ json-viewer {
 }
 
 .history-badges {
-    margin-top: 5px;
+    margin-top: 3px;
     display: flex;
+    flex-wrap: nowrap;
     gap: 4px;
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .history-badge {
-    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 16px;
+    max-width: calc(50% - 2px);
     padding: 0 6px;
     border: 1px solid var(--border-light);
     border-radius: 999px;
-    background: var(--white);
+    background: var(--panel);
     color: var(--text-secondary);
-    font-size: 10px;
-    line-height: 16px;
+    font-size: 9px;
+    line-height: 1;
     font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 0 1 auto;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .layout-box {
@@ -4017,16 +4193,17 @@ json-viewer {
     display: none;
 }
 
+/* single-file: keep horizontal card, no grid override */
 .setup-file-cards {
-    width: 100%;
-    grid-template-columns: repeat(auto-fill, minmax(104px, 118px));
-    justify-content: center;
-    align-content: center;
+    width: min(480px, 100%);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .setup-file-card {
-    min-height: 126px;
-    border-radius: 12px;
+    border-radius: 10px;
 }
 
 .setup-inline-settings .drawer-header {
@@ -4182,12 +4359,7 @@ json-viewer {
     border-width: 2px;
 }
 
-.history-badge {
-    height: 19px;
-    padding: 0 7px;
-    font-size: 11px;
-    line-height: 17px;
-}
+/* history-badge sizing consolidated above - no override */
 
 .setup-inline-settings .drawer-header {
     padding: 14px 16px 8px;
@@ -4516,7 +4688,7 @@ json-viewer {
     transition-delay: 0ms;
 }
 
-/* aria-disabled visual feedback — dim controls that are aria-disabled
+/* aria-disabled visual feedback - dim controls that are aria-disabled
    during processing without mutating native disabled (which breaks form semantics). */
 [aria-disabled="true"] {
     opacity: 0.45;
@@ -4524,18 +4696,18 @@ json-viewer {
     cursor: not-allowed;
 }
 
-/* ARIA role=status for progress overlay — ensure it is announced.
+/* ARIA role=status for progress overlay - ensure it is announced.
    role=alert for error toasts is set in JS via showRecoverableError. */
 #progressOverlay[role="status"] {
-    /* No visual change — role is semantic only */
+    /* No visual change - role is semantic only */
 }
 
 /* aria-live polite region for elapsed time */
 #timeElapsed[aria-live="polite"] {
-    /* No visual change — aria-live is semantic only */
+    /* No visual change - aria-live is semantic only */
 }
 
-/* Quick-nav scroll-to-top button — hidden by default, shown by JS
+/* Quick-nav scroll-to-top button - hidden by default, shown by JS
    when markdown content is long (scrollHeight > 200 || textLength > 10000). */
 #scrollToTopBtn {
     position: fixed;
@@ -4565,7 +4737,7 @@ json-viewer {
     display: none;
 }
 
-/* ===== LOCAL-FIRST NOTE — centered under header ===== */
+/* ===== LOCAL-FIRST NOTE - centered under header ===== */
 .local-note {
     display: inline-flex;
     align-items: center;
@@ -4682,7 +4854,7 @@ json-viewer {
     margin: 4px 0;
 }
 
-/* ===== REFINED SIDEBAR — compact final overrides ===== */
+/* ===== REFINED SIDEBAR - compact final overrides ===== */
 .file-list-header {
     display: flex !important;
     flex-direction: column !important;
@@ -4691,8 +4863,22 @@ json-viewer {
     padding: 6px 4px 6px !important;
     height: auto !important;
     min-height: 0 !important;
+    flex: 0 0 auto !important;
     border-bottom: 1px solid var(--border-light) !important;
-    margin-bottom: 6px !important;
+    margin-bottom: 0 !important;
+    position: sticky !important;
+    top: 0 !important;
+    background: var(--white) !important;
+    z-index: 2 !important;
+}
+
+.file-list {
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 6px 0 8px !important;
+    gap: 6px !important;
 }
 
 .file-list-section {

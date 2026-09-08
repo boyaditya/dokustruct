@@ -8,8 +8,6 @@ It is a direct port of [RapidDoc](https://github.com/RapidAI/RapidDoc) (from [Mi
 
 [![Live app](https://img.shields.io/badge/Live%20app-dokustruct.vercel.app-1d4ed8?style=for-the-badge&logo=vercel&logoColor=white)](https://dokustruct.vercel.app)
 
-**Try it live at [dokustruct.vercel.app](https://dokustruct.vercel.app)** — no install, no upload.
-
 [Porting notes](docs/porting-decisions.md) · [Technical insights](docs/technical-insights.md) · [Evidence](docs/evidence/) · [Demo video](docs/dokustruct-demo.mp4)
 
 ---

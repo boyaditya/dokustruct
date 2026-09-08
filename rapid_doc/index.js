@@ -107,6 +107,7 @@ export {
   downloadAssetGroup,
   downloadModel,
   clearAsset,
+  clearAllAssets,
   fetchAssetBuffer,
   fetchAssetText,
   fetchAssetJson,

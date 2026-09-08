@@ -478,6 +478,36 @@ export async function clearAsset(assetId) {
   await deleteFromCache(asset.cacheKey);
 }
 
+export async function clearAllAssets() {
+  clearAssetMemoryCache();
+  if (!hasIndexedDb()) return;
+  try {
+    const db = await openCacheDB();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = (e) => reject(e.target.error);
+      });
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    logger.warning('Clear all assets failed, trying deleteDatabase:', err);
+    try {
+      await new Promise((resolve, reject) => {
+        const req = indexedDB.deleteDatabase(DB_NAME);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+        req.onblocked = () => resolve();
+      });
+    } catch (e2) {
+      logger.warning('deleteDatabase failed:', e2);
+    }
+  }
+}
+
 export async function getCachedAssetObjectUrl(assetId) {
   const asset = getAsset(assetId);
   if (!asset) return null;

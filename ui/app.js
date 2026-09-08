@@ -677,6 +677,50 @@ async function confirmHistoryDelete() {
   await deleteHistoryItem(id);
 }
 
+function openCacheClearConfirm() {
+  el.confirmBackdrop?.classList.remove('hidden');
+  el.cacheClearDialog?.classList.remove('hidden');
+  refreshIcons();
+  requestAnimationFrame(() => el.cacheClearCancelBtn?.focus());
+}
+
+function closeCacheClearConfirm() {
+  el.confirmBackdrop?.classList.add('hidden');
+  el.cacheClearDialog?.classList.add('hidden');
+}
+
+async function confirmCacheClear() {
+  closeCacheClearConfirm();
+  await clearModelCache();
+}
+
+async function clearModelCache() {
+  if (assetDownloadController) {
+    showLoading('Cannot clear cache while downloading', 3000);
+    return;
+  }
+  try {
+    showLoading('Clearing cache...');
+    const { clearAllAssets } = await import('../rapid_doc/utils/download_file.js');
+    await clearAllAssets();
+    try {
+      const { engineReset } = await import('../rapid_doc/index.js');
+      await engineReset();
+    } catch { /* ignore */ }
+    assetSummary = null;
+    formulaAssetSummary = null;
+    requiredAssetsReady = false;
+    appState.set('assetStatus', {});
+    appState.patch({ warmupStatus: 'idle', warmupConfigKey: null, warmupError: null });
+    await refreshAssetRequirements({ allowWarmup: false });
+    updateUI();
+    showLoading('Cache cleared. Models will download again on next run.', 3000);
+  } catch (err) {
+    console.error(`${UI_LOG_PREFIX} Clear cache failed:`, err);
+    showLoading('Failed to clear cache', 3000);
+  }
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -942,6 +986,11 @@ async function init() {
   el.assetProgressLabel = document.getElementById('assetProgressLabel');
   el.assetProgressPercent = document.getElementById('assetProgressPercent');
   el.assetDownloadBtn = document.getElementById('assetDownloadBtn');
+  el.assetClearCacheBtn = document.getElementById('assetClearCacheBtn');
+  el.cacheClearDialog = document.getElementById('cacheClearDialog');
+  el.cacheClearCancelBtn = document.getElementById('cacheClearCancelBtn');
+  el.cacheClearConfirmBtn = document.getElementById('cacheClearConfirmBtn');
+  el.cacheClearMessage = document.getElementById('cacheClearMessage');
   el.layoutModel = document.getElementById('layoutModel');
   el.ocrModel = document.getElementById('ocrModel');
   el.executionProvider = document.getElementById('executionProvider');
@@ -1327,6 +1376,11 @@ function setupEventListeners() {
   el.confirmCancelBtn?.addEventListener('click', closeHistoryDeleteConfirm);
   el.confirmBackdrop?.addEventListener('click', closeHistoryDeleteConfirm);
   el.confirmDeleteBtn?.addEventListener('click', confirmHistoryDelete);
+  el.assetClearCacheBtn?.addEventListener('click', openCacheClearConfirm);
+  el.cacheClearCancelBtn?.addEventListener('click', closeCacheClearConfirm);
+  el.cacheClearConfirmBtn?.addEventListener('click', confirmCacheClear);
+  // Backdrop also closes cache dialog
+  el.confirmBackdrop?.addEventListener('click', closeCacheClearConfirm);
   el.setupPreviewClose?.addEventListener('click', closeSetupPreviewDialog);
   el.setupPreviewBackdrop?.addEventListener('click', closeSetupPreviewDialog);
   el.setupPreviewPrev?.addEventListener('click', () => setPage(currentPage - 1));
@@ -1378,6 +1432,7 @@ function setupEventListeners() {
       closeDrawers();
       closeExportMenu();
       closeHistoryDeleteConfirm();
+      closeCacheClearConfirm();
       closeSetupPreviewDialog();
     }
   });
@@ -1702,8 +1757,24 @@ function isWarmupActive() {
 }
 
 function canRunExtraction() {
-  return selectedFiles.length > 0
-    && !appState.get('isProcessing');
+  if (selectedFiles.length === 0) return false;
+  if (appState.get('isProcessing')) return false;
+  if (assetDownloadController) return false;
+  if (!requiredAssetsReady) return false;
+  if (appState.get('warmupStatus') === 'error') return false;
+  return true;
+}
+
+function getCanRunReason() {
+  if (selectedFiles.length === 0) return 'Select a file first';
+  if (appState.get('isProcessing')) return 'Pipeline is already running';
+  if (assetDownloadController) return 'Downloading models… please wait';
+  if (!requiredAssetsReady) {
+    const missing = assetSummary ? (assetSummary.ids || []).filter(id => !assetSummary.status?.[id]?.cached).length : 0;
+    return missing ? `Models not ready — ${missing} component(s) still to download` : 'Models not ready — checking cache…';
+  }
+  if (appState.get('warmupStatus') === 'error') return 'Engine failed to start — check console and retry';
+  return '';
 }
 
 function cancelPendingWarmup({ resetStatus = false } = {}) {
@@ -5152,9 +5223,8 @@ function updateUI() {
   if (el.startBtn) {
     const canRun = canRunExtraction();
     el.startBtn.disabled = !canRun;
-    el.startBtn.title = canRun ? '' : hasFiles && appState.get('isProcessing')
-      ? 'Pipeline is already running'
-      : '';
+    el.startBtn.title = canRun ? '' : getCanRunReason();
+    el.startBtn.setAttribute('aria-disabled', String(!canRun));
   }
   if (el.uploadBtn) el.uploadBtn.disabled = Boolean(isProcessing);
   if (el.downloadBtn) el.downloadBtn.disabled = !hasResults;

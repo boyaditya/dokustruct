@@ -67,6 +67,19 @@
       </div>
     </div>
   </section>
+  <section class="confirm-dialog hidden" id="cacheClearDialog" role="dialog" aria-modal="true" aria-labelledby="cacheClearTitle">
+    <div class="confirm-icon">
+      <i data-lucide="trash-2"></i>
+    </div>
+    <div class="confirm-body">
+      <h2 id="cacheClearTitle">Clear cached models</h2>
+      <p id="cacheClearMessage">This removes all downloaded models (about 285 MB core, up to 550 MB with formulas) from this browser. You will need to download them again on the next run.</p>
+      <div class="confirm-actions">
+        <button class="btn-secondary" id="cacheClearCancelBtn" type="button">Cancel</button>
+        <button class="btn-danger" id="cacheClearConfirmBtn" type="button">Clear cache</button>
+      </div>
+    </div>
+  </section>
 
   <section class="dokustruct-drawer hidden" id="settingsPanel" role="dialog" aria-modal="false" aria-label="Settings">
     <div class="drawer-header">
@@ -269,6 +282,10 @@
           <button class="btn-secondary asset-download-btn" id="assetDownloadBtn" type="button">
             <i data-lucide="download"></i>
             <span>Download</span>
+          </button>
+          <button class="asset-clear-btn" id="assetClearCacheBtn" type="button" title="Remove all cached models from this browser">
+            <i data-lucide="trash-2"></i>
+            <span>Clear cache</span>
           </button>
         </section>
         <div class="setup-file-loading hidden" id="setupFileLoading">
